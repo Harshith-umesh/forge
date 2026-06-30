@@ -15,6 +15,7 @@ from projects.caliper.engine.model import (
 
 from .ai_eval import GuideLLMAIEvaluator
 from .parsing import GuideLLMKpiHandler, GuideLLMParser
+from .plotting.kpi_report import generate_kpi_report
 from .plotting.performance_analysis import generate_comprehensive_performance_report
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,14 @@ PLOT_REGISTRY = {
             "report_title": "GuideLLM Performance Analysis",
         },
         "description": "comprehensive performance analysis report (recommended)",
+    },
+    "report_kpi_summary": {
+        "function": generate_kpi_report,
+        "type": "report",
+        "kwargs": {
+            "report_title": "GuideLLM KPI Summary",
+        },
+        "description": "KPI summary with test conditions and metrics",
     },
 }
 
@@ -168,6 +177,49 @@ class GuideLLMPlugin(PostProcessingPlugin):
     def build_ai_eval_payload(self, model: UnifiedRunModel) -> dict[str, Any]:
         """Build AI evaluation payload from the unified model."""
         return self.ai_evaluator.build_payload(model)
+
+    def get_ai_eval_artifact_files(self, model: UnifiedRunModel) -> list[str]:
+        """Return list of artifact files to copy for AI evaluation export."""
+        from pathlib import Path
+
+        base_dir = Path(model.base_directory)
+        artifact_files = []
+
+        # LLMInferenceService state files - expect one or zero matches
+        llmisvc_patterns = [
+            "*__capture_llmisvc_state/artifacts/llminferenceservice.json",
+            "*__capture_llmisvc_state/artifacts/llminferenceservice.deployments.json",
+        ]
+
+        for pattern in llmisvc_patterns:
+            matches = list(base_dir.glob(pattern))
+            if matches:
+                # Take the first match (should be only one)
+                relative_path = str(matches[0].relative_to(base_dir))
+                artifact_files.append(relative_path)
+                logger.debug(f"Found LLMInferenceService artifact: {relative_path}")
+                if len(matches) > 1:
+                    logger.warning(
+                        f"Multiple matches for pattern {pattern}, using first: {relative_path}"
+                    )
+            else:
+                logger.debug(f"No matches found for pattern: {pattern}")
+
+        # GuideLLM benchmark results - may have multiple files
+        benchmark_pattern = "*__llmd_test/*__benchmark_*/*__run_guidellm_benchmark/artifacts/results/benchmarks.json"
+        benchmark_matches = list(base_dir.glob(benchmark_pattern))
+
+        if benchmark_matches:
+            logger.debug(f"Found {len(benchmark_matches)} GuideLLM benchmark files")
+            for match in benchmark_matches:
+                relative_path = str(match.relative_to(base_dir))
+                artifact_files.append(relative_path)
+                logger.debug(f"Found GuideLLM benchmark artifact: {relative_path}")
+        else:
+            logger.debug(f"No matches found for pattern: {benchmark_pattern}")
+
+        logger.info(f"AI eval export will copy {len(artifact_files)} artifact files")
+        return artifact_files
 
 
 def get_plugin() -> PostProcessingPlugin:
