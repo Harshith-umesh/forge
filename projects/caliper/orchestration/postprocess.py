@@ -10,6 +10,7 @@ Computes ``final_status`` from the FORGE test phase outcome plus all enabled ste
 from __future__ import annotations
 
 import logging
+import time
 import traceback
 from pathlib import Path
 from typing import Any
@@ -113,10 +114,15 @@ def _run_kpi_generate(
     base_dir: Path,
 ) -> dict[str, Any]:
     """Generate KPI JSONL using the plugin's compute_kpis method."""
+
     if not postprocess_config.kpi.enabled:
-        return {"status": "skipped", "reason": "kpi disabled"}
+        return {"status": "skipped", "reason": "kpi disabled", "completed_at": time.time()}
     if not postprocess_config.kpi.generate.enabled:
-        return {"status": "skipped", "reason": "kpi.generate disabled"}
+        return {
+            "status": "skipped",
+            "reason": "kpi.generate disabled",
+            "completed_at": time.time(),
+        }
 
     try:
         # Write KPI JSONL
@@ -139,10 +145,15 @@ def _run_kpi_generate(
                 f.write(json.dumps(kpi) + "\n")
 
         logger.info(f"Generated {len(kpis)} KPI records in {output_file}")
-        return {"status": "success", "kpi_count": len(kpis), "output_file": str(output_file)}
+        return {
+            "status": "success",
+            "kpi_count": len(kpis),
+            "output_file": str(output_file),
+            "completed_at": time.time(),
+        }
     except Exception as e:
         logger.error(f"KPI generation failed: {e}")
-        return {"status": "failed", "error": str(e)}
+        return {"status": "failed", "error": str(e), "completed_at": time.time()}
 
 
 def _run_kpi_export(
@@ -150,10 +161,15 @@ def _run_kpi_export(
     output_dir: Path,
 ) -> dict[str, Any]:
     """Export KPIs to external system (placeholder for OpenSearch integration)."""
+
     if not postprocess_config.kpi.enabled:
-        return {"status": "skipped", "reason": "kpi disabled"}
+        return {"status": "skipped", "reason": "kpi disabled", "completed_at": time.time()}
     if not postprocess_config.kpi.export.enabled:
-        return {"status": "skipped", "reason": "kpi.export disabled"}
+        return {
+            "status": "skipped",
+            "reason": "kpi.export disabled",
+            "completed_at": time.time(),
+        }
 
     # Log command to reproduce this step
     input_path = output_dir / postprocess_config.kpi.generate.output
@@ -164,7 +180,11 @@ def _run_kpi_export(
 
     # TODO: Implement actual KPI export to OpenSearch when credentials/config available
     logger.info("KPI export is configured but not yet implemented")
-    return {"status": "skipped", "reason": "KPI export not yet implemented"}
+    return {
+        "status": "skipped",
+        "reason": "KPI export not yet implemented",
+        "completed_at": time.time(),
+    }
 
 
 def _run_ai_eval_export(
@@ -177,7 +197,11 @@ def _run_ai_eval_export(
     """Export AI evaluation payload with structured directories and copied artifacts."""
     try:
         if not hasattr(plugin, "build_ai_eval_payload"):
-            return {"status": "skipped", "reason": "plugin does not support AI evaluation"}
+            return {
+                "status": "skipped",
+                "reason": "plugin does not support AI evaluation",
+                "completed_at": time.time(),
+            }
 
         # Create AI evaluation directory structure
         ai_eval_dir = output_dir / "ai_eval"
@@ -217,10 +241,11 @@ def _run_ai_eval_export(
             "ai_eval_dir": str(ai_eval_dir),
             "exported_entries": len(exported_entries),
             "payload_schema_version": payload.get("schema_version", "unknown"),
+            "completed_at": time.time(),
         }
     except Exception as e:
         logger.error(f"AI eval export failed: {e}")
-        return {"status": "failed", "error": str(e)}
+        return {"status": "failed", "error": str(e), "completed_at": time.time()}
 
 
 def _export_test_entries_with_artifacts(
@@ -305,10 +330,15 @@ def _run_kpi_csv_export(
     kpi_jsonl_path: Path,
 ) -> dict[str, Any]:
     """Export KPI data to CSV format using the plugin's compute_kpis method."""
+
     if not postprocess_config.kpi.enabled:
-        return {"status": "skipped", "reason": "kpi disabled"}
+        return {"status": "skipped", "reason": "kpi disabled", "completed_at": time.time()}
     if not postprocess_config.kpi.csv_export.enabled:
-        return {"status": "skipped", "reason": "kpi.csv_export disabled"}
+        return {
+            "status": "skipped",
+            "reason": "kpi.csv_export disabled",
+            "completed_at": time.time(),
+        }
 
     try:
         # Compute KPIs from the model
@@ -338,10 +368,11 @@ def _run_kpi_csv_export(
             "status": "success",
             "kpi_count": len(kpi_records),
             "output_file": result_path,
+            "completed_at": time.time(),
         }
     except Exception as e:
         logger.error(f"KPI CSV export failed: {e}")
-        return {"status": "failed", "error": str(e)}
+        return {"status": "failed", "error": str(e), "completed_at": time.time()}
 
 
 def _stub_analyze(
@@ -538,10 +569,11 @@ class CaliperPostprocessOrchestrator:
                 )
 
                 self.steps["parse"] = {
-                    "status": "ok",
+                    "status": "success",
                     "plugin_module": mod_str,
                     "record_count": len(model.unified_result_records),
                     "parse_cache_ref": model.parse_cache_ref,
+                    "completed_at": time.time(),
                 }
             except Exception as e:  # noqa: BLE001
                 self.parse_failed = True
@@ -550,6 +582,7 @@ class CaliperPostprocessOrchestrator:
                     "status": "failure",
                     "detail": str(e),
                     "traceback": traceback.format_exc(),
+                    "completed_at": time.time(),
                 }
 
     def _run_visualize_step(self) -> None:
@@ -614,10 +647,11 @@ class CaliperPostprocessOrchestrator:
                         relative_paths.append(str(path))
 
                 self.steps["visualize"] = {
-                    "status": "ok",
+                    "status": "success",
                     "plugin_module": mod_str,
                     "output_dir": str(output_dir),
                     "paths": relative_paths,
+                    "completed_at": time.time(),
                 }
 
             except Exception as e:  # noqa: BLE001
@@ -627,6 +661,7 @@ class CaliperPostprocessOrchestrator:
                     "status": "failure",
                     "detail": str(e),
                     "traceback": traceback.format_exc(),
+                    "completed_at": time.time(),
                 }
 
     def _run_kpi_and_ai_eval_steps(self) -> None:
@@ -666,13 +701,30 @@ class CaliperPostprocessOrchestrator:
             self._run_ai_eval_export_step(plugin, model, output_dir, mod_str)
 
         except Exception as e:
+            completion_time = time.time()
             logger.error(f"Failed to run KPI/AI eval operations: {e}")
             self.steps.update(
                 {
-                    "kpi_generate": {"status": "failed", "error": str(e)},
-                    "kpi_csv_export": {"status": "failed", "error": str(e)},
-                    "kpi_export": {"status": "skipped", "reason": "failed to load plugin"},
-                    "ai_eval_export": {"status": "failed", "error": str(e)},
+                    "kpi_generate": {
+                        "status": "failed",
+                        "error": str(e),
+                        "completed_at": completion_time,
+                    },
+                    "kpi_csv_export": {
+                        "status": "failed",
+                        "error": str(e),
+                        "completed_at": completion_time,
+                    },
+                    "kpi_export": {
+                        "status": "skipped",
+                        "reason": "failed to load plugin",
+                        "completed_at": completion_time,
+                    },
+                    "ai_eval_export": {
+                        "status": "failed",
+                        "error": str(e),
+                        "completed_at": completion_time,
+                    },
                 }
             )
             self.kpi_generate_failed = True
@@ -694,6 +746,7 @@ class CaliperPostprocessOrchestrator:
             self.steps["kpi_generate"] = {
                 "status": "skipped",
                 "reason": "kpi.generate disabled",
+                "completed_at": time.time(),
             }
 
     def _run_kpi_csv_export_step(self, plugin: Any, model: Any, output_dir: Path) -> None:
@@ -711,6 +764,7 @@ class CaliperPostprocessOrchestrator:
             self.steps["kpi_csv_export"] = {
                 "status": "skipped",
                 "reason": "kpi.csv_export disabled",
+                "completed_at": time.time(),
             }
 
     def _run_kpi_export_step(self, output_dir: Path) -> None:
@@ -725,6 +779,7 @@ class CaliperPostprocessOrchestrator:
             self.steps["kpi_export"] = {
                 "status": "skipped",
                 "reason": "kpi.export disabled",
+                "completed_at": time.time(),
             }
 
     def _run_ai_eval_export_step(
