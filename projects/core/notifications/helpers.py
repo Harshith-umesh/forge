@@ -27,21 +27,36 @@ logger = logging.getLogger(__name__)
 def get_test_artifacts_root(context: NotificationContext) -> Path | None:
     """Resolve the root directory containing actual test results.
 
-    During CI, each phase gets its own artifact subdir (via NextArtifactDir).
-    The export phase's ARTIFACT_DIR doesn't contain the test results.
-    We use the framework's BASE_ARTIFACT_DIR which is the immutable root
-    set at init time, before any phase subdirectories are created.
-    """
-    from projects.core.library import env
+    In Fournos pipelines, each step (prepare, test, export) runs as a
+    separate container with its own ARTIFACT_DIR. The export step's
+    BASE_ARTIFACT_DIR is its own subdir, NOT the overall root.
 
-    if env.BASE_ARTIFACT_DIR:
-        return Path(env.BASE_ARTIFACT_DIR)
+    The correct root is ``caliper.export.from`` which is set by the
+    export entrypoint to the shared workspace containing all steps.
+    """
+    try:
+        from projects.core.library import config
+
+        export_from = config.project.get_config(
+            "caliper.export.from", None, print=False, warn=False
+        )
+        if export_from:
+            p = Path(export_from)
+            if p.exists():
+                return p
+    except Exception:
+        pass
 
     base_env = os.environ.get("FORGE_BASE_ARTIFACT_DIR")
     if base_env:
         p = Path(base_env)
         if p.exists():
             return p
+
+    if context.artifact_dir:
+        parent = context.artifact_dir.parent
+        if parent.exists() and any(parent.glob("*/__test_labels__.yaml")):
+            return parent
 
     return context.artifact_dir
 
