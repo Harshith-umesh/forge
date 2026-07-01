@@ -116,9 +116,7 @@ class SlackNotificationProvider(ABC):
             logger.error("Provider %s: failed to init Slack client", type(self).__name__)
             return False
 
-        channel_msg_ts, _ = slack_api.search_channel_message(
-            client, anchor, channel_id=channel_id
-        )
+        channel_msg_ts, _ = slack_api.search_channel_message(client, anchor, channel_id=channel_id)
 
         if not channel_msg_ts:
             channel_message = f"🧵 {anchor}"

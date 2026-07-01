@@ -234,7 +234,10 @@ def _load_previous_kpis_from_mlflow() -> tuple[dict[str, float], str]:
             "caliper.export.backend.mlflow.secrets.vault.name", None, print=False, warn=False
         )
         vault_secret = config.project.get_config(
-            "caliper.export.backend.mlflow.secrets.vault.mlflow_secret", None, print=False, warn=False
+            "caliper.export.backend.mlflow.secrets.vault.mlflow_secret",
+            None,
+            print=False,
+            warn=False,
         )
         experiment_name = config.project.get_config(
             "caliper.export.backend.mlflow.config.experiment", None, print=False, warn=False
