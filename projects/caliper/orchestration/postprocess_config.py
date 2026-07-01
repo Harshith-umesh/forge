@@ -72,6 +72,22 @@ class CaliperOrchestrationKpiExportSection(BaseModel):
     enabled: bool = False
 
 
+class CaliperOrchestrationKpiCsvExportSection(BaseModel):
+    """Export KPI data to CSV format."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    output: str | None = Field(
+        default="kpis.csv",
+        description="CSV filename or path; relative paths resolve under the post-processing artifact dir.",
+    )
+    include_header_comments: bool = Field(
+        default=True,
+        description="Whether to include descriptive header comments in the CSV file.",
+    )
+
+
 class CaliperOrchestrationKpiSection(BaseModel):
     """``caliper.postprocess.kpi``."""
 
@@ -83,6 +99,9 @@ class CaliperOrchestrationKpiSection(BaseModel):
     )
     export: CaliperOrchestrationKpiExportSection = Field(
         default_factory=CaliperOrchestrationKpiExportSection
+    )
+    csv_export: CaliperOrchestrationKpiCsvExportSection = Field(
+        default_factory=CaliperOrchestrationKpiCsvExportSection
     )
 
 
