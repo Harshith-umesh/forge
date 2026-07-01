@@ -19,10 +19,7 @@ import projects.core.notifications.slack.api as slack_api
 logger = logging.getLogger(__name__)
 
 DEFAULT_SLACK_TOKEN_FILE = "topsail-bot.slack-token"
-DEFAULT_SECRET_ENV_KEYS = (
-    "PSAP_FORGE_NOTIFICATIONS_SECRET_PATH",
-    "PSAP_FORGE_JUMP_CI_SECRET_PATH",
-)
+DEFAULT_SECRET_ENV_KEYS = ("PSAP_FORGE_NOTIFICATIONS_SECRET_PATH",)
 
 
 @dataclass
