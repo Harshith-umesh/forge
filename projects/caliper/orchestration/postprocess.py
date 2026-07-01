@@ -39,6 +39,7 @@ from projects.caliper.orchestration.step_logging import (
     log_visualize_command,
     step_logging,
 )
+from projects.core.library import env
 
 logger = logging.getLogger(__name__)
 
@@ -173,23 +174,33 @@ def _run_ai_eval_export(
     plugin_module: str,
     base_dir: Path,
 ) -> dict[str, Any]:
-    """Export AI evaluation payload using the plugin's build_ai_eval_payload method."""
+    """Export AI evaluation payload with structured directories and copied artifacts."""
     try:
         if not hasattr(plugin, "build_ai_eval_payload"):
             return {"status": "skipped", "reason": "plugin does not support AI evaluation"}
 
+        # Create AI evaluation directory structure
+        ai_eval_dir = output_dir / "ai_eval"
+        ai_eval_dir.mkdir(parents=True, exist_ok=True)
+
         # Log command to reproduce this step
-        output_file = output_dir / "ai_eval_payload.json"
+        output_file = ai_eval_dir / "ai_eval_payload.json"
         log_ai_eval_command(
             base_dir=base_dir,
             plugin_module=plugin_module,
             output_file=output_file,
         )
 
+        # Build payload from plugin
         payload = plugin.build_ai_eval_payload(model)
 
-        # Write AI eval payload
-        output_file = output_dir / "ai_eval_payload.json"
+        # Export structured test entries with artifact copying
+        exported_entries = _export_test_entries_with_artifacts(model, ai_eval_dir, base_dir, plugin)
+
+        # Add exported entries info to payload
+        payload["exported_test_entries"] = exported_entries
+
+        # Write main AI eval payload
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
         import json
@@ -198,14 +209,90 @@ def _run_ai_eval_export(
             json.dump(payload, f, indent=2)
 
         logger.info(f"Generated AI evaluation payload in {output_file}")
+        logger.info(f"Exported {len(exported_entries)} test entries with artifacts")
+
         return {
             "status": "success",
             "output_file": str(output_file),
+            "ai_eval_dir": str(ai_eval_dir),
+            "exported_entries": len(exported_entries),
             "payload_schema_version": payload.get("schema_version", "unknown"),
         }
     except Exception as e:
         logger.error(f"AI eval export failed: {e}")
         return {"status": "failed", "error": str(e)}
+
+
+def _export_test_entries_with_artifacts(model, ai_eval_dir: Path, base_dir: Path, plugin) -> list[dict]:
+    """
+    Export test entries by creating directories and copying specific artifacts.
+
+    Args:
+        model: Unified model containing test results
+        ai_eval_dir: Directory where test entries should be exported
+        base_dir: Base directory of the test artifacts (test directory)
+        plugin: Plugin instance to get artifact file list
+
+    Returns:
+        List of exported test entry information
+    """
+    import shutil
+
+    exported_entries = []
+
+    # Get the specific files we want to copy from the plugin
+    target_files = plugin.get_ai_eval_artifact_files(model)
+
+    for idx, record in enumerate(model.unified_result_records):
+        # Create directory for this test entry
+        test_entry_dir = ai_eval_dir / f"test_entry_{idx:03d}"
+        test_entry_dir.mkdir(parents=True, exist_ok=True)
+
+        # Record test entry metadata
+        entry_info = {
+            "entry_id": f"test_entry_{idx:03d}",
+            "test_base_path": str(record.test_base_path),
+            "distinguishing_labels": record.distinguishing_labels,
+            "copied_files": [],
+            "missing_files": [],
+        }
+
+        # Copy target files if they exist
+        for target_file in target_files:
+            source_file = base_dir / target_file
+            if source_file.exists():
+                # Create target directory structure
+                target_path = test_entry_dir / Path(target_file).name
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+
+                try:
+                    shutil.copy2(source_file, target_path)
+                    entry_info["copied_files"].append(
+                        {
+                            "source": str(source_file),
+                            "target": str(target_path),
+                            "size_bytes": source_file.stat().st_size,
+                        }
+                    )
+                    logger.debug(f"Copied {source_file} -> {target_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to copy {source_file}: {e}")
+                    entry_info["missing_files"].append({"file": str(source_file), "error": str(e)})
+            else:
+                entry_info["missing_files"].append(
+                    {"file": str(source_file), "error": "File does not exist"}
+                )
+
+        # Write entry metadata
+        entry_metadata_file = test_entry_dir / "entry_metadata.json"
+        import json
+
+        with open(entry_metadata_file, "w") as f:
+            json.dump(entry_info, f, indent=2)
+
+        exported_entries.append(entry_info)
+
+    return exported_entries
 
 
 def _run_kpi_csv_export(
@@ -369,10 +456,18 @@ class CaliperPostprocessOrchestrator:
             )
 
         # Execute steps in sequence
+        logger.info("Starting postprocessing steps")
         self._run_parse_step()
+        logger.info(f"After parse step: parse_failed={self.parse_failed}")
         self._run_visualize_step()
+        logger.info(f"After visualize step: visualize_failed={self.visualize_failed}")
         self._run_kpi_and_ai_eval_steps()
+        logger.info(
+            f"After KPI/AI steps: kpi_generate_failed={self.kpi_generate_failed}, kpi_export_failed={self.kpi_export_failed}"
+        )
         self._run_analyze_step()
+        logger.info(f"After analyze step: analyze_failed={self.analyze_failed}")
+        logger.info("All postprocessing steps completed")
 
         # Compute final status and build result
         final_status = self._compute_final_status()
@@ -382,6 +477,9 @@ class CaliperPostprocessOrchestrator:
         if self.visualize_output_dir:
             self._generate_reports(result)
 
+        # Save postprocess status YAML for notifications
+        self._save_postprocess_status_yaml(result)
+
         return result
 
     def _setup_paths(self) -> None:
@@ -390,11 +488,8 @@ class CaliperPostprocessOrchestrator:
             self.config, artifacts_dir=self.artifacts_dir
         )
 
-        self.step_logs_dir = (
-            self.visualize_output_dir
-            if self.visualize_output_dir
-            else self.artifacts_dir / "postprocess_logs"
-        )
+        self.step_logs_dir = Path(env.ARTIFACT_DIR)
+        self.step_logs_dir.mkdir(parents=True, exist_ok=True)
 
     def _any_step_enabled(self) -> bool:
         """Check if any postprocessing step is enabled."""
@@ -635,8 +730,14 @@ class CaliperPostprocessOrchestrator:
     ) -> None:
         """Execute the AI evaluation export step."""
         with step_logging("caliper_ai_eval_export", self.step_logs_dir):
-            result = _run_ai_eval_export(plugin, model, output_dir, mod_str, self.tree_root)
-            self.steps["ai_eval_export"] = result
+            try:
+                result = _run_ai_eval_export(plugin, model, output_dir, mod_str, self.tree_root)
+                self.steps["ai_eval_export"] = result
+                logger.info(f"AI eval export result: {result}")
+            except Exception as e:
+                logger.exception("AI eval export failed")
+                self.steps["ai_eval_export"] = {"status": "failed", "error": str(e)}
+                # Note: AI eval failures don't affect overall postprocessing status
 
     def _run_analyze_step(self) -> None:
         """Execute the analyze step if enabled."""
@@ -652,7 +753,16 @@ class CaliperPostprocessOrchestrator:
 
     def _compute_final_status(self) -> str:
         """Compute the final postprocessing status."""
-        return compute_final_postprocess_status(
+        # Debug logging to identify what's causing failures
+        logger.info("Computing final status with failure flags:")
+        logger.info(f"  test_outcome.phase: {self.test_outcome.phase}")
+        logger.info(f"  parse_failed: {self.parse_failed}")
+        logger.info(f"  visualize_failed: {self.visualize_failed}")
+        logger.info(f"  kpi_generate_failed: {self.kpi_generate_failed}")
+        logger.info(f"  kpi_export_failed: {self.kpi_export_failed}")
+        logger.info(f"  analyze_failed: {self.analyze_failed}")
+
+        final_status = compute_final_postprocess_status(
             test_outcome=self.test_outcome,
             parse_failed=self.parse_failed,
             visualize_failed=self.visualize_failed,
@@ -662,6 +772,9 @@ class CaliperPostprocessOrchestrator:
             has_regression=False,
             has_improvement=False,
         )
+
+        logger.info(f"Computed final status: {final_status}")
+        return final_status
 
     def _generate_reports(self, result: dict[str, Any]) -> None:
         """Generate HTML reports if output directory is available."""
@@ -680,6 +793,31 @@ class CaliperPostprocessOrchestrator:
             generate_postprocess_status_report(result, output_dir, "postprocess_status.html")
         except Exception as e:
             logger.warning("Failed to generate postprocessing status report: %s", e)
+
+    def _save_postprocess_status_yaml(self, result: dict[str, Any]) -> None:
+        """Save postprocess status as YAML for GitHub notifications."""
+        try:
+            import yaml
+
+            # Use ARTIFACT_DIR if available, otherwise use the visualize output directory
+            if env.ARTIFACT_DIR:
+                output_dir = Path(env.ARTIFACT_DIR)
+            elif self.visualize_output_dir:
+                output_dir = Path(self.visualize_output_dir)
+            else:
+                logger.warning("No output directory available for postprocess status YAML")
+                return
+
+            output_dir.mkdir(parents=True, exist_ok=True)
+            status_file = output_dir / "caliper_postprocess_status.yaml"
+
+            with open(status_file, "w", encoding="utf-8") as f:
+                yaml.dump(result, f, default_flow_style=False, sort_keys=True)
+
+            logger.info(f"Saved postprocess status to {status_file}")
+
+        except Exception as e:
+            logger.warning(f"Failed to save postprocess status YAML: {e}")
 
 
 def run_postprocess_from_orchestration_config(

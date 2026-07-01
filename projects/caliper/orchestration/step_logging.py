@@ -383,7 +383,7 @@ def log_ai_eval_command(
     _log_command_banner(
         "caliper_ai_eval_export",
         command,
-        "Export AI evaluation payload for external analysis",
+        "Export AI evaluation payload with structured test directories and artifacts",
         step_args,
     )
 
