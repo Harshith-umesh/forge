@@ -58,6 +58,10 @@ caliper:
       generate:
         enabled: true
         output: kpis.jsonl
+      csv_export:
+        enabled: true
+        output: kpis.csv
+        include_header_comments: true
       export:
         enabled: true
 
