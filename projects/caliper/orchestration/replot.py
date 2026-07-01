@@ -99,7 +99,6 @@ def _download_mlflow_artifacts(
 
         # Use the same MLflow connection setup as export
         with mlflow_connection_env(mlflow_secrets):
-            # Set tracking URI before creating client (AWS credentials need to be set first)
             mlflow.set_tracking_uri(mlflow_uri)
             client = MlflowClient()
 
@@ -179,8 +178,6 @@ def run_replot_from_orchestration_config(
         raise FileNotFoundError(
             f"MLflow secrets not found in vault {vault_name}/{vault_mlflow_secret}"
         )
-
-    # Get AWS credentials if provided
 
     logger.info(f"Using MLflow secrets from vault {vault_name}/{vault_mlflow_secret}")
 
