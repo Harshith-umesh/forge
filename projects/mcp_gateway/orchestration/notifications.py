@@ -37,6 +37,14 @@ TARGET_KPIS = [
     ("mcp_gw_failure_rate", "Failure rate", "%"),
 ]
 
+# Mapping from kpis.jsonl IDs to MLflow metrics.json keys (logged via mlflow.log_metric)
+_KPI_TO_MLFLOW_METRIC = {
+    "mcp_gw_requests_per_second": "requests_per_second",
+    "mcp_gw_p95_ms": "p95_ms",
+    "mcp_gw_p99_ms": "p99_ms",
+    "mcp_gw_failure_rate": "failure_rate",
+}
+
 
 class MCPGatewaySlackProvider(SlackNotificationProvider):
     """Slack notification provider for the mcp_gateway project."""
@@ -243,7 +251,15 @@ def _load_previous_kpis_from_mlflow() -> tuple[dict[str, float], str]:
 
             previous_run = runs[1]
             run_name = getattr(previous_run.info, "run_name", "") or previous_run.info.run_id[:8]
-            metrics = previous_run.data.metrics or {}
+            raw_metrics = previous_run.data.metrics or {}
+
+            # Translate MLflow metric keys to kpi_id format
+            mlflow_to_kpi = {v: k for k, v in _KPI_TO_MLFLOW_METRIC.items()}
+            metrics = {}
+            for mlflow_key, value in raw_metrics.items():
+                kpi_id = mlflow_to_kpi.get(mlflow_key)
+                if kpi_id:
+                    metrics[kpi_id] = value
 
             return metrics, run_name
 
