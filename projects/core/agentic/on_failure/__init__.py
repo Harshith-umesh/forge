@@ -126,7 +126,7 @@ def agent_review_on_failure(func):
     Usage:
         @main.command()
         @click.pass_context
-        @ci_lib.safe_ci_command
+        @ci_lib.safe_ci_entrypoint
         @agent_review_on_failure
         def test(ctx) -> int:
             return test_toolbox_run()

@@ -95,7 +95,7 @@ def run_replot(*, artifact_directory: Path | None, keep_download_dir: bool | Non
     help="Keep the download directory after processing (don't clean up).",
 )
 @click.pass_context
-@ci_lib.safe_ci_command
+@ci_lib.safe_ci_entrypoint
 def caliper_replot_entrypoint(
     _ctx, artifact_directory: Path | None, replot_url: str | None, keep_download: bool
 ):

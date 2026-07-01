@@ -345,7 +345,7 @@ def run_orchestration_postprocess(
     ),
 )
 @click.pass_context
-@ci_lib.safe_ci_command
+@ci_lib.safe_ci_entrypoint
 def postprocess_command(_ctx, artifact_dir: Path, output_dir: Path):
     """Run the post-processing pipeline."""
 

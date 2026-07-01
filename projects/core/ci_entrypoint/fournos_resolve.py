@@ -211,7 +211,7 @@ def create_fournos_resolve_entrypoint(
         help="Show the updated FournosJob spec without applying changes to the cluster",
     )
     @click.pass_context
-    @ci_lib.safe_ci_command
+    @ci_lib.safe_ci_entrypoint
     def fournos_resolve_command(ctx, fjob_name, namespace, dry_run):
         """Resolve the FournosJob object configuration."""
 

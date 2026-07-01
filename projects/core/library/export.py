@@ -516,7 +516,7 @@ def run_caliper_orchestration_export(*, artifact_directory: Path | None):
     help="If set, overrides caliper.export.from (artifact root directory).",
 )
 @click.pass_context
-@ci_lib.safe_ci_command
+@ci_lib.safe_ci_entrypoint
 def caliper_export_entrypoint(_ctx, artifact_directory: Path | None):
     """Export the file artifacts."""
 
