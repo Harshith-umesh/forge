@@ -348,6 +348,7 @@ def run_orchestration_postprocess(
 @ci_lib.safe_ci_command
 def postprocess_command(_ctx, artifact_dir: Path, output_dir: Path):
     """Run the post-processing pipeline."""
+
     status = run_orchestration_postprocess(
         artifact_dir=artifact_dir,
         test_outcome=TestPhaseOutcome("NOT_AVAILABLE"),
