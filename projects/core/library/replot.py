@@ -54,9 +54,6 @@ def run_replot(*, artifact_directory: Path | None):
             "MLflow vault configuration missing. Check caliper.export.backend.mlflow.secrets.vault settings."
         )
 
-    # Get AWS credentials configuration (optional)
-    vault_aws_secret = secrets_config.get("aws_secret")
-
     # Get post-processing configuration
     postprocess_config = config.project.get_config(
         "caliper.postprocess", {}, print=False, warn=False
@@ -68,7 +65,6 @@ def run_replot(*, artifact_directory: Path | None):
         artifact_directory=artifact_directory,
         vault_name=vault_name,
         vault_mlflow_secret=vault_mlflow_secret,
-        vault_aws_secret=vault_aws_secret,
         keep_replot_dir=keep_replot_dir,
         postprocess_config=postprocess_config,
     )
