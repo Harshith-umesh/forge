@@ -2,8 +2,8 @@
 Per-project Slack notification provider for MCP Gateway.
 
 Sends structured performance summaries with KPI comparison against the
-previous MLflow run. Reuses artifact link generation from the core
-notification system.
+previous MLflow run. Reuses shared helpers from the core notification
+framework.
 
 Channel ID is read from the project's config.yaml at
 ``notifications.slack.channel_id``.
@@ -14,11 +14,17 @@ from __future__ import annotations
 import json
 import logging
 import os
-from pathlib import Path
-
-import yaml
 
 from projects.core.library import config
+from projects.core.notifications.helpers import (
+    build_comparison_table,
+    build_current_kpis_list,
+    extract_mlflow_url,
+    find_kpis_jsonl,
+    get_label_value,
+    get_test_artifacts_root,
+    read_test_duration,
+)
 from projects.core.notifications.provider import NotificationContext, SlackNotificationProvider
 from projects.core.notifications.send import get_ocpci_link
 
@@ -68,45 +74,26 @@ class MCPGatewaySlackProvider(SlackNotificationProvider):
 
 
 # ---------------------------------------------------------------------------
-# Message sections
+# Message sections (MCP Gateway specific)
 # ---------------------------------------------------------------------------
 
 
 def _format_header(context: NotificationContext) -> str:
     status_icon = ":done-circle-check:" if context.finish_reason == "success" else ":no-red-circle:"
-    duration = _read_test_duration(context)
+    duration = read_test_duration(context)
     duration_str = f" after {duration}" if duration else ""
     return f"{status_icon} *mcp_gateway test finished{duration_str}* {status_icon}"
-
-
-def _read_test_duration(context: NotificationContext) -> str:
-    """Read duration from 000__ci_metadata/test_duration.yaml."""
-    if not context.artifact_dir:
-        return ""
-
-    timing_file = context.artifact_dir / "000__ci_metadata" / "test_duration.yaml"
-    if not timing_file.exists():
-        candidates = list(context.artifact_dir.glob("**/000__ci_metadata/test_duration.yaml"))
-        if not candidates:
-            return ""
-        timing_file = candidates[0]
-
-    try:
-        with open(timing_file) as f:
-            data = yaml.safe_load(f) or {}
-        return data.get("duration", {}).get("formatted", "")
-    except Exception:
-        return ""
 
 
 def _format_metadata(context: NotificationContext) -> str:
     version = os.environ.get("MCP_GATEWAY_VERSION", "")
     preset = os.environ.get("MCP_GATEWAY_PRESET", "")
 
+    test_root = get_test_artifacts_root(context)
     if not version:
-        version = _get_label_value(context, "mcp_gateway_version") or "unknown"
+        version = get_label_value(test_root, "mcp_gateway_version") or "unknown"
     if not preset:
-        preset = _get_label_value(context, "preset") or "default"
+        preset = get_label_value(test_root, "preset") or "default"
 
     return f"*Version*: `{version}`  |  *Preset*: `{preset}`"
 
@@ -120,9 +107,9 @@ def _format_kpi_table(context: NotificationContext) -> str:
     previous_kpis, previous_run_name = _load_previous_kpis_from_mlflow()
 
     if previous_kpis:
-        return _build_comparison_table(current_kpis, previous_kpis, previous_run_name)
+        return build_comparison_table(current_kpis, previous_kpis, previous_run_name, TARGET_KPIS)
     else:
-        return _build_current_only(current_kpis)
+        return build_current_kpis_list(current_kpis, TARGET_KPIS)
 
 
 def _format_standard_links(context: NotificationContext) -> str:
@@ -138,20 +125,11 @@ def _format_standard_links(context: NotificationContext) -> str:
     except Exception as e:
         logger.debug("CI link generation unavailable: %s", e)
 
-    mlflow_url = _extract_mlflow_url(context)
+    mlflow_url = extract_mlflow_url(context)
     if mlflow_url:
         lines.append(f"\u2022 <{mlflow_url}|MLflow run>")
 
     return "\n".join(lines) if lines else ""
-
-
-def _extract_mlflow_url(context: NotificationContext) -> str | None:
-    """Extract MLflow run URL from caliper export status."""
-    if not isinstance(context.status, dict):
-        return None
-    backends = context.status.get("caliper_artifacts_export", {}).get("backends", {})
-    mlflow_info = backends.get("mlflow", {})
-    return mlflow_info.get("run_url") or mlflow_info.get("experiment_url")
 
 
 def _format_failure_info(context: NotificationContext) -> str:
@@ -177,16 +155,17 @@ def _format_failure_info(context: NotificationContext) -> str:
 
 
 # ---------------------------------------------------------------------------
-# KPI loading
+# KPI loading (MCP Gateway specific)
 # ---------------------------------------------------------------------------
 
 
 def _load_current_kpis(context: NotificationContext) -> dict[str, float]:
     """Read KPI values from kpis.jsonl in the artifact directory."""
-    if not context.artifact_dir:
+    test_root = get_test_artifacts_root(context)
+    if not test_root:
         return {}
 
-    kpis_file = _find_kpis_jsonl(context.artifact_dir)
+    kpis_file = find_kpis_jsonl(test_root)
     if not kpis_file:
         return {}
 
@@ -205,17 +184,6 @@ def _load_current_kpis(context: NotificationContext) -> dict[str, float]:
         logger.warning("Failed to read kpis.jsonl: %s", e)
 
     return kpis
-
-
-def _find_kpis_jsonl(artifact_dir: Path) -> Path | None:
-    """Find kpis.jsonl in artifact directory tree."""
-    direct = artifact_dir / "kpis.jsonl"
-    if direct.exists():
-        return direct
-
-    for f in artifact_dir.glob("**/kpis.jsonl"):
-        return f
-    return None
 
 
 def _load_previous_kpis_from_mlflow() -> tuple[dict[str, float], str]:
@@ -282,92 +250,3 @@ def _load_previous_kpis_from_mlflow() -> tuple[dict[str, float], str]:
     except Exception as e:
         logger.warning("MLflow comparison unavailable: %s", e)
         return {}, ""
-
-
-# ---------------------------------------------------------------------------
-# Formatting helpers
-# ---------------------------------------------------------------------------
-
-
-def _build_comparison_table(
-    current: dict[str, float], previous: dict[str, float], prev_run_name: str
-) -> str:
-    """Format a Slack-friendly comparison table."""
-    lines = [f"*KPI comparison* (vs `{prev_run_name}`):", "```"]
-
-    header = f"{'KPI':<16}| {'Previous':>10} | {'Current':>10} | {'Delta':>8}"
-    lines.append(header)
-    lines.append("-" * len(header))
-
-    for kpi_id, display_name, unit in TARGET_KPIS:
-        cur_val = current.get(kpi_id)
-        prev_val = previous.get(kpi_id)
-
-        if cur_val is None:
-            continue
-
-        cur_str = _format_value(cur_val, unit)
-        prev_str = _format_value(prev_val, unit) if prev_val is not None else "n/a"
-        delta_str = _format_delta(cur_val, prev_val, kpi_id) if prev_val is not None else "n/a"
-
-        lines.append(f"{display_name:<16}| {prev_str:>10} | {cur_str:>10} | {delta_str:>8}")
-
-    lines.append("```")
-    return "\n".join(lines)
-
-
-def _build_current_only(current: dict[str, float]) -> str:
-    """Format current KPIs as a simple list (no comparison available)."""
-    lines = ["*Current KPIs*:"]
-    for kpi_id, display_name, unit in TARGET_KPIS:
-        val = current.get(kpi_id)
-        if val is None:
-            continue
-        lines.append(f"  \u2022 {display_name}: `{_format_value(val, unit)}`")
-
-    return "\n".join(lines) if len(lines) > 1 else ""
-
-
-def _format_value(value: float | None, unit: str) -> str:
-    if value is None:
-        return "n/a"
-    if unit == "%":
-        return f"{value * 100:.2f}%"
-    if unit == "ms":
-        return f"{value:.1f} ms"
-    if unit == "req/s":
-        return f"{value:.0f}"
-    return f"{value:.2f}"
-
-
-def _format_delta(current: float, previous: float, kpi_id: str) -> str:
-    if previous == 0:
-        return "n/a"
-    pct = ((current - previous) / abs(previous)) * 100
-    sign = "+" if pct >= 0 else ""
-    return f"{sign}{pct:.1f}%"
-
-
-def _get_label_value(context: NotificationContext, key: str) -> str | None:
-    """Extract a value from test labels in artifact dir.
-
-    The labels file format is: {"version": "1", "labels": {"key": "value", ...}}
-    """
-    if not context.artifact_dir:
-        return None
-
-    labels_file = context.artifact_dir / "__test_labels__.yaml"
-    if not labels_file.exists():
-        labels_glob = list(context.artifact_dir.glob("**/__test_labels__.yaml"))
-        if not labels_glob:
-            return None
-        labels_file = labels_glob[0]
-
-    try:
-        with open(labels_file) as f:
-            data = yaml.safe_load(f) or {}
-        labels = data.get("labels", data)
-        val = labels.get(key, "")
-        return str(val) if val else None
-    except Exception:
-        return None
