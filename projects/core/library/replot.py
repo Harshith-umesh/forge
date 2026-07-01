@@ -78,10 +78,20 @@ def run_replot(*, artifact_directory: Path | None):
     default=None,
     help="Artifact root directory to replot from (defaults to ARTIFACT_DIR).",
 )
+@click.option(
+    "--url",
+    "replot_url",
+    type=str,
+    default=None,
+    help="Remote URL to replot artifacts from (defaults to caliper.replot.url config).",
+)
 @click.pass_context
 @ci_lib.safe_ci_command
-def caliper_replot_entrypoint(_ctx, artifact_directory: Path | None):
+def caliper_replot_entrypoint(_ctx, artifact_directory: Path | None, replot_url: str | None):
     """Replot artifacts and visualizations from a remote URL."""
+
+    if replot_url:
+        config.project.set_config("caliper.replot.url", replot_url)
 
     status = run_replot(artifact_directory=artifact_directory)
 
