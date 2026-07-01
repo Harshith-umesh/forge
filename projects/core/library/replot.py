@@ -18,41 +18,45 @@ from projects.core.library import config, env
 logger = logging.getLogger(__name__)
 
 
-def run_replot(*, artifact_directory: Path | None):
+def run_replot(*, artifact_directory: Path | None, keep_download_dir: bool | None = None):
     """Run replotting logic on the specified artifact directory."""
 
     if artifact_directory is None:
         artifact_directory = env.ARTIFACT_DIR
 
-    # Get the replot URL from configuration
-    replot_url = config.project.get_config("caliper.replot.url", None, print=False, warn=False)
-    if not replot_url:
-        raise ValueError(
-            "caliper.replot.url is not configured. Use /replot.url directive or set in config."
+    # Get the replot URL from configuration (empty string if not configured)
+    replot_url = config.project.get_config("caliper.replot.url", "", print=False, warn=False)
+
+    # Determine keep setting: CLI flag > config > default False
+    if keep_download_dir is not None:
+        keep_replot_dir = keep_download_dir
+    else:
+        keep_replot_dir = config.project.get_config(
+            "caliper.replot.keep", False, print=False, warn=False
         )
 
-    keep_replot_dir = config.project.get_config(
-        "caliper.replot.keep", False, print=False, warn=False
-    )
+    # Load MLflow configuration from export settings to get vault secrets (only if URL provided)
+    vault_name = None
+    vault_mlflow_secret = None
 
-    # Load MLflow configuration from export settings to get vault secrets
-    export_config = config.project.get_config("caliper.export", {}, print=False, warn=False)
-    mlflow_backend = export_config.get("backend", {}).get("mlflow", {})
+    if replot_url:  # Only load MLflow config if we have a URL to download from
+        export_config = config.project.get_config("caliper.export", {}, print=False, warn=False)
+        mlflow_backend = export_config.get("backend", {}).get("mlflow", {})
 
-    if not mlflow_backend.get("enabled", False):
-        raise ValueError(
-            "MLflow export is not enabled in configuration. Cannot determine authentication settings."
-        )
+        if not mlflow_backend.get("enabled", False):
+            raise ValueError(
+                "MLflow export is not enabled in configuration. Cannot determine authentication settings."
+            )
 
-    # Get vault secrets configuration (same as export)
-    secrets_config = mlflow_backend.get("secrets", {}).get("vault", {})
-    vault_name = secrets_config.get("name")
-    vault_mlflow_secret = secrets_config.get("mlflow_secret")
+        # Get vault secrets configuration (same as export)
+        secrets_config = mlflow_backend.get("secrets", {}).get("vault", {})
+        vault_name = secrets_config.get("name")
+        vault_mlflow_secret = secrets_config.get("mlflow_secret")
 
-    if not vault_name or not vault_mlflow_secret:
-        raise ValueError(
-            "MLflow vault configuration missing. Check caliper.export.backend.mlflow.secrets.vault settings."
-        )
+        if not vault_name or not vault_mlflow_secret:
+            raise ValueError(
+                "MLflow vault configuration missing. Check caliper.export.backend.mlflow.secrets.vault settings."
+            )
 
     # Get post-processing configuration
     postprocess_config = config.project.get_config(
@@ -83,17 +87,25 @@ def run_replot(*, artifact_directory: Path | None):
     "replot_url",
     type=str,
     default=None,
-    help="Remote URL to replot artifacts from (defaults to caliper.replot.url config).",
+    help="Remote URL to replot artifacts from (if not provided, uses existing config or skips download).",
+)
+@click.option(
+    "--keep-download",
+    is_flag=True,
+    help="Keep the download directory after processing (don't clean up).",
 )
 @click.pass_context
 @ci_lib.safe_ci_command
-def caliper_replot_entrypoint(_ctx, artifact_directory: Path | None, replot_url: str | None):
+def caliper_replot_entrypoint(
+    _ctx, artifact_directory: Path | None, replot_url: str | None, keep_download: bool
+):
     """Replot artifacts and visualizations from a remote URL."""
 
-    if replot_url:
+    # Only override config if URL was explicitly provided via CLI
+    if replot_url is not None:
         config.project.set_config("caliper.replot.url", replot_url)
 
-    status = run_replot(artifact_directory=artifact_directory)
+    status = run_replot(artifact_directory=artifact_directory, keep_download_dir=keep_download)
 
     # Log the status
     import yaml

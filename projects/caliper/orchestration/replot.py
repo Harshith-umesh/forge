@@ -66,7 +66,14 @@ def _download_mlflow_artifacts_via_import(
         "--mlflow-insecure-tls",
     ]
 
-    logger.debug(f"Running import command: {' '.join(cmd)}")
+    logger.info(f"Running import command: {' '.join(cmd)}")
+    logger.info(f"Target download directory: {replot_download_dir}")
+
+    # Record what exists before import
+    files_before = set()
+    if replot_download_dir.exists():
+        files_before = set(replot_download_dir.rglob("*"))
+        files_before = {f for f in files_before if f.is_file()}
 
     try:
         # Run the import command
@@ -83,9 +90,18 @@ def _download_mlflow_artifacts_via_import(
         if result.stderr:
             logger.debug(f"Import stderr: {result.stderr}")
 
-        # Count downloaded files
-        downloaded_files = list(replot_download_dir.rglob("*"))
-        downloaded_files = [f for f in downloaded_files if f.is_file()]
+        # Find what was actually downloaded
+        files_after = set()
+        if replot_download_dir.exists():
+            files_after = set(replot_download_dir.rglob("*"))
+            files_after = {f for f in files_after if f.is_file()}
+
+        downloaded_files = list(files_after - files_before)
+
+        if not downloaded_files:
+            raise RuntimeError(
+                f"Import command completed but no new files found in {replot_download_dir}"
+            )
 
         logger.info(f"Downloaded {len(downloaded_files)} files to {replot_download_dir}")
         if downloaded_files:
@@ -146,18 +162,30 @@ def run_replot_from_orchestration_config(
     """
     replot_download_dir = artifact_directory / "replot"
 
-    logger.info(f"Replotting artifacts from URL: {replot_url}")
-    logger.info(f"Download directory: {replot_download_dir}")
-    logger.info(f"Output directory: {artifact_directory}")
+    # Check if URL is valid for downloading
+    skip_download = (
+        not replot_url or not replot_url.strip() or replot_url.strip().lower() in ("false", "0")
+    )
 
-    # Get MLflow secrets from vault
-    mlflow_secrets_path = vault_lib.get_vault_content_path(vault_name, vault_mlflow_secret)
-    if mlflow_secrets_path is None or not mlflow_secrets_path.exists():
-        raise FileNotFoundError(
-            f"MLflow secrets not found in vault {vault_name}/{vault_mlflow_secret}"
-        )
+    if skip_download:
+        keep_replot_dir = True
+        logger.info("No replot URL provided, skipping artifact download")
+        logger.info("Automatically setting keep_replot_dir=True to preserve existing files")
+        logger.info(f"Download directory: {replot_download_dir}")
+        logger.info(f"Output directory: {artifact_directory}")
+    else:
+        logger.info(f"Replotting artifacts from URL: {replot_url}")
+        logger.info(f"Download directory: {replot_download_dir}")
+        logger.info(f"Output directory: {artifact_directory}")
 
-    logger.info(f"Using MLflow secrets from vault {vault_name}/{vault_mlflow_secret}")
+        # Get MLflow secrets from vault
+        mlflow_secrets_path = vault_lib.get_vault_content_path(vault_name, vault_mlflow_secret)
+        if mlflow_secrets_path is None or not mlflow_secrets_path.exists():
+            raise FileNotFoundError(
+                f"MLflow secrets not found in vault {vault_name}/{vault_mlflow_secret}"
+            )
+
+        logger.info(f"Using MLflow secrets from vault {vault_name}/{vault_mlflow_secret}")
 
     status = {
         "replot": {
@@ -169,64 +197,117 @@ def run_replot_from_orchestration_config(
     }
 
     try:
-        # Step 1: Download artifacts
-        logger.info("Downloading artifacts...")
+        # Step 1: Download artifacts (or skip if no URL)
+        if skip_download:
+            logger.info("Skipping download step (no URL provided)")
 
-        # Check if download directory already exists with content
-        if replot_download_dir.exists() and any(replot_download_dir.iterdir()):
-            logger.info(
-                f"Replot download directory already exists with content, skipping download: {replot_download_dir}"
-            )
+            # Check if download directory already exists with content
+            if replot_download_dir.exists() and any(replot_download_dir.iterdir()):
+                existing_files = list(replot_download_dir.rglob("*"))
+                existing_files = [f for f in existing_files if f.is_file()]
 
-            # Count existing files for status
-            existing_files = list(replot_download_dir.rglob("*"))
-            existing_files = [f for f in existing_files if f.is_file()]
+                logger.info(f"Found {len(existing_files)} existing files in download directory")
+                if existing_files:
+                    logger.info("Existing files:")
+                    for file in existing_files[:10]:  # Show first 10
+                        try:
+                            relative_path = file.relative_to(replot_download_dir)
+                            logger.info(f"  {relative_path}")
+                        except ValueError:
+                            logger.info(f"  {file}")
+                    if len(existing_files) > 10:
+                        logger.info(f"  ... and {len(existing_files) - 10} more")
 
-            logger.info(f"Found {len(existing_files)} existing files")
-            if existing_files:
-                logger.info("Existing files:")
-                for file in existing_files[:10]:  # Show first 10
-                    try:
-                        relative_path = file.relative_to(replot_download_dir)
-                        logger.info(f"  {relative_path}")
-                    except ValueError:
-                        logger.info(f"  {file}")
-                if len(existing_files) > 10:
-                    logger.info(f"  ... and {len(existing_files) - 10} more")
+                status["replot"].update(
+                    {
+                        "download_status": "skipped",
+                        "downloaded_files": len(existing_files),
+                        "skip_reason": "no_url_provided",
+                    }
+                )
+            else:
+                logger.info("No existing artifacts found to process")
+                status["replot"].update(
+                    {
+                        "download_status": "skipped",
+                        "downloaded_files": 0,
+                        "skip_reason": "no_url_provided",
+                    }
+                )
+        else:
+            logger.info("Downloading artifacts...")
 
-            status["replot"].update(
-                {
-                    "download_status": "skipped",
-                    "downloaded_files": len(existing_files),
-                    "skip_reason": "directory_already_exists",
-                }
+            # Check if download directory already exists with content
+            if replot_download_dir.exists() and any(replot_download_dir.iterdir()):
+                logger.info(
+                    f"Replot download directory already exists with content, skipping download: {replot_download_dir}"
+                )
+
+                # Count existing files for status
+                existing_files = list(replot_download_dir.rglob("*"))
+                existing_files = [f for f in existing_files if f.is_file()]
+
+                logger.info(f"Found {len(existing_files)} existing files")
+                if existing_files:
+                    logger.info("Existing files:")
+                    for file in existing_files[:10]:  # Show first 10
+                        try:
+                            relative_path = file.relative_to(replot_download_dir)
+                            logger.info(f"  {relative_path}")
+                        except ValueError:
+                            logger.info(f"  {file}")
+                    if len(existing_files) > 10:
+                        logger.info(f"  ... and {len(existing_files) - 10} more")
+
+                status["replot"].update(
+                    {
+                        "download_status": "skipped",
+                        "downloaded_files": len(existing_files),
+                        "skip_reason": "directory_already_exists",
+                    }
+                )
+            else:
+                # Create the download directory
+                replot_download_dir.mkdir(parents=True, exist_ok=True)
+
+                # Download artifacts based on URL type
+                if "mlflow" in replot_url.lower() and "runs" in replot_url:
+                    download_result = _download_mlflow_artifacts_via_import(
+                        replot_url, replot_download_dir, mlflow_secrets_path
+                    )
+                    status["replot"].update(download_result)
+                else:
+                    raise ValueError(
+                        f"Unsupported replot URL type: {replot_url}. Only MLflow URLs are currently supported."
+                    )
+
+        logger.info("Download step completed")
+
+        # Step 2: Run post-processing on artifacts
+        if artifact_directory.exists():
+            logger.info("Running post-processing...")
+
+            visualize_output_dir = artifact_directory / "postprocess_output"
+            visualize_output_dir.mkdir(parents=True, exist_ok=True)
+
+            postprocess_result = run_postprocess_from_orchestration_config(
+                postprocess_config_raw=postprocess_config or {},
+                artifacts_dir=artifact_directory,
+                visualize_output_dir=visualize_output_dir,
+                test_outcome=TestPhaseOutcome("SUCCESS"),
             )
         else:
-            # Create the download directory
-            replot_download_dir.mkdir(parents=True, exist_ok=True)
-
-            # Download artifacts based on URL type
-            if "mlflow" in replot_url.lower() and "runs" in replot_url:
-                download_result = _download_mlflow_artifacts_via_import(
-                    replot_url, replot_download_dir, mlflow_secrets_path
-                )
-                status["replot"].update(download_result)
-            else:
-                raise ValueError(
-                    f"Unsupported replot URL type: {replot_url}. Only MLflow URLs are currently supported."
-                )
-
-        logger.info("Artifacts downloaded successfully")
-
-        # Step 2: Run post-processing on downloaded artifacts
-        logger.info("Running post-processing...")
-
-        postprocess_result = run_postprocess_from_orchestration_config(
-            postprocess_config_raw=postprocess_config or {},
-            artifacts_dir=replot_download_dir,
-            visualize_output_dir=artifact_directory,
-            test_outcome=TestPhaseOutcome("SUCCESS"),
-        )
+            logger.info("Artifacts directory not found")
+            postprocess_result = {
+                "success": True,
+                "steps": {
+                    "visualize": {
+                        "status": "skipped",
+                        "message": "No artifacts found",
+                        "artifact_directory": artifact_directory,
+                    }
+                },
+            }
 
         # Log post-processing results
         if postprocess_result.get("steps", {}).get("visualize", {}).get("status") == "skipped":
@@ -237,22 +318,29 @@ def run_replot_from_orchestration_config(
         else:
             logger.info("Post-processing completed (parsing only)")
 
-        status["replot"]["postprocess_status"] = (
-            "success" if postprocess_result.get("success", False) else "failed"
-        )
+        postprocess_success = postprocess_result.get("success", False)
+        status["replot"]["postprocess_status"] = "success" if postprocess_success else "failed"
         status["replot"]["postprocess_result"] = postprocess_result
 
         # Step 3: Clean up download directory unless keeping
-        if not keep_replot_dir:
+        if not keep_replot_dir and replot_download_dir.exists():
             logger.info(f"Cleaning up download directory: {replot_download_dir}")
             shutil.rmtree(replot_download_dir)
             status["replot"]["cleanup_status"] = "completed"
-        else:
+        elif keep_replot_dir and replot_download_dir.exists():
             logger.info(f"Keeping download directory as requested: {replot_download_dir}")
             status["replot"]["cleanup_status"] = "skipped"
+        else:
+            logger.info("No download directory to clean up")
+            status["replot"]["cleanup_status"] = "not_needed"
 
-        status["replot"]["status"] = "success"
-        status["replot"]["message"] = "Replot completed successfully"
+        # Overall status considers both download and postprocessing
+        if postprocess_success:
+            status["replot"]["status"] = "success"
+            status["replot"]["message"] = "Replot completed successfully"
+        else:
+            status["replot"]["status"] = "failed"
+            status["replot"]["message"] = "Replot completed but postprocessing failed"
 
     except Exception as e:
         logger.error(f"Replot failed: {e}")
