@@ -6,6 +6,11 @@ vaults:
   prepare: []
   test: []
 
+notifications:
+  slack:
+    channel_id: C0BEBS6929L
+    provider_module: projects.mcp_gateway.orchestration.notifications.MCPGatewaySlackProvider
+
 metrics:
   enabled: true
   namespaces:
