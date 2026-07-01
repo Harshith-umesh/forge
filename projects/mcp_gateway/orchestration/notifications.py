@@ -47,7 +47,7 @@ class MCPGatewaySlackProvider(SlackNotificationProvider):
         header = _format_header(context)
         metadata = _format_metadata(context)
         kpi_table = _format_kpi_table(context)
-        links = _format_standard_links()
+        links = _format_standard_links(context)
         failure_info = _format_failure_info(context)
 
         parts = [header, metadata, kpi_table, links, failure_info]
@@ -74,9 +74,29 @@ class MCPGatewaySlackProvider(SlackNotificationProvider):
 
 def _format_header(context: NotificationContext) -> str:
     status_icon = ":done-circle-check:" if context.finish_reason == "success" else ":no-red-circle:"
-    duration = context.status.get("duration", "")
+    duration = _read_test_duration(context)
     duration_str = f" after {duration}" if duration else ""
     return f"{status_icon} *mcp_gateway test finished{duration_str}* {status_icon}"
+
+
+def _read_test_duration(context: NotificationContext) -> str:
+    """Read duration from 000__ci_metadata/test_duration.yaml."""
+    if not context.artifact_dir:
+        return ""
+
+    timing_file = context.artifact_dir / "000__ci_metadata" / "test_duration.yaml"
+    if not timing_file.exists():
+        candidates = list(context.artifact_dir.glob("**/000__ci_metadata/test_duration.yaml"))
+        if not candidates:
+            return ""
+        timing_file = candidates[0]
+
+    try:
+        with open(timing_file) as f:
+            data = yaml.safe_load(f) or {}
+        return data.get("duration", {}).get("formatted", "")
+    except Exception:
+        return ""
 
 
 def _format_metadata(context: NotificationContext) -> str:
@@ -105,20 +125,33 @@ def _format_kpi_table(context: NotificationContext) -> str:
         return _build_current_only(current_kpis)
 
 
-def _format_standard_links() -> str:
+def _format_standard_links(context: NotificationContext) -> str:
     """Generate artifact links reusing the core notification link builder."""
-    try:
-        def get_link(name, path, **kwargs):
-            return f"<{get_ocpci_link(path, **kwargs)}|{name}>"
+    lines = []
 
-        lines = [
-            f"\u2022 {get_link('Test results', '', is_dir=True)}",
-            f"\u2022 {get_link('Execution logs', 'run.log', is_raw_file=True)}",
-        ]
-        return "\n".join(lines)
+    try:
+        ci_link = get_ocpci_link("", is_dir=True)
+        if ci_link and "no_known_ci_engine" not in ci_link:
+            lines.append(f"\u2022 <{ci_link}|Test results>")
+            log_link = get_ocpci_link("run.log", is_raw_file=True)
+            lines.append(f"\u2022 <{log_link}|Execution logs>")
     except Exception as e:
-        logger.warning("Failed to generate artifact links: %s", e)
-        return ""
+        logger.debug("CI link generation unavailable: %s", e)
+
+    mlflow_url = _extract_mlflow_url(context)
+    if mlflow_url:
+        lines.append(f"\u2022 <{mlflow_url}|MLflow run>")
+
+    return "\n".join(lines) if lines else ""
+
+
+def _extract_mlflow_url(context: NotificationContext) -> str | None:
+    """Extract MLflow run URL from caliper export status."""
+    if not isinstance(context.status, dict):
+        return None
+    backends = context.status.get("caliper_artifacts_export", {}).get("backends", {})
+    mlflow_info = backends.get("mlflow", {})
+    return mlflow_info.get("run_url") or mlflow_info.get("experiment_url")
 
 
 def _format_failure_info(context: NotificationContext) -> str:
@@ -313,7 +346,10 @@ def _format_delta(current: float, previous: float, kpi_id: str) -> str:
 
 
 def _get_label_value(context: NotificationContext, key: str) -> str | None:
-    """Extract a value from test labels in artifact dir."""
+    """Extract a value from test labels in artifact dir.
+
+    The labels file format is: {"version": "1", "labels": {"key": "value", ...}}
+    """
     if not context.artifact_dir:
         return None
 
@@ -326,7 +362,9 @@ def _get_label_value(context: NotificationContext, key: str) -> str | None:
 
     try:
         with open(labels_file) as f:
-            labels = yaml.safe_load(f) or {}
-        return str(labels.get(key, "")) or None
+            data = yaml.safe_load(f) or {}
+        labels = data.get("labels", data)
+        val = labels.get(key, "")
+        return str(val) if val else None
     except Exception:
         return None
