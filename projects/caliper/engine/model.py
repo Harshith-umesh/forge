@@ -107,3 +107,20 @@ class PostProcessingPlugin(ABC):
     def build_ai_eval_payload(self, model: UnifiedRunModel) -> dict[str, Any]:
         """Structured JSON for AI agent evaluation."""
         return {"schema_version": "1", "run_id": "", "metrics": {}}
+
+    def get_ai_eval_artifact_files(self, model: UnifiedRunModel) -> list[str]:
+        """Return list of artifact files to copy for AI evaluation export.
+
+        Args:
+            model: Unified model containing test results
+
+        Returns:
+            List of relative file paths from the base directory to copy for AI evaluation
+
+        Example:
+            return [
+                "004__capture_llmisvc_state/artifacts/llminferenceservice.json",
+                "001__llmd_test/003__benchmark_short/000__run_guidellm_benchmark/artifacts/results/benchmarks.json"
+            ]
+        """
+        return []

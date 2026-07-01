@@ -223,7 +223,9 @@ def _run_ai_eval_export(
         return {"status": "failed", "error": str(e)}
 
 
-def _export_test_entries_with_artifacts(model, ai_eval_dir: Path, base_dir: Path, plugin) -> list[dict]:
+def _export_test_entries_with_artifacts(
+    model, ai_eval_dir: Path, base_dir: Path, plugin
+) -> list[dict]:
     """
     Export test entries by creating directories and copying specific artifacts.
 
