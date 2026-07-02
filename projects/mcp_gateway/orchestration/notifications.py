@@ -117,55 +117,6 @@ class MCPGatewaySlackProvider(SlackNotificationProvider):
 
         return "Thread for mcp_gateway run"
 
-    def notify(self, context: NotificationContext, *, dry_run: bool = False) -> bool:
-        """Override to skip notification for duplicate version/SHA runs."""
-        if not self.should_notify(context):
-            logger.info("Provider %s: should_notify returned False, skipping", type(self).__name__)
-            return True
-
-        token = self.get_slack_token()
-        if not token:
-            logger.warning("Provider %s: no Slack token available", type(self).__name__)
-            return False
-
-        channel_id = self.get_channel_id()
-        message = self.format_message(context)
-
-        if context.extra.get("_skip_notification"):
-            logger.info("Skipping notification: duplicate version/SHA already notified")
-            return True
-
-        anchor = self.get_thread_anchor(context)
-
-        import projects.core.notifications.slack.api as slack_api
-
-        client = slack_api.init_client(token)
-        if not client:
-            logger.error("Provider %s: failed to init Slack client", type(self).__name__)
-            return False
-
-        channel_msg_ts, _ = slack_api.search_channel_message(client, anchor, channel_id=channel_id)
-
-        if not channel_msg_ts:
-            channel_message = f"\U0001f9f5 {anchor}"
-            if dry_run:
-                logger.info("Would post channel message: %s", channel_message)
-            else:
-                channel_msg_ts, ok = slack_api.send_message(
-                    client, message=channel_message, channel_id=channel_id
-                )
-                if not ok:
-                    return False
-
-        if dry_run:
-            logger.info("Would post thread message:\n%s", message)
-            return True
-
-        _, ok = slack_api.send_message(
-            client, message=message, main_ts=channel_msg_ts, channel_id=channel_id
-        )
-        return ok
-
 
 # ---------------------------------------------------------------------------
 # Message sections (MCP Gateway specific)
@@ -198,7 +149,13 @@ def _format_kpi_table(context: NotificationContext) -> str:
     if not current_kpis:
         return ""
 
-    previous_kpis, previous_run_name, skip = _load_previous_kpis_from_mlflow()
+    # Extract current run_id from export status to avoid race with parallel jobs
+    current_run_id = None
+    if isinstance(context.status, dict):
+        backends = context.status.get("caliper_artifacts_export", {}).get("backends", {})
+        current_run_id = backends.get("mlflow", {}).get("run_id")
+
+    previous_kpis, previous_run_name, skip = _load_previous_kpis_from_mlflow(current_run_id)
 
     if skip:
         context.extra["_skip_notification"] = True
@@ -273,8 +230,14 @@ def _load_current_kpis(context: NotificationContext) -> dict[str, float]:
     return kpis
 
 
-def _load_previous_kpis_from_mlflow() -> tuple[dict[str, float], str, bool]:
+def _load_previous_kpis_from_mlflow(
+    current_run_id: str | None = None,
+) -> tuple[dict[str, float], str, bool]:
     """Query MLflow for the previous matching run's metrics.
+
+    Args:
+        current_run_id: MLflow run ID of this notification's run. When provided
+            the current run is located by ID (avoids races with parallel jobs).
 
     Matching rules:
     - Same load config (e.g. s150-u500)
@@ -335,7 +298,21 @@ def _load_previous_kpis_from_mlflow() -> tuple[dict[str, float], str, bool]:
                 logger.info("No previous MLflow run found for comparison")
                 return {}, "", False
 
-            current_run = runs[0]
+            # Locate the current run explicitly by ID when available
+            current_run = None
+            if current_run_id:
+                for run in runs:
+                    if run.info.run_id == current_run_id:
+                        current_run = run
+                        break
+                if current_run is None:
+                    logger.info(
+                        "Current run_id '%s' not found in recent runs, falling back to runs[0]",
+                        current_run_id,
+                    )
+            if current_run is None:
+                current_run = runs[0]
+
             current_name = getattr(current_run.info, "run_name", "") or current_run.info.run_id[:8]
             current_parsed = _parse_run_name(current_name)
             current_preset = (current_run.data.params or {}).get("preset", "")
@@ -346,7 +323,9 @@ def _load_previous_kpis_from_mlflow() -> tuple[dict[str, float], str, bool]:
 
             # Find previous run matching: same config, same type, same preset
             previous_run = None
-            for run in runs[1:]:
+            for run in runs:
+                if run.info.run_id == current_run.info.run_id:
+                    continue
                 candidate_name = getattr(run.info, "run_name", "") or run.info.run_id[:8]
                 candidate_parsed = _parse_run_name(candidate_name)
                 if not candidate_parsed:

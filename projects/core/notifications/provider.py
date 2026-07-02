@@ -104,6 +104,11 @@ class SlackNotificationProvider(ABC):
 
         channel_id = self.get_channel_id()
         message = self.format_message(context)
+
+        if context.extra.get("_skip_notification"):
+            logger.info("Provider %s: _skip_notification set, skipping", type(self).__name__)
+            return True
+
         anchor = self.get_thread_anchor(context)
 
         client = slack_api.init_client(token)
