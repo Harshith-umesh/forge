@@ -194,6 +194,10 @@ class RhaiisKpiHandler:
                 except (TypeError, ValueError):
                     value = None
 
+                # Skip KPIs with null values
+                if value is None:
+                    continue
+
                 labels = {**base_labels}
                 if higher_is_better is not None:
                     labels["higher_is_better"] = higher_is_better
@@ -204,7 +208,7 @@ class RhaiisKpiHandler:
                         "kpi_id": kpi_id,
                         "value": value,
                         "unit": unit,
-                        "run_id": r.test_base_path,
+                        "run_path": r.test_base_path,
                         "timestamp": ts,
                         "labels": labels,
                         "source": {
