@@ -113,7 +113,7 @@ def _run_kpi_generate(
     plugin_module: str,
     base_dir: Path,
 ) -> dict[str, Any]:
-    """Generate KPI JSONL using the plugin's compute_kpis method."""
+    """Generate KPI JSON using the plugin's compute_kpis method."""
 
     if not postprocess_config.kpi.enabled:
         return {"status": "skipped", "reason": "kpi disabled", "completed_at": time.time()}
@@ -125,7 +125,7 @@ def _run_kpi_generate(
         }
 
     try:
-        # Write KPI JSONL
+        # Write KPI JSON
         output_file = output_dir / postprocess_config.kpi.generate.output
 
         # Log command to reproduce this step
@@ -327,7 +327,7 @@ def _run_kpi_csv_export(
     plugin,
     model,
     output_dir: Path,
-    kpi_jsonl_path: Path,
+    kpi_json_path: Path,
 ) -> dict[str, Any]:
     """Export KPI data to CSV format using the plugin's compute_kpis method."""
 
@@ -350,7 +350,7 @@ def _run_kpi_csv_export(
 
         # Log command to reproduce this step
         log_kpi_csv_export_command(
-            input_path=kpi_jsonl_path,
+            input_path=kpi_json_path,
             output_path=output_file,
         )
 
@@ -688,7 +688,7 @@ class CaliperPostprocessOrchestrator:
                 use_cache=not self.config.parse.no_cache,
             )
 
-            # KPI JSONL generation
+            # KPI JSON generation
             self._run_kpi_generate_step(plugin, model, output_dir, mod_str)
 
             # KPI CSV export
@@ -753,9 +753,9 @@ class CaliperPostprocessOrchestrator:
         """Execute the KPI CSV export step."""
         if self.config.kpi.csv_export.enabled:
             with step_logging("caliper_kpi_csv_export", self.step_logs_dir):
-                # Path to the JSONL file for reference in command logging
-                kpi_jsonl_path = output_dir / self.config.kpi.generate.output
-                result = _run_kpi_csv_export(self.config, plugin, model, output_dir, kpi_jsonl_path)
+                # Path to the JSON file for reference in command logging
+                kpi_json_path = output_dir / self.config.kpi.generate.output
+                result = _run_kpi_csv_export(self.config, plugin, model, output_dir, kpi_json_path)
                 self.steps["kpi_csv_export"] = result
                 if result.get("status") == "failed":
                     # CSV export failure doesn't affect overall status - it's supplementary

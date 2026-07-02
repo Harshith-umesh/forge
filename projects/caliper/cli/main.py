@@ -20,7 +20,7 @@ from projects.caliper.engine.kpi.generate import run_kpi_generate
 from projects.caliper.engine.kpi.import_export import (
     export_kpis_to_index,
     import_kpis_snapshot,
-    load_kpis_jsonl,
+    load_kpis_json,
 )
 from projects.caliper.engine.load_plugin import load_plugin
 from projects.caliper.engine.parse import run_parse
@@ -814,7 +814,7 @@ def kpi_import(ctx: click.Context, snapshot: Path) -> None:
 @click.pass_context
 def kpi_export(ctx: click.Context, input_path: Path, dry_run: bool) -> None:
     try:
-        rows = load_kpis_jsonl(input_path)
+        rows = load_kpis_json(input_path)
         if dry_run:
             click.echo(f"Would export {len(rows)} records")
             return
