@@ -30,17 +30,35 @@ class GuideLLMAIEvaluator:
         # Extract GuideLLM-specific metrics for AI evaluation
         benchmarks = []
         for record in model.unified_result_records:
-            if record.run_identity.get("guidellm") and not record.metrics.get(
-                "no_benchmarks_found"
+            if (
+                record.run_identity.get("guidellm")
+                and not record.metrics.get("no_benchmarks_found")
+                and record.metrics.get("performance_curves")
             ):
+                curves = record.metrics.get("performance_curves", {})
+
+                # Extract peak performance metrics from curves
+                max_request_rate = max(curves.get("request_rate", [0.0]))
+                max_tokens_per_second = max(curves.get("tokens_per_second", [0.0]))
+                min_ttft_median = min(
+                    [x for x in curves.get("ttft_median", [0.0]) if x > 0], default=0.0
+                )
+                min_itl_median = min(
+                    [x for x in curves.get("itl_median", [0.0]) if x > 0], default=0.0
+                )
+                min_request_latency_p95 = min(
+                    [x for x in curves.get("request_latency_p95", [0.0]) if x > 0], default=0.0
+                )
+
                 strategy_info = {
-                    "strategy": record.distinguishing_labels.get("strategy", "unknown"),
-                    "concurrency": record.distinguishing_labels.get("concurrency", 1.0),
-                    "request_rate": record.metrics.get("request_rate", 0.0),
-                    "tokens_per_second": record.metrics.get("tokens_per_second", 0.0),
-                    "ttft_median": record.metrics.get("ttft_median", 0.0),
-                    "itl_median": record.metrics.get("itl_median", 0.0),
-                    "request_latency_p95": record.metrics.get("request_latency_p95", 0.0),
+                    "strategy": record.metrics.get("strategy", "unknown"),
+                    "concurrency": record.metrics.get("request_concurrency", 1.0),
+                    "max_request_rate": max_request_rate,
+                    "max_tokens_per_second": max_tokens_per_second,
+                    "best_ttft_median": min_ttft_median,
+                    "best_itl_median": min_itl_median,
+                    "best_request_latency_p95": min_request_latency_p95,
+                    "rate_points": len(curves.get("request_rate", [])),
                 }
                 benchmarks.append(strategy_info)
 
@@ -68,13 +86,19 @@ class GuideLLMAIEvaluator:
         """
         return {
             "record_count": len(all_records),
-            "benchmark_count": len(benchmarks),
+            "test_count": len(
+                benchmarks
+            ),  # Now represents unified tests, not individual benchmarks
             "strategies": [b["strategy"] for b in benchmarks],
-            "max_request_rate": max([b["request_rate"] for b in benchmarks], default=0.0),
-            "max_tokens_per_second": max([b["tokens_per_second"] for b in benchmarks], default=0.0),
-            "min_ttft_median": min(
-                [b["ttft_median"] for b in benchmarks if b["ttft_median"] > 0], default=0.0
+            "max_request_rate": max([b["max_request_rate"] for b in benchmarks], default=0.0),
+            "max_tokens_per_second": max(
+                [b["max_tokens_per_second"] for b in benchmarks], default=0.0
             ),
+            "min_ttft_median": min(
+                [b["best_ttft_median"] for b in benchmarks if b["best_ttft_median"] > 0],
+                default=0.0,
+            ),
+            "total_rate_points": sum([b["rate_points"] for b in benchmarks]),
         }
 
     def get_schema_version(self) -> str:
@@ -96,11 +120,12 @@ class GuideLLMAIEvaluator:
 
         required_metric_keys = {
             "record_count",
-            "benchmark_count",
+            "test_count",
             "strategies",
             "max_request_rate",
             "max_tokens_per_second",
             "min_ttft_median",
+            "total_rate_points",
         }
         if not all(key in payload["metrics"] for key in required_metric_keys):
             return False

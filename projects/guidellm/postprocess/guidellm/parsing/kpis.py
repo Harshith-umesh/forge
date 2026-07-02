@@ -20,273 +20,248 @@ from projects.caliper.engine.kpi import (
 from projects.caliper.engine.model import UnifiedRunModel
 
 
-# Throughput KPIs
+# Throughput KPIs - for individual benchmark records
 @HigherBetter()
 @Format("{:.2f}")
-@KPIMetadata(help="Measured requests processed per second", unit="req/s")
-def guidellm_measured_rps(unified_record) -> float:
-    """Measured Request Rate KPI."""
-    return float(unified_record.metrics.get("measured_rps", 0))
-
-
-@HigherBetter()
-@Format("{:.2f}")
-@KPIMetadata(help="Output tokens processed per second", unit="tokens/s")
-def guidellm_output_tok_per_sec(unified_record) -> float:
-    """Output Token Throughput KPI."""
-    return float(unified_record.metrics.get("output_tok/sec", 0))
+@KPIMetadata(help="Maximum achieved request rate", unit="req/s")
+def guidellm_max_request_rate(unified_record) -> float:
+    """Maximum Request Rate KPI."""
+    value = unified_record.metrics.get("request_rate")
+    if value is None:
+        raise ValueError("request_rate metric not found")
+    return float(value)
 
 
 @HigherBetter()
 @Format("{:.2f}")
-@KPIMetadata(help="Total tokens processed per second", unit="tokens/s")
-def guidellm_total_tok_per_sec(unified_record) -> float:
-    """Total Token Throughput KPI."""
-    return float(unified_record.metrics.get("total_tok/sec", 0))
+@KPIMetadata(help="Maximum achieved output token throughput", unit="tokens/s")
+def guidellm_max_output_tokens_per_second(unified_record) -> float:
+    """Maximum Output Token Throughput KPI."""
+    value = unified_record.metrics.get("output_tokens_per_second")
+    if value is None:
+        raise ValueError("output_tokens_per_second metric not found")
+    return float(value)
+
+
+@HigherBetter()
+@Format("{:.2f}")
+@KPIMetadata(help="Maximum achieved total token throughput", unit="tokens/s")
+def guidellm_max_tokens_per_second(unified_record) -> float:
+    """Maximum Total Token Throughput KPI."""
+    value = unified_record.metrics.get("tokens_per_second")
+    if value is None:
+        raise ValueError("tokens_per_second metric not found")
+    return float(value)
 
 
 @HigherBetter()
 @Format("{:.1f}")
-@KPIMetadata(help="Measured concurrent connections", unit="connections")
-def guidellm_measured_concurrency(unified_record) -> float:
-    """Measured Concurrency KPI."""
-    return float(unified_record.metrics.get("measured_concurrency", 0))
+@KPIMetadata(help="Request concurrency level", unit="connections")
+def guidellm_request_concurrency(unified_record) -> float:
+    """Request Concurrency KPI."""
+    value = unified_record.metrics.get("request_concurrency")
+    if value is None:
+        raise ValueError("request_concurrency metric not found")
+    return float(value)
 
 
-# Token Count Statistics KPIs
+# Token Count Statistics KPIs - static values
 @LowerBetter()
 @Format("{:.1f}")
-@KPIMetadata(help="Average prompt token count", unit="tokens")
-def guidellm_prompt_token_count_mean(unified_record) -> float:
-    """Prompt Token Count Mean KPI."""
-    return float(unified_record.metrics.get("prompt_token_count_mean", 0))
+@KPIMetadata(help="Average input tokens per request", unit="tokens")
+def guidellm_input_tokens_per_request(unified_record) -> float:
+    """Input Tokens Per Request KPI."""
+    value = unified_record.metrics.get("input_tokens_per_request")
+    if value is None:
+        raise ValueError("input_tokens_per_request metric not found")
+    return float(value)
 
 
 @LowerBetter()
 @Format("{:.1f}")
-@KPIMetadata(help="99th percentile prompt token count", unit="tokens")
-def guidellm_prompt_token_count_p99(unified_record) -> float:
-    """Prompt Token Count P99 KPI."""
-    return float(unified_record.metrics.get("prompt_token_count_p99", 0))
+@KPIMetadata(help="Average output tokens per request", unit="tokens")
+def guidellm_output_tokens_per_request(unified_record) -> float:
+    """Output Tokens Per Request KPI."""
+    value = unified_record.metrics.get("output_tokens_per_request")
+    if value is None:
+        raise ValueError("output_tokens_per_request metric not found")
+    return float(value)
 
 
-@HigherBetter()
-@Format("{:.1f}")
-@KPIMetadata(help="Average output token count", unit="tokens")
-def guidellm_output_token_count_mean(unified_record) -> float:
-    """Output Token Count Mean KPI."""
-    return float(unified_record.metrics.get("output_token_count_mean", 0))
-
-
-@HigherBetter()
-@Format("{:.1f}")
-@KPIMetadata(help="99th percentile output token count", unit="tokens")
-def guidellm_output_token_count_p99(unified_record) -> float:
-    """Output Token Count P99 KPI."""
-    return float(unified_record.metrics.get("output_token_count_p99", 0))
-
-
-# Time to First Token (TTFT) KPIs
+# Time to First Token (TTFT) KPIs - from individual records
 @LowerBetter()
 @Format("{:.4f}")
-@KPIMetadata(help="Time to first token (median)", unit="s")
-def guidellm_ttft_median(unified_record) -> float:
+@KPIMetadata(help="Time to first token median", unit="s")
+def guidellm_best_ttft_median(unified_record) -> float:
     """Time to First Token Median KPI."""
-    return float(unified_record.metrics.get("ttft_median", 0))
+    value = unified_record.metrics.get("ttft_median")
+    if value is None:
+        raise ValueError("ttft_median metric not found")
+    return float(value)
 
 
 @LowerBetter()
 @Format("{:.4f}")
-@KPIMetadata(help="Time to first token (mean)", unit="s")
-def guidellm_ttft_mean(unified_record) -> float:
-    """Time to First Token Mean KPI."""
-    return float(unified_record.metrics.get("ttft_mean", 0))
-
-
-@LowerBetter()
-@Format("{:.4f}")
-@KPIMetadata(help="Time to first token (1st percentile)", unit="s")
-def guidellm_ttft_p1(unified_record) -> float:
-    """Time to First Token P1 KPI."""
-    return float(unified_record.metrics.get("ttft_p1", 0))
-
-
-@LowerBetter()
-@Format("{:.4f}")
-@KPIMetadata(help="Time to first token (95th percentile)", unit="s")
-def guidellm_ttft_p95(unified_record) -> float:
+@KPIMetadata(help="Time to first token P95", unit="s")
+def guidellm_best_ttft_p95(unified_record) -> float:
     """Time to First Token P95 KPI."""
-    return float(unified_record.metrics.get("ttft_p95", 0))
+    value = unified_record.metrics.get("ttft_p95")
+    if value is None:
+        raise ValueError("ttft_p95 metric not found")
+    return float(value)
 
 
 @LowerBetter()
 @Format("{:.4f}")
-@KPIMetadata(help="Time to first token (99th percentile)", unit="s")
-def guidellm_ttft_p99(unified_record) -> float:
+@KPIMetadata(help="Time to first token P99", unit="s")
+def guidellm_best_ttft_p99(unified_record) -> float:
     """Time to First Token P99 KPI."""
-    return float(unified_record.metrics.get("ttft_p99", 0))
+    value = unified_record.metrics.get("ttft_p99")
+    if value is None:
+        raise ValueError("ttft_p99 metric not found")
+    return float(value)
 
 
+# Time Per Output Token (TPOT) KPIs - from individual records
 @LowerBetter()
 @Format("{:.4f}")
-@KPIMetadata(help="Time to first token (99.9th percentile)", unit="s")
-def guidellm_ttft_p999(unified_record) -> float:
-    """Time to First Token P999 KPI."""
-    return float(unified_record.metrics.get("ttft_p999", 0))
-
-
-# Time Per Output Token (TPOT) KPIs
-@LowerBetter()
-@Format("{:.4f}")
-@KPIMetadata(help="Time per output token (median)", unit="s")
-def guidellm_tpot_median(unified_record) -> float:
+@KPIMetadata(help="Time per output token median", unit="s")
+def guidellm_best_tpot_median(unified_record) -> float:
     """Time Per Output Token Median KPI."""
-    return float(unified_record.metrics.get("tpot_median", 0))
+    value = unified_record.metrics.get("tpot_median")
+    if value is None:
+        raise ValueError("tpot_median metric not found")
+    return float(value)
 
 
 @LowerBetter()
 @Format("{:.4f}")
-@KPIMetadata(help="Time per output token (1st percentile)", unit="s")
-def guidellm_tpot_p1(unified_record) -> float:
-    """Time Per Output Token P1 KPI."""
-    return float(unified_record.metrics.get("tpot_p1", 0))
-
-
-@LowerBetter()
-@Format("{:.4f}")
-@KPIMetadata(help="Time per output token (95th percentile)", unit="s")
-def guidellm_tpot_p95(unified_record) -> float:
+@KPIMetadata(help="Time per output token P95", unit="s")
+def guidellm_best_tpot_p95(unified_record) -> float:
     """Time Per Output Token P95 KPI."""
-    return float(unified_record.metrics.get("tpot_p95", 0))
+    value = unified_record.metrics.get("tpot_p95")
+    if value is None:
+        raise ValueError("tpot_p95 metric not found")
+    return float(value)
 
 
 @LowerBetter()
 @Format("{:.4f}")
-@KPIMetadata(help="Time per output token (99th percentile)", unit="s")
-def guidellm_tpot_p99(unified_record) -> float:
+@KPIMetadata(help="Time per output token P99", unit="s")
+def guidellm_best_tpot_p99(unified_record) -> float:
     """Time Per Output Token P99 KPI."""
-    return float(unified_record.metrics.get("tpot_p99", 0))
+    value = unified_record.metrics.get("tpot_p99")
+    if value is None:
+        raise ValueError("tpot_p99 metric not found")
+    return float(value)
 
 
+# Inter-Token Latency (ITL) KPIs - from individual records
 @LowerBetter()
 @Format("{:.4f}")
-@KPIMetadata(help="Time per output token (99.9th percentile)", unit="s")
-def guidellm_tpot_p999(unified_record) -> float:
-    """Time Per Output Token P999 KPI."""
-    return float(unified_record.metrics.get("tpot_p999", 0))
-
-
-# Inter-Token Latency (ITL) KPIs
-@LowerBetter()
-@Format("{:.4f}")
-@KPIMetadata(help="Inter-token latency (median)", unit="s")
-def guidellm_itl_median(unified_record) -> float:
+@KPIMetadata(help="Inter-token latency median", unit="s")
+def guidellm_best_itl_median(unified_record) -> float:
     """Inter Token Latency Median KPI."""
-    return float(unified_record.metrics.get("itl_median", 0))
+    value = unified_record.metrics.get("itl_median")
+    if value is None:
+        raise ValueError("itl_median metric not found")
+    return float(value)
 
 
 @LowerBetter()
 @Format("{:.4f}")
-@KPIMetadata(help="Inter-token latency (mean)", unit="s")
-def guidellm_itl_mean(unified_record) -> float:
-    """Inter Token Latency Mean KPI."""
-    return float(unified_record.metrics.get("itl_mean", 0))
-
-
-@LowerBetter()
-@Format("{:.4f}")
-@KPIMetadata(help="Inter-token latency (1st percentile)", unit="s")
-def guidellm_itl_p1(unified_record) -> float:
-    """Inter Token Latency P1 KPI."""
-    return float(unified_record.metrics.get("itl_p1", 0))
-
-
-@LowerBetter()
-@Format("{:.4f}")
-@KPIMetadata(help="Inter-token latency (95th percentile)", unit="s")
-def guidellm_itl_p95(unified_record) -> float:
+@KPIMetadata(help="Inter-token latency P95", unit="s")
+def guidellm_best_itl_p95(unified_record) -> float:
     """Inter Token Latency P95 KPI."""
-    return float(unified_record.metrics.get("itl_p95", 0))
+    value = unified_record.metrics.get("itl_p95")
+    if value is None:
+        raise ValueError("itl_p95 metric not found")
+    return float(value)
 
 
 @LowerBetter()
 @Format("{:.4f}")
-@KPIMetadata(help="Inter-token latency (99th percentile)", unit="s")
-def guidellm_itl_p99(unified_record) -> float:
+@KPIMetadata(help="Inter-token latency P99", unit="s")
+def guidellm_best_itl_p99(unified_record) -> float:
     """Inter Token Latency P99 KPI."""
-    return float(unified_record.metrics.get("itl_p99", 0))
+    value = unified_record.metrics.get("itl_p99")
+    if value is None:
+        raise ValueError("itl_p99 metric not found")
+    return float(value)
 
 
+# Request Latency KPIs - from individual records
 @LowerBetter()
 @Format("{:.4f}")
-@KPIMetadata(help="Inter-token latency (99.9th percentile)", unit="s")
-def guidellm_itl_p999(unified_record) -> float:
-    """Inter Token Latency P999 KPI."""
-    return float(unified_record.metrics.get("itl_p999", 0))
-
-
-# Request Latency KPIs
-@LowerBetter()
-@Format("{:.4f}")
-@KPIMetadata(help="End-to-end request latency (median)", unit="s")
-def guidellm_request_latency_median(unified_record) -> float:
+@KPIMetadata(help="End-to-end request latency median", unit="s")
+def guidellm_best_request_latency_median(unified_record) -> float:
     """Request Latency Median KPI."""
-    return float(unified_record.metrics.get("request_latency_median", 0))
+    value = unified_record.metrics.get("request_latency_median")
+    if value is None:
+        raise ValueError("request_latency_median metric not found")
+    return float(value)
 
 
 @LowerBetter()
 @Format("{:.4f}")
-@KPIMetadata(help="End-to-end request latency (minimum)", unit="s")
-def guidellm_request_latency_min(unified_record) -> float:
-    """Request Latency Min KPI."""
-    return float(unified_record.metrics.get("request_latency_min", 0))
+@KPIMetadata(help="End-to-end request latency P95", unit="s")
+def guidellm_best_request_latency_p95(unified_record) -> float:
+    """Request Latency P95 KPI."""
+    value = unified_record.metrics.get("request_latency_p95")
+    if value is None:
+        raise ValueError("request_latency_p95 metric not found")
+    return float(value)
 
 
-@HigherBetter()
-@Format("{:.4f}")
-@KPIMetadata(help="End-to-end request latency (maximum)", unit="s")
-def guidellm_request_latency_max(unified_record) -> float:
-    """Request Latency Max KPI."""
-    return float(unified_record.metrics.get("request_latency_max", 0))
-
-
-# Success/Failure KPIs
+# Success/Failure KPIs - from individual records
 @HigherBetter()
 @Format("{:,.0f}")
-@KPIMetadata(help="Number of successful requests", unit="requests")
-def guidellm_successful_requests(unified_record) -> float:
-    """Successful Requests KPI."""
-    return float(unified_record.metrics.get("successful_requests", 0))
+@KPIMetadata(help="Completed requests", unit="requests")
+def guidellm_total_completed_requests(unified_record) -> float:
+    """Completed Requests KPI."""
+    value = unified_record.metrics.get("completed_requests")
+    if value is None:
+        raise ValueError("completed_requests metric not found")
+    return float(value)
 
 
 @LowerBetter()
 @Format("{:,.0f}")
-@KPIMetadata(help="Number of errored requests", unit="requests")
-def guidellm_errored_requests(unified_record) -> float:
-    """Errored Requests KPI."""
-    return float(unified_record.metrics.get("errored_requests", 0))
+@KPIMetadata(help="Failed requests", unit="requests")
+def guidellm_total_failed_requests(unified_record) -> float:
+    """Failed Requests KPI."""
+    value = unified_record.metrics.get("failed_requests")
+    if value is None:
+        raise ValueError("failed_requests metric not found")
+    return float(value)
 
 
-# Example 2D KPIs
+# 2D KPIs that aggregate data from multiple individual records
 @HigherBetter()
 @TwoDimensional(
     x_unit="req/s",
-    x_help="Target request rate",
-    y_unit="req/s",
+    x_help="Request rate",
+    y_unit="tokens/s",
     y_help="Achieved throughput",
     x_format="{:.1f}",
     y_format="{:.1f}",
 )
-@KPIMetadata(help="Throughput achieved at different target request rates", unit="req/s")
-def guidellm_throughput_curve(unified_record) -> list[tuple[float, float]]:
+@KPIMetadata(help="Throughput achieved at different request rates", unit="tokens/s")
+def guidellm_throughput_curve(unified_records) -> list[tuple[float, float]]:
     """Throughput vs Request Rate Curve KPI."""
-    # Extract real curve data from load testing at different RPS levels
-    curve_data = unified_record.metrics.get("throughput_curve", [])
-    if not curve_data:
-        # Return empty list when no real curve data exists
-        return []
+    # Handle both single record and list of records
+    if not isinstance(unified_records, list):
+        unified_records = [unified_records]
 
-    return [(float(x), float(y)) for x, y in curve_data]
+    curve_points = []
+    for record in unified_records:
+        request_rate = record.metrics.get("request_rate", 0)
+        tokens_per_sec = record.metrics.get("tokens_per_second", 0)
+
+        if request_rate > 0 and tokens_per_sec > 0:
+            curve_points.append((float(request_rate), float(tokens_per_sec)))
+
+    return curve_points
 
 
 @LowerBetter()
@@ -294,20 +269,53 @@ def guidellm_throughput_curve(unified_record) -> list[tuple[float, float]]:
     x_unit="req/s",
     x_help="Request rate",
     y_unit="s",
-    y_help="Latency percentile",
+    y_help="P95 latency",
     x_format="{:.1f}",
     y_format="{:.4f}",
 )
 @KPIMetadata(help="P95 latency at different request rates", unit="s")
-def guidellm_latency_vs_load(unified_record) -> list[tuple[float, float]]:
+def guidellm_latency_vs_load(unified_records) -> list[tuple[float, float]]:
     """P95 Latency vs Load Curve KPI."""
-    # Extract real curve data showing how latency degrades with load
-    latency_curve = unified_record.metrics.get("latency_curve", [])
-    if not latency_curve:
-        # Return empty list when no real curve data exists
-        return []
+    # Handle both single record and list of records
+    if not isinstance(unified_records, list):
+        unified_records = [unified_records]
 
-    return [(float(x), float(y)) for x, y in latency_curve]
+    curve_points = []
+    for record in unified_records:
+        request_rate = record.metrics.get("request_rate", 0)
+        p95_latency = record.metrics.get("request_latency_p95", 0)
+
+        if request_rate > 0 and p95_latency > 0:
+            curve_points.append((float(request_rate), float(p95_latency)))
+
+    return curve_points
+
+
+@LowerBetter()
+@TwoDimensional(
+    x_unit="req/s",
+    x_help="Request rate",
+    y_unit="s",
+    y_help="TTFT P95",
+    x_format="{:.1f}",
+    y_format="{:.4f}",
+)
+@KPIMetadata(help="Time to first token P95 at different request rates", unit="s")
+def guidellm_ttft_vs_load(unified_records) -> list[tuple[float, float]]:
+    """TTFT P95 vs Load Curve KPI."""
+    # Handle both single record and list of records
+    if not isinstance(unified_records, list):
+        unified_records = [unified_records]
+
+    curve_points = []
+    for record in unified_records:
+        request_rate = record.metrics.get("request_rate", 0)
+        ttft_p95 = record.metrics.get("ttft_p95", 0)
+
+        if request_rate > 0 and ttft_p95 > 0:
+            curve_points.append((float(request_rate), float(ttft_p95)))
+
+    return curve_points
 
 
 class GuideLLMKpiHandler:
@@ -315,39 +323,9 @@ class GuideLLMKpiHandler:
 
     # Define label extractor for all GuideLLM test conditions
     LABEL_EXTRACTOR = create_label_extractor(
-        lambda record: {
-            # Test identification
-            "run": record.metrics.get("run", "unknown"),
-            # Model configuration
-            "model": record.metrics.get("model", "unknown"),
-            "version": record.metrics.get("version", "unknown"),
-            "image_tag": record.metrics.get("image_tag", "unknown"),
-            "guidellm_version": record.metrics.get("guidellm_version", "unknown"),
-            # Hardware setup
-            "accelerator": record.metrics.get("accelerator", "unknown"),
-            # Workload configuration
-            "prompt_toks": str(record.metrics.get("prompt toks", 0)),
-            "output_toks": str(record.metrics.get("output toks", 0)),
-            "intended_concurrency": str(record.metrics.get("intended concurrency", 1)),
-            # Parallelism settings
-            "TP": str(record.metrics.get("TP", 1)),
-            "DP": str(record.metrics.get("DP", 1)),
-            "EP": str(record.metrics.get("EP", 1)),
-            "replicas": str(record.metrics.get("replicas", 1)),
-            # Infrastructure setup
-            "prefill_pod_count": str(record.metrics.get("prefill_pod_count", 0)),
-            "decode_pod_count": str(record.metrics.get("decode_pod_count", 0)),
-            "router_config": record.metrics.get("router_config", "unknown"),
-            # Runtime configuration
-            "runtime_args": record.metrics.get("runtime_args", "unknown"),
-            # Performance tier (derived)
-            "performance_tier": (
-                "high"
-                if record.metrics.get("total_tok/sec", 0) > 1000
-                else "medium"
-                if record.metrics.get("total_tok/sec", 0) > 100
-                else "low"
-            ),
+        {
+            "strategy": "metrics.strategy",
+            "duration": "metrics.duration",
         }
     )
 
@@ -355,9 +333,10 @@ class GuideLLMKpiHandler:
     @staticmethod
     def extract_metadata(record) -> dict[str, Any]:
         """Extract metadata fields for KPI records."""
+        config = record.metrics.get("configuration", {})
         return {
-            "uuid": record.metrics.get("uuid"),
-            "notes": record.metrics.get("notes"),
+            "configuration": config,
+            "run_path": record.test_base_path,
         }
 
     @staticmethod
@@ -387,32 +366,43 @@ class GuideLLMKpiHandler:
         current_module = inspect.getmodule(GuideLLMKpiHandler)
         kpi_functions = get_kpi_functions(current_module)
 
-        for r in model.unified_result_records:
-            # Skip records without GuideLLM data
-            if not r.run_identity.get("guidellm"):
-                continue
+        # Filter valid records
+        valid_records = [
+            r
+            for r in model.unified_result_records
+            if r.run_identity.get("guidellm") and not r.metrics.get("no_benchmarks_found")
+        ]
 
-            # Skip if no benchmarks found
-            if r.metrics.get("no_benchmarks_found"):
-                continue
+        if not valid_records:
+            return out
 
+        # Group records by test path for 2D KPIs (same test, different rates)
+        from collections import defaultdict
+
+        records_by_test = defaultdict(list)
+        for r in valid_records:
+            records_by_test[r.test_base_path].append(r)
+
+        # Generate scalar KPIs for each record
+        for r in valid_records:
             base_labels = {**r.distinguishing_labels}
-
-            # Extract test condition labels (same for all KPIs in this test)
             test_condition_labels = GuideLLMKpiHandler.LABEL_EXTRACTOR.extract(r)
-
-            # Extract metadata fields
             metadata_fields = GuideLLMKpiHandler.extract_metadata(r)
 
-            # Compute each KPI using the decorated functions
+            # Compute scalar KPIs only
             for kpi_id, kpi_func in kpi_functions.items():
+                # Skip 2D KPIs for individual records - they'll be handled separately
+                if is_2d_kpi(kpi_func):
+                    continue
+
                 try:
                     value = kpi_func(r)
                 except (TypeError, ValueError, KeyError):
-                    if is_2d_kpi(kpi_func):
-                        value = []  # Empty list for failed 2D KPIs
-                    else:
-                        value = None  # None for missing/failed scalar KPIs
+                    value = None  # None for missing/failed scalar KPIs
+
+                # Skip KPIs with null values
+                if value is None:
+                    continue
 
                 # Merge base labels, test condition labels, and system labels
                 all_labels = {
@@ -434,21 +424,75 @@ class GuideLLMKpiHandler:
                         "test_base_path": r.test_base_path,
                         "plugin_module": model.plugin_module,
                     },
+                    "is_2d": False,
                 }
 
-                # Add 2D-specific metadata
-                if is_2d_kpi(kpi_func):
-                    kpi_record["is_2d"] = True
-                    kpi_record["x_unit"] = kpi_func._kpi_x_unit
-                    kpi_record["x_help"] = kpi_func._kpi_x_help
-                    kpi_record["y_unit"] = (
-                        getattr(kpi_func, "_kpi_y_unit", None) or kpi_func._kpi_unit
-                    )
-                    kpi_record["y_help"] = (
-                        getattr(kpi_func, "_kpi_y_help", None) or kpi_func._kpi_help
-                    )
-                else:
-                    kpi_record["is_2d"] = False
+                out.append(kpi_record)
+
+        # Generate 2D curve KPIs once per test (aggregated across rates)
+        for test_path, test_records in records_by_test.items():
+            if len(test_records) < 1:
+                continue  # Need at least one record
+
+            # Use first record for labels and metadata
+            representative_record = test_records[0]
+            base_labels = {**representative_record.distinguishing_labels}
+            test_condition_labels = GuideLLMKpiHandler.LABEL_EXTRACTOR.extract(
+                representative_record
+            )
+            metadata_fields = GuideLLMKpiHandler.extract_metadata(representative_record)
+
+            # Generate 2D KPIs with aggregated data
+            for kpi_id, kpi_func in kpi_functions.items():
+                if not is_2d_kpi(kpi_func):
+                    continue
+
+                try:
+                    # Pass all records for this test to the 2D KPI function
+                    if len(test_records) == 1:
+                        # If only one record, pass it directly (for backward compatibility)
+                        value = kpi_func(test_records[0])
+                    else:
+                        # Multiple records, pass as list for aggregation
+                        value = kpi_func(test_records)
+                except (TypeError, ValueError, KeyError):
+                    value = []  # Empty list for failed 2D KPIs
+
+                # Skip 2D KPIs with empty or null values
+                if not value or value is None:
+                    continue
+
+                # Remove rate-specific labels for aggregated KPIs
+                aggregated_labels = {
+                    k: v
+                    for k, v in base_labels.items()
+                    if k not in ["concurrency", "rate", "max_concurrency"]
+                }
+                all_labels = {
+                    **aggregated_labels,
+                    **test_condition_labels,
+                    "higher_is_better": kpi_func._kpi_higher_is_better,
+                }
+
+                kpi_record = {
+                    "schema_version": "1",
+                    "kpi_id": kpi_id,
+                    "value": value,
+                    "unit": kpi_func._kpi_unit,
+                    "run_id": test_path,
+                    "timestamp": ts,
+                    "labels": all_labels,
+                    "metadata": metadata_fields,
+                    "source": {
+                        "test_base_path": test_path,
+                        "plugin_module": model.plugin_module,
+                    },
+                    "is_2d": True,
+                    "x_unit": kpi_func._kpi_x_unit,
+                    "x_help": kpi_func._kpi_x_help,
+                    "y_unit": getattr(kpi_func, "_kpi_y_unit", None) or kpi_func._kpi_unit,
+                    "y_help": getattr(kpi_func, "_kpi_y_help", None) or kpi_func._kpi_help,
+                }
 
                 out.append(kpi_record)
 
