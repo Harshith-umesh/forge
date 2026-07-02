@@ -105,6 +105,149 @@ def _load_plugin(
     return mod_str, load_plugin(mod_str)
 
 
+def _transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
+    """
+    Transform flat KPI list into hierarchical JSON structure.
+
+    Groups KPIs by test (run_id), extracting common labels and organizing
+    KPI metadata (name, help, unit, etc.) for improved readability.
+
+    Args:
+        kpis: List of flat KPI records from compute_kpis
+        model: Unified model for accessing plugin metadata
+
+    Returns:
+        Hierarchical JSON structure organized by test
+    """
+    from collections import defaultdict
+
+    from projects.caliper.engine.kpi.decorators import get_kpi_functions
+
+    if not kpis:
+        return {"schema_version": "2", "tests": []}
+
+    # Group KPIs by test (run_id)
+    tests_data = defaultdict(lambda: {"kpis": [], "labels": {}, "metadata": {}})
+
+    # Get KPI function metadata from the plugin module
+    try:
+        plugin_module = __import__(model.plugin_module, fromlist=[""])
+        kpi_functions = get_kpi_functions(plugin_module)
+    except (ImportError, AttributeError):
+        kpi_functions = {}
+
+    for kpi in kpis:
+        run_id = kpi.get("run_id", "unknown")
+        test_data = tests_data[run_id]
+
+        # Extract common labels (excluding KPI-specific ones)
+        kpi_labels = kpi.get("labels", {})
+        test_labels = {
+            k: v for k, v in kpi_labels.items() if k not in ["higher_is_better"]
+        }  # Exclude KPI-specific labels
+
+        # Merge test labels (they should be the same for all KPIs in a test)
+        if not test_data["labels"]:
+            test_data["labels"] = test_labels
+
+        # Store test metadata from first KPI
+        if not test_data["metadata"]:
+            test_data["metadata"] = {
+                "timestamp": kpi.get("timestamp"),
+                "source": kpi.get("source", {}),
+                "run_id": run_id,
+            }
+
+        # Create KPI record with metadata
+        kpi_id = kpi.get("kpi_id")
+        raw_value = kpi.get("value")
+
+        # Transform 2D KPI values to structured format
+        if isinstance(raw_value, list) and raw_value and len(raw_value) > 0:
+            # Check if this looks like 2D data: list of tuples/lists with 2 elements
+            first_item = raw_value[0]
+            if isinstance(first_item, (list, tuple)) and len(first_item) == 2:
+                try:
+                    # Convert list of tuples [(x1, y1), (x2, y2), ...] to structured format
+                    structured_value = {
+                        "data_points": [{"x": float(x), "y": float(y)} for x, y in raw_value],
+                        "count": len(raw_value),
+                    }
+                    final_value = structured_value
+                except (ValueError, TypeError, IndexError):
+                    # If conversion fails, keep original value
+                    final_value = raw_value
+            else:
+                final_value = raw_value
+        else:
+            final_value = raw_value
+
+        kpi_record = {
+            "id": kpi_id,
+            "value": final_value,
+            "unit": kpi.get("unit"),
+            "higher_is_better": kpi_labels.get("higher_is_better", True),
+        }
+
+        # Add KPI metadata from function decorator if available
+        if kpi_id in kpi_functions:
+            func = kpi_functions[kpi_id]
+            kpi_record.update(
+                {
+                    "name": (
+                        func.__doc__.replace(" KPI.", "")
+                        if func.__doc__
+                        else kpi_id.replace("_", " ").title()
+                    ),
+                    "help": getattr(func, "_kpi_help", ""),
+                }
+            )
+
+            # Add 2D-specific metadata if present
+            if getattr(func, "_kpi_is_2d", False):
+                kpi_record.update(
+                    {
+                        "is_2d": True,
+                        "x_unit": getattr(func, "_kpi_x_unit", ""),
+                        "x_help": getattr(func, "_kpi_x_help", ""),
+                        "y_unit": getattr(func, "_kpi_y_unit", None) or kpi_record["unit"],
+                        "y_help": getattr(func, "_kpi_y_help", None)
+                        or getattr(func, "_kpi_help", ""),
+                    }
+                )
+            else:
+                kpi_record["is_2d"] = False
+
+            # Add formatting info if available
+            if hasattr(func, "_kpi_format"):
+                kpi_record["format"] = func._kpi_format
+        else:
+            # Fallback if no function metadata available
+            kpi_record.update(
+                {
+                    "name": kpi_id.replace("_", " ").title(),
+                    "help": f"KPI: {kpi_id}",
+                    "is_2d": isinstance(kpi.get("value"), list),
+                }
+            )
+
+        test_data["kpis"].append(kpi_record)
+
+    # Convert to final structure
+    tests_list = []
+    for run_id, test_data in tests_data.items():
+        tests_list.append(
+            {
+                "run_id": run_id,
+                "labels": test_data["labels"],
+                "metadata": test_data["metadata"],
+                "kpis": test_data["kpis"],
+            }
+        )
+
+    return {"schema_version": "2", "tests": tests_list}
+
+
 def _run_kpi_generate(
     postprocess_config: CaliperOrchestrationPostprocessConfig,
     plugin,
@@ -140,11 +283,15 @@ def _run_kpi_generate(
 
         import json
 
-        with open(output_file, "w") as f:
-            for kpi in kpis:
-                f.write(json.dumps(kpi) + "\n")
+        # Transform flat KPI list into hierarchical structure
+        hierarchical_data = _transform_kpis_to_hierarchical_format(kpis, model)
 
-        logger.info(f"Generated {len(kpis)} KPI records in {output_file}")
+        with open(output_file, "w") as f:
+            json.dump(hierarchical_data, f, indent=2)
+
+        logger.info(
+            f"Generated hierarchical KPI structure with {len(kpis)} total records in {output_file}"
+        )
         return {
             "status": "success",
             "kpi_count": len(kpis),
@@ -240,7 +387,6 @@ def _run_ai_eval_export(
             "output_file": str(output_file),
             "ai_eval_dir": str(ai_eval_dir),
             "exported_entries": len(exported_entries),
-            "payload_schema_version": payload.get("schema_version", "unknown"),
             "completed_at": time.time(),
         }
     except Exception as e:
