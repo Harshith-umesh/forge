@@ -81,7 +81,7 @@ class StubPlugin(PostProcessingPlugin):
             try:
                 val = float(m)
             except (TypeError, ValueError):
-                val = 0.0
+                val = None
             out.append(
                 {
                     "schema_version": "1",

@@ -189,7 +189,7 @@ class KPICsvSchema:
                 cleaned[col] = str(value).lower()  # Convert bool to string
             elif col == "value":
                 # Keep numeric values as-is, convert others to string
-                if isinstance(value, (int, float)):
+                if isinstance(value, int | float):
                     cleaned[col] = value
                 else:
                     cleaned[col] = str(value)
@@ -244,7 +244,7 @@ def create_csv_row_from_kpi_record(kpi_record: dict[str, Any]) -> KPICsvRow:
         kpi_unit=kpi_record.get("unit", ""),
         kpi_help=kpi_record.get("help", ""),
         higher_is_better=labels.get("higher_is_better", False),
-        value=kpi_record.get("value", 0),
+        value=kpi_record.get("value"),
         # System info
         run_id=kpi_record.get("run_id", ""),
         timestamp=kpi_record.get("timestamp", ""),

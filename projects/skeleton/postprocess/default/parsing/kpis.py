@@ -49,20 +49,20 @@ class SkeletonKpiHandler:
         out: list[dict[str, Any]] = []
 
         for r in model.unified_result_records:
-            tp_raw = r.metrics.get("throughput", 0)
-            lat_raw = r.metrics.get("latency_ms", 0)
+            tp_raw = r.metrics.get("throughput")
+            lat_raw = r.metrics.get("latency_ms")
 
             # Convert throughput to float
             try:
-                tp = float(tp_raw)
+                tp = float(tp_raw) if tp_raw is not None else None
             except (TypeError, ValueError):
-                tp = 0.0
+                tp = None
 
             # Convert latency to float
             try:
-                lat = float(lat_raw)
+                lat = float(lat_raw) if lat_raw is not None else None
             except (TypeError, ValueError):
-                lat = 0.0
+                lat = None
 
             base_labels = {**r.distinguishing_labels}
 

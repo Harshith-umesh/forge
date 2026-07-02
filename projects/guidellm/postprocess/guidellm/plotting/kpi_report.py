@@ -67,7 +67,7 @@ def generate_kpi_report(
             if is_2d_kpi(kpi_func):
                 value = []  # Empty list for failed 2D KPIs
             else:
-                value = 0.0  # Zero for failed scalar KPIs
+                value = None  # None for missing/failed scalar KPIs
 
         kpi_record = {
             "kpi_id": kpi_id,
@@ -341,7 +341,7 @@ def _generate_html(
 
             # Format the value using decorator format string
             value = kpi["value"]
-            if isinstance(value, (int, float)):
+            if isinstance(value, int | float):
                 try:
                     formatted_value = kpi["format"].format(value)
                 except (ValueError, KeyError):

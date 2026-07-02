@@ -412,7 +412,7 @@ class GuideLLMKpiHandler:
                     if is_2d_kpi(kpi_func):
                         value = []  # Empty list for failed 2D KPIs
                     else:
-                        value = 0.0  # Zero for failed scalar KPIs
+                        value = None  # None for missing/failed scalar KPIs
 
                 # Merge base labels, test condition labels, and system labels
                 all_labels = {
