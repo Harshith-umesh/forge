@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 
 from projects.core.library import config
 from projects.core.notifications.helpers import (
@@ -44,6 +45,45 @@ _KPI_TO_MLFLOW_METRIC = {
     "mcp_gw_p99_ms": "p99_ms",
     "mcp_gw_failure_rate": "failure_rate",
 }
+
+_RUN_NAME_PREFIX = "forge-mcp-gateway-"
+
+
+def _parse_run_name(run_name: str) -> dict | None:
+    """Parse a forge-mcp-gateway run name into components.
+
+    Expected formats:
+      forge-mcp-gateway-s150-u500-vsha-<hash>-YYYYMMDD-HHMMSS
+      forge-mcp-gateway-s150-u500-v0.7.0-YYYYMMDD-HHMMSS
+      forge-mcp-gateway-0.5.1-YYYYMMDD-HHMMSS
+
+    Returns dict with keys: config, is_sha, version — or None if unparseable.
+    """
+    if not run_name.startswith(_RUN_NAME_PREFIX):
+        return None
+
+    rest = run_name[len(_RUN_NAME_PREFIX) :]
+
+    config = None
+    config_match = re.match(r"(s\d+-u\d+)-", rest)
+    if config_match:
+        config = config_match.group(1)
+        rest = rest[config_match.end() :]
+
+    is_sha = False
+    version = None
+
+    if rest.startswith("vsha-"):
+        is_sha = True
+        sha_match = re.match(r"vsha-([a-f0-9]+)-\d{8}-\d{6}$", rest)
+        if sha_match:
+            version = sha_match.group(1)
+    else:
+        version_match = re.match(r"v?(.+?)-\d{8}-\d{6}$", rest)
+        if version_match:
+            version = version_match.group(1)
+
+    return {"config": config, "is_sha": is_sha, "version": version}
 
 
 class MCPGatewaySlackProvider(SlackNotificationProvider):
@@ -77,8 +117,54 @@ class MCPGatewaySlackProvider(SlackNotificationProvider):
 
         return "Thread for mcp_gateway run"
 
-    def should_notify(self, context: NotificationContext) -> bool:
-        return True
+    def notify(self, context: NotificationContext, *, dry_run: bool = False) -> bool:
+        """Override to skip notification for duplicate version/SHA runs."""
+        if not self.should_notify(context):
+            logger.info("Provider %s: should_notify returned False, skipping", type(self).__name__)
+            return True
+
+        token = self.get_slack_token()
+        if not token:
+            logger.warning("Provider %s: no Slack token available", type(self).__name__)
+            return False
+
+        channel_id = self.get_channel_id()
+        message = self.format_message(context)
+
+        if context.extra.get("_skip_notification"):
+            logger.info("Skipping notification: duplicate version/SHA already notified")
+            return True
+
+        anchor = self.get_thread_anchor(context)
+
+        import projects.core.notifications.slack.api as slack_api
+
+        client = slack_api.init_client(token)
+        if not client:
+            logger.error("Provider %s: failed to init Slack client", type(self).__name__)
+            return False
+
+        channel_msg_ts, _ = slack_api.search_channel_message(client, anchor, channel_id=channel_id)
+
+        if not channel_msg_ts:
+            channel_message = f"\U0001f9f5 {anchor}"
+            if dry_run:
+                logger.info("Would post channel message: %s", channel_message)
+            else:
+                channel_msg_ts, ok = slack_api.send_message(
+                    client, message=channel_message, channel_id=channel_id
+                )
+                if not ok:
+                    return False
+
+        if dry_run:
+            logger.info("Would post thread message:\n%s", message)
+            return True
+
+        _, ok = slack_api.send_message(
+            client, message=message, main_ts=channel_msg_ts, channel_id=channel_id
+        )
+        return ok
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +198,11 @@ def _format_kpi_table(context: NotificationContext) -> str:
     if not current_kpis:
         return ""
 
-    previous_kpis, previous_run_name = _load_previous_kpis_from_mlflow()
+    previous_kpis, previous_run_name, skip = _load_previous_kpis_from_mlflow()
+
+    if skip:
+        context.extra["_skip_notification"] = True
+        return ""
 
     if previous_kpis:
         return build_comparison_table(current_kpis, previous_kpis, previous_run_name, TARGET_KPIS)
@@ -121,23 +211,12 @@ def _format_kpi_table(context: NotificationContext) -> str:
 
 
 def _format_standard_links(context: NotificationContext) -> str:
-    """Generate artifact links reusing the core notification link builder."""
-    lines = []
-
-    try:
-        ci_link = get_ocpci_link("", is_dir=True)
-        if ci_link and "no_known_ci_engine" not in ci_link:
-            lines.append(f"\u2022 <{ci_link}|Test results>")
-            log_link = get_ocpci_link("run.log", is_raw_file=True)
-            lines.append(f"\u2022 <{log_link}|Execution logs>")
-    except Exception as e:
-        logger.debug("CI link generation unavailable: %s", e)
-
+    """Generate artifact links pointing to MLflow."""
     mlflow_url = extract_mlflow_url(context)
-    if mlflow_url:
-        lines.append(f"\u2022 <{mlflow_url}|MLflow run>")
+    if not mlflow_url:
+        return ""
 
-    return "\n".join(lines) if lines else ""
+    return f"\u2022 <{mlflow_url}|MLflow run (results & logs)>"
 
 
 def _format_failure_info(context: NotificationContext) -> str:
@@ -194,10 +273,17 @@ def _load_current_kpis(context: NotificationContext) -> dict[str, float]:
     return kpis
 
 
-def _load_previous_kpis_from_mlflow() -> tuple[dict[str, float], str]:
-    """Query MLflow for the most recent previous run's metrics.
+def _load_previous_kpis_from_mlflow() -> tuple[dict[str, float], str, bool]:
+    """Query MLflow for the previous matching run's metrics.
 
-    Returns (metrics_dict, run_name) or ({}, "") if unavailable.
+    Matching rules:
+    - Same load config (e.g. s150-u500)
+    - Same version type (SHA-based compared only to SHA-based, release to release)
+    - Same preset parameter value
+
+    Returns (metrics_dict, run_name, skip_notification):
+    - skip_notification is True when the previous matching run has the same
+      version/SHA (duplicate run, notification already sent).
     """
     try:
         from projects.caliper.engine.file_export.mlflow_secrets import (
@@ -221,12 +307,12 @@ def _load_previous_kpis_from_mlflow() -> tuple[dict[str, float], str]:
 
         if not all([vault_name, vault_secret, experiment_name]):
             logger.info("MLflow config incomplete, skipping comparison")
-            return {}, ""
+            return {}, "", False
 
         secrets_path = vault_lib.get_vault_content_path(vault_name, vault_secret)
         if not secrets_path or not secrets_path.exists():
             logger.info("MLflow secrets not available, skipping comparison")
-            return {}, ""
+            return {}, "", False
 
         secrets = load_mlflow_secrets_yaml(secrets_path)
 
@@ -237,23 +323,68 @@ def _load_previous_kpis_from_mlflow() -> tuple[dict[str, float], str]:
             exp = client.get_experiment_by_name(experiment_name)
             if not exp:
                 logger.info("MLflow experiment '%s' not found", experiment_name)
-                return {}, ""
+                return {}, "", False
 
             runs = client.search_runs(
                 experiment_ids=[exp.experiment_id],
                 order_by=["start_time DESC"],
-                max_results=2,
+                max_results=50,
             )
 
             if len(runs) < 2:
                 logger.info("No previous MLflow run found for comparison")
-                return {}, ""
+                return {}, "", False
 
-            previous_run = runs[1]
-            run_name = getattr(previous_run.info, "run_name", "") or previous_run.info.run_id[:8]
+            current_run = runs[0]
+            current_name = getattr(current_run.info, "run_name", "") or current_run.info.run_id[:8]
+            current_parsed = _parse_run_name(current_name)
+            current_preset = (current_run.data.params or {}).get("preset", "")
+
+            if not current_parsed:
+                logger.info("Cannot parse current run name '%s', skipping comparison", current_name)
+                return {}, "", False
+
+            # Find previous run matching: same config, same type, same preset
+            previous_run = None
+            for run in runs[1:]:
+                candidate_name = getattr(run.info, "run_name", "") or run.info.run_id[:8]
+                candidate_parsed = _parse_run_name(candidate_name)
+                if not candidate_parsed:
+                    continue
+
+                if candidate_parsed["config"] != current_parsed["config"]:
+                    continue
+                if candidate_parsed["is_sha"] != current_parsed["is_sha"]:
+                    continue
+
+                candidate_preset = (run.data.params or {}).get("preset", "")
+                if candidate_preset != current_preset:
+                    continue
+
+                previous_run = run
+                break
+
+            if previous_run is None:
+                logger.info(
+                    "No previous run matches config=%s, is_sha=%s, preset=%s",
+                    current_parsed["config"],
+                    current_parsed["is_sha"],
+                    current_preset,
+                )
+                return {}, "", False
+
+            prev_name = getattr(previous_run.info, "run_name", "") or previous_run.info.run_id[:8]
+            prev_parsed = _parse_run_name(prev_name)
+
+            # Check for duplicate: same version/SHA means already notified
+            if prev_parsed and prev_parsed["version"] == current_parsed["version"]:
+                logger.info(
+                    "Previous matching run has same version '%s', skipping notification",
+                    current_parsed["version"],
+                )
+                return {}, "", True
+
             raw_metrics = previous_run.data.metrics or {}
-
-            # Translate MLflow metric keys to kpi_id format
             mlflow_to_kpi = {v: k for k, v in _KPI_TO_MLFLOW_METRIC.items()}
             metrics = {}
             for mlflow_key, value in raw_metrics.items():
@@ -261,8 +392,8 @@ def _load_previous_kpis_from_mlflow() -> tuple[dict[str, float], str]:
                 if kpi_id:
                     metrics[kpi_id] = value
 
-            return metrics, run_name
+            return metrics, prev_name, False
 
     except Exception as e:
         logger.warning("MLflow comparison unavailable: %s", e)
-        return {}, ""
+        return {}, "", False

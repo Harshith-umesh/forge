@@ -15,11 +15,9 @@ from pathlib import Path
 from typing import Any
 
 import projects.core.notifications.slack.api as slack_api
+from projects.core.library import vault
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_SLACK_TOKEN_FILE = "topsail-bot.slack-token"
-DEFAULT_SECRET_ENV_KEYS = ("PSAP_FORGE_NOTIFICATIONS_SECRET_PATH",)
 
 
 @dataclass
@@ -51,19 +49,19 @@ class SlackNotificationProvider(ABC):
 
         Override this only if your project needs a different bot token.
         """
-        for env_key in DEFAULT_SECRET_ENV_KEYS:
-            path = os.environ.get(env_key)
-            if not path:
-                continue
-            secret_dir = Path(path)
-            if not secret_dir.exists():
-                continue
-            token_file = secret_dir / DEFAULT_SLACK_TOKEN_FILE
-            if token_file.exists():
-                return token_file.read_text().strip()
+        try:
+            token_path = vault.get_vault_content_path(
+                "psap-forge-notifications", "topsail-bot.slack-token"
+            )
+        except RuntimeError:
+            logger.warning("Vault not initialized, cannot resolve Slack token")
+            return None
 
-        logger.warning("Slack token not found via %s", DEFAULT_SECRET_ENV_KEYS)
-        return None
+        if not token_path or not token_path.exists():
+            logger.warning("Slack token not found in psap-forge-notifications vault")
+            return None
+
+        return token_path.read_text().strip()
 
     @abstractmethod
     def get_channel_id(self) -> str:
