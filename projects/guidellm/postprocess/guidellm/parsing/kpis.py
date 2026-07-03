@@ -20,40 +20,6 @@ from projects.caliper.engine.kpi import (
 from projects.caliper.engine.model import UnifiedRunModel
 
 
-# Throughput KPIs - for individual benchmark records
-@HigherBetter()
-@Format("{:.2f}")
-@KPIMetadata(help="Maximum achieved request rate", unit="req/s")
-def guidellm_max_request_rate(unified_record) -> float:
-    """Maximum Request Rate KPI."""
-    value = unified_record.metrics.get("request_rate")
-    if value is None:
-        raise ValueError("request_rate metric not found")
-    return float(value)
-
-
-@HigherBetter()
-@Format("{:.2f}")
-@KPIMetadata(help="Maximum achieved output token throughput", unit="tokens/s")
-def guidellm_max_output_tokens_per_second(unified_record) -> float:
-    """Maximum Output Token Throughput KPI."""
-    value = unified_record.metrics.get("output_tokens_per_second")
-    if value is None:
-        raise ValueError("output_tokens_per_second metric not found")
-    return float(value)
-
-
-@HigherBetter()
-@Format("{:.2f}")
-@KPIMetadata(help="Maximum achieved total token throughput", unit="tokens/s")
-def guidellm_max_tokens_per_second(unified_record) -> float:
-    """Maximum Total Token Throughput KPI."""
-    value = unified_record.metrics.get("tokens_per_second")
-    if value is None:
-        raise ValueError("tokens_per_second metric not found")
-    return float(value)
-
-
 @HigherBetter()
 @Format("{:.1f}")
 @KPIMetadata(help="Request concurrency level", unit="connections")
@@ -88,155 +54,13 @@ def guidellm_output_tokens_per_request(unified_record) -> float:
     return float(value)
 
 
-# Time to First Token (TTFT) KPIs - from individual records
-@LowerBetter()
-@Format("{:.4f}")
-@KPIMetadata(help="Time to first token median", unit="s")
-def guidellm_best_ttft_median(unified_record) -> float:
-    """Time to First Token Median KPI."""
-    value = unified_record.metrics.get("ttft_median")
-    if value is None:
-        raise ValueError("ttft_median metric not found")
-    return float(value)
+# Note: Scalar "best" KPIs removed - only 2D curve KPIs are desired
 
 
-@LowerBetter()
-@Format("{:.4f}")
-@KPIMetadata(help="Time to first token P95", unit="s")
-def guidellm_best_ttft_p95(unified_record) -> float:
-    """Time to First Token P95 KPI."""
-    value = unified_record.metrics.get("ttft_p95")
-    if value is None:
-        raise ValueError("ttft_p95 metric not found")
-    return float(value)
+# Note: Total request count KPIs removed - only 2D curve KPIs are desired
 
 
-@LowerBetter()
-@Format("{:.4f}")
-@KPIMetadata(help="Time to first token P99", unit="s")
-def guidellm_best_ttft_p99(unified_record) -> float:
-    """Time to First Token P99 KPI."""
-    value = unified_record.metrics.get("ttft_p99")
-    if value is None:
-        raise ValueError("ttft_p99 metric not found")
-    return float(value)
-
-
-# Time Per Output Token (TPOT) KPIs - from individual records
-@LowerBetter()
-@Format("{:.4f}")
-@KPIMetadata(help="Time per output token median", unit="s")
-def guidellm_best_tpot_median(unified_record) -> float:
-    """Time Per Output Token Median KPI."""
-    value = unified_record.metrics.get("tpot_median")
-    if value is None:
-        raise ValueError("tpot_median metric not found")
-    return float(value)
-
-
-@LowerBetter()
-@Format("{:.4f}")
-@KPIMetadata(help="Time per output token P95", unit="s")
-def guidellm_best_tpot_p95(unified_record) -> float:
-    """Time Per Output Token P95 KPI."""
-    value = unified_record.metrics.get("tpot_p95")
-    if value is None:
-        raise ValueError("tpot_p95 metric not found")
-    return float(value)
-
-
-@LowerBetter()
-@Format("{:.4f}")
-@KPIMetadata(help="Time per output token P99", unit="s")
-def guidellm_best_tpot_p99(unified_record) -> float:
-    """Time Per Output Token P99 KPI."""
-    value = unified_record.metrics.get("tpot_p99")
-    if value is None:
-        raise ValueError("tpot_p99 metric not found")
-    return float(value)
-
-
-# Inter-Token Latency (ITL) KPIs - from individual records
-@LowerBetter()
-@Format("{:.4f}")
-@KPIMetadata(help="Inter-token latency median", unit="s")
-def guidellm_best_itl_median(unified_record) -> float:
-    """Inter Token Latency Median KPI."""
-    value = unified_record.metrics.get("itl_median")
-    if value is None:
-        raise ValueError("itl_median metric not found")
-    return float(value)
-
-
-@LowerBetter()
-@Format("{:.4f}")
-@KPIMetadata(help="Inter-token latency P95", unit="s")
-def guidellm_best_itl_p95(unified_record) -> float:
-    """Inter Token Latency P95 KPI."""
-    value = unified_record.metrics.get("itl_p95")
-    if value is None:
-        raise ValueError("itl_p95 metric not found")
-    return float(value)
-
-
-@LowerBetter()
-@Format("{:.4f}")
-@KPIMetadata(help="Inter-token latency P99", unit="s")
-def guidellm_best_itl_p99(unified_record) -> float:
-    """Inter Token Latency P99 KPI."""
-    value = unified_record.metrics.get("itl_p99")
-    if value is None:
-        raise ValueError("itl_p99 metric not found")
-    return float(value)
-
-
-# Request Latency KPIs - from individual records
-@LowerBetter()
-@Format("{:.4f}")
-@KPIMetadata(help="End-to-end request latency median", unit="s")
-def guidellm_best_request_latency_median(unified_record) -> float:
-    """Request Latency Median KPI."""
-    value = unified_record.metrics.get("request_latency_median")
-    if value is None:
-        raise ValueError("request_latency_median metric not found")
-    return float(value)
-
-
-@LowerBetter()
-@Format("{:.4f}")
-@KPIMetadata(help="End-to-end request latency P95", unit="s")
-def guidellm_best_request_latency_p95(unified_record) -> float:
-    """Request Latency P95 KPI."""
-    value = unified_record.metrics.get("request_latency_p95")
-    if value is None:
-        raise ValueError("request_latency_p95 metric not found")
-    return float(value)
-
-
-# Success/Failure KPIs - from individual records
-@HigherBetter()
-@Format("{:,.0f}")
-@KPIMetadata(help="Completed requests", unit="requests")
-def guidellm_total_completed_requests(unified_record) -> float:
-    """Completed Requests KPI."""
-    value = unified_record.metrics.get("completed_requests")
-    if value is None:
-        raise ValueError("completed_requests metric not found")
-    return float(value)
-
-
-@LowerBetter()
-@Format("{:,.0f}")
-@KPIMetadata(help="Failed requests", unit="requests")
-def guidellm_total_failed_requests(unified_record) -> float:
-    """Failed Requests KPI."""
-    value = unified_record.metrics.get("failed_requests")
-    if value is None:
-        raise ValueError("failed_requests metric not found")
-    return float(value)
-
-
-# 2D KPIs that aggregate data from multiple individual records
+# 2D KPIs that extract data from performance curves
 @HigherBetter()
 @TwoDimensional(
     x_unit="req/s",
@@ -247,21 +71,20 @@ def guidellm_total_failed_requests(unified_record) -> float:
     y_format="{:.1f}",
 )
 @KPIMetadata(help="Throughput achieved at different request rates", unit="tokens/s")
-def guidellm_throughput_curve(unified_records) -> list[tuple[float, float]]:
+def guidellm_throughput_curve(unified_record) -> list[tuple[float, float]]:
     """Throughput vs Request Rate Curve KPI."""
-    # Handle both single record and list of records
-    if not isinstance(unified_records, list):
-        unified_records = [unified_records]
+    request_rates = unified_record.metrics.get("request_rate", [])
+    curves = unified_record.metrics.get("performance_curves", {})
+    tokens_per_sec = curves.get("tokens_per_second", [])
 
-    curve_points = []
-    for record in unified_records:
-        request_rate = record.metrics.get("request_rate", 0)
-        tokens_per_sec = record.metrics.get("tokens_per_second", 0)
+    if not request_rates or not tokens_per_sec or len(request_rates) != len(tokens_per_sec):
+        return []
 
-        if request_rate > 0 and tokens_per_sec > 0:
-            curve_points.append((float(request_rate), float(tokens_per_sec)))
-
-    return curve_points
+    return [
+        (float(x), float(y))
+        for x, y in zip(request_rates, tokens_per_sec, strict=False)
+        if x > 0 and y > 0
+    ]
 
 
 @LowerBetter()
@@ -274,21 +97,20 @@ def guidellm_throughput_curve(unified_records) -> list[tuple[float, float]]:
     y_format="{:.4f}",
 )
 @KPIMetadata(help="P95 latency at different request rates", unit="s")
-def guidellm_latency_vs_load(unified_records) -> list[tuple[float, float]]:
+def guidellm_latency(unified_record) -> list[tuple[float, float]]:
     """P95 Latency vs Load Curve KPI."""
-    # Handle both single record and list of records
-    if not isinstance(unified_records, list):
-        unified_records = [unified_records]
+    request_rates = unified_record.metrics.get("request_rate", [])
+    curves = unified_record.metrics.get("performance_curves", {})
+    p95_latency = curves.get("request_latency_p95", [])
 
-    curve_points = []
-    for record in unified_records:
-        request_rate = record.metrics.get("request_rate", 0)
-        p95_latency = record.metrics.get("request_latency_p95", 0)
+    if not request_rates or not p95_latency or len(request_rates) != len(p95_latency):
+        return []
 
-        if request_rate > 0 and p95_latency > 0:
-            curve_points.append((float(request_rate), float(p95_latency)))
-
-    return curve_points
+    return [
+        (float(x), float(y))
+        for x, y in zip(request_rates, p95_latency, strict=False)
+        if x > 0 and y > 0
+    ]
 
 
 @LowerBetter()
@@ -301,21 +123,98 @@ def guidellm_latency_vs_load(unified_records) -> list[tuple[float, float]]:
     y_format="{:.4f}",
 )
 @KPIMetadata(help="Time to first token P95 at different request rates", unit="s")
-def guidellm_ttft_vs_load(unified_records) -> list[tuple[float, float]]:
+def guidellm_ttft(unified_record) -> list[tuple[float, float]]:
     """TTFT P95 vs Load Curve KPI."""
-    # Handle both single record and list of records
-    if not isinstance(unified_records, list):
-        unified_records = [unified_records]
+    request_rates = unified_record.metrics.get("request_rate", [])
+    curves = unified_record.metrics.get("performance_curves", {})
+    ttft_p95 = curves.get("ttft_p95", [])
 
-    curve_points = []
-    for record in unified_records:
-        request_rate = record.metrics.get("request_rate", 0)
-        ttft_p95 = record.metrics.get("ttft_p95", 0)
+    if not request_rates or not ttft_p95 or len(request_rates) != len(ttft_p95):
+        return []
 
-        if request_rate > 0 and ttft_p95 > 0:
-            curve_points.append((float(request_rate), float(ttft_p95)))
+    return [
+        (float(x), float(y))
+        for x, y in zip(request_rates, ttft_p95, strict=False)
+        if x > 0 and y > 0
+    ]
 
-    return curve_points
+
+@LowerBetter()
+@TwoDimensional(
+    x_unit="req/s",
+    x_help="Request rate",
+    y_unit="s",
+    y_help="TPOT median",
+    x_format="{:.1f}",
+    y_format="{:.4f}",
+)
+@KPIMetadata(help="Time per output token median at different request rates", unit="s")
+def guidellm_tpot(unified_record) -> list[tuple[float, float]]:
+    """TPOT Median vs Load Curve KPI."""
+    request_rates = unified_record.metrics.get("request_rate", [])
+    curves = unified_record.metrics.get("performance_curves", {})
+    tpot_median = curves.get("tpot_median", [])
+
+    if not request_rates or not tpot_median or len(request_rates) != len(tpot_median):
+        return []
+
+    return [
+        (float(x), float(y))
+        for x, y in zip(request_rates, tpot_median, strict=False)
+        if x > 0 and y > 0
+    ]
+
+
+@LowerBetter()
+@TwoDimensional(
+    x_unit="req/s",
+    x_help="Request rate",
+    y_unit="s",
+    y_help="TPOT P95",
+    x_format="{:.1f}",
+    y_format="{:.4f}",
+)
+@KPIMetadata(help="Time per output token P95 at different request rates", unit="s")
+def guidellm_tpot_p95(unified_record) -> list[tuple[float, float]]:
+    """TPOT P95 vs Load Curve KPI."""
+    request_rates = unified_record.metrics.get("request_rate", [])
+    curves = unified_record.metrics.get("performance_curves", {})
+    tpot_p95 = curves.get("tpot_p95", [])
+
+    if not request_rates or not tpot_p95 or len(request_rates) != len(tpot_p95):
+        return []
+
+    return [
+        (float(x), float(y))
+        for x, y in zip(request_rates, tpot_p95, strict=False)
+        if x > 0 and y > 0
+    ]
+
+
+@LowerBetter()
+@TwoDimensional(
+    x_unit="req/s",
+    x_help="Request rate",
+    y_unit="s",
+    y_help="TPOT P99",
+    x_format="{:.1f}",
+    y_format="{:.4f}",
+)
+@KPIMetadata(help="Time per output token P99 at different request rates", unit="s")
+def guidellm_tpot_p99(unified_record) -> list[tuple[float, float]]:
+    """TPOT P99 vs Load Curve KPI."""
+    request_rates = unified_record.metrics.get("request_rate", [])
+    curves = unified_record.metrics.get("performance_curves", {})
+    tpot_p99 = curves.get("tpot_p99", [])
+
+    if not request_rates or not tpot_p99 or len(request_rates) != len(tpot_p99):
+        return []
+
+    return [
+        (float(x), float(y))
+        for x, y in zip(request_rates, tpot_p99, strict=False)
+        if x > 0 and y > 0
+    ]
 
 
 class GuideLLMKpiHandler:
@@ -429,32 +328,28 @@ class GuideLLMKpiHandler:
 
                 out.append(kpi_record)
 
-        # Generate 2D curve KPIs once per test (aggregated across rates)
-        for test_path, test_records in records_by_test.items():
-            if len(test_records) < 1:
-                continue  # Need at least one record
+        # Generate 2D curve KPIs for records that have performance curves
+        for r in valid_records:
+            # Check if this record has performance curves (indicating it's aggregated data)
+            curves = r.metrics.get("performance_curves", {})
+            request_rates = r.metrics.get("request_rate", [])
 
-            # Use first record for labels and metadata
-            representative_record = test_records[0]
-            base_labels = {**representative_record.distinguishing_labels}
-            test_condition_labels = GuideLLMKpiHandler.LABEL_EXTRACTOR.extract(
-                representative_record
-            )
-            metadata_fields = GuideLLMKpiHandler.extract_metadata(representative_record)
+            # Only generate 2D KPIs if we have performance curves with data
+            if not curves or not request_rates:
+                continue
 
-            # Generate 2D KPIs with aggregated data
+            base_labels = {**r.distinguishing_labels}
+            test_condition_labels = GuideLLMKpiHandler.LABEL_EXTRACTOR.extract(r)
+            metadata_fields = GuideLLMKpiHandler.extract_metadata(r)
+
+            # Generate 2D KPIs from performance curves
             for kpi_id, kpi_func in kpi_functions.items():
                 if not is_2d_kpi(kpi_func):
                     continue
 
                 try:
-                    # Pass all records for this test to the 2D KPI function
-                    if len(test_records) == 1:
-                        # If only one record, pass it directly (for backward compatibility)
-                        value = kpi_func(test_records[0])
-                    else:
-                        # Multiple records, pass as list for aggregation
-                        value = kpi_func(test_records)
+                    # Pass the single record with performance curves to the 2D KPI function
+                    value = kpi_func(r)
                 except (TypeError, ValueError, KeyError):
                     value = []  # Empty list for failed 2D KPIs
 
@@ -479,12 +374,12 @@ class GuideLLMKpiHandler:
                     "kpi_id": kpi_id,
                     "value": value,
                     "unit": kpi_func._kpi_unit,
-                    "run_id": test_path,
+                    "run_id": r.test_base_path,
                     "timestamp": ts,
                     "labels": all_labels,
                     "metadata": metadata_fields,
                     "source": {
-                        "test_base_path": test_path,
+                        "test_base_path": r.test_base_path,
                         "plugin_module": model.plugin_module,
                     },
                     "is_2d": True,

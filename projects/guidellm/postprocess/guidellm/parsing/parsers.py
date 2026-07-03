@@ -106,7 +106,7 @@ class GuideLLMParser:
             metric_name: str, stat_type: str = "median", default: float = 0.0
         ) -> float:
             metric_data = metrics.get(metric_name, {}).get("successful", {})
-            if stat_type in ["p95", "p90", "p75", "p50", "p25", "p10"]:
+            if stat_type in ["p99", "p95", "p90", "p75", "p50", "p25", "p10"]:
                 percentiles = metric_data.get("percentiles", {})
                 return float(percentiles.get(stat_type, default))
             else:
@@ -259,17 +259,9 @@ class GuideLLMParser:
         groups = {}
 
         for benchmark in benchmarks:
-            # Create a group key based on test characteristics excluding rate
-            # This groups benchmarks that are the same test at different rates
-            # We only include characteristics that should be the same across rate variations
-            group_key = (
-                benchmark.strategy,
-                # Don't include request_concurrency as it varies with rate
-                # Don't include rate-dependent metrics
-                benchmark.duration,  # Should be similar for same test type
-                benchmark.input_tokens_per_request,  # Test workload characteristic
-                benchmark.output_tokens_per_request,  # Test workload characteristic
-            )
+            # Create a simple group key based only on strategy
+            # This ensures all rate variations are grouped together into a single performance curve
+            group_key = benchmark.strategy
 
             if group_key not in groups:
                 groups[group_key] = []
@@ -308,8 +300,8 @@ class GuideLLMParser:
         }
 
         # Create performance curves across all rates
+        request_rates = []
         curves = {
-            "request_rate": [],
             "tokens_per_second": [],
             "input_tokens_per_second": [],
             "output_tokens_per_second": [],
@@ -329,7 +321,7 @@ class GuideLLMParser:
         }
 
         for benchmark in sorted_benchmarks:
-            curves["request_rate"].append(benchmark.request_rate)
+            request_rates.append(benchmark.request_rate)
             curves["tokens_per_second"].append(benchmark.tokens_per_second)
             curves["input_tokens_per_second"].append(benchmark.input_tokens_per_second)
             curves["output_tokens_per_second"].append(benchmark.output_tokens_per_second)
@@ -347,7 +339,8 @@ class GuideLLMParser:
             curves["completed_requests"].append(benchmark.completed_requests)
             curves["failed_requests"].append(benchmark.failed_requests)
 
-        # Add curves to metrics
+        # Add request_rate and performance curves to metrics
+        metrics["request_rate"] = request_rates
         metrics["performance_curves"] = curves
 
         # Also add summary statistics from the representative benchmark
@@ -370,7 +363,7 @@ class GuideLLMParser:
             nodes: List of test nodes to parse
 
         Returns:
-            ParseResult with unified records and warnings
+            ParseResult with one unified record per node and warnings
         """
         records: list[UnifiedResultRecord] = []
         warnings: list[str] = []
@@ -381,7 +374,7 @@ class GuideLLMParser:
             benchmarks_files.sort(key=lambda path: path.name)
 
             if not benchmarks_files:
-                # No benchmark result JSON found, create empty record
+                # No benchmark result JSON found for this node, create empty record
                 labels = _labels_from_node(node)
                 records.append(
                     UnifiedResultRecord(
@@ -395,38 +388,32 @@ class GuideLLMParser:
                 continue
 
             # Collect all benchmarks from all files for this node
-            all_benchmarks = []
-            combined_config = None
+            node_benchmarks = []
+            node_config = None
 
             for benchmarks_file in benchmarks_files:
                 benchmarks, config, file_warnings = self.parse_benchmarks_json(benchmarks_file)
                 warnings.extend(file_warnings)
-                all_benchmarks.extend(benchmarks)
-                if config and not combined_config:
-                    combined_config = config
+                node_benchmarks.extend(benchmarks)
+                if config and not node_config:
+                    node_config = config
 
-            if all_benchmarks:
-                # Group benchmarks by strategy and other distinguishing characteristics
-                # (excluding rate which will become the curve dimension)
-                grouped_benchmarks = self._group_benchmarks_by_test(all_benchmarks)
+            if node_benchmarks:
+                # Create aggregated metrics with performance curves for this node
+                labels = _labels_from_node(node)
+                metrics = self._create_aggregated_metrics(node_benchmarks)
+                if node_config:
+                    metrics["configuration"] = node_config.to_dict()
 
-                for _group_key, benchmark_group in grouped_benchmarks.items():
-                    labels = _labels_from_node(node)
-
-                    # Create aggregated metrics with performance curves
-                    metrics = self._create_aggregated_metrics(benchmark_group)
-                    if combined_config:
-                        metrics["configuration"] = combined_config.to_dict()
-
-                    records.append(
-                        UnifiedResultRecord(
-                            test_base_path=str(node.directory.relative_to(base_dir.resolve())),
-                            distinguishing_labels=labels,
-                            metrics=metrics,
-                            run_identity={"guidellm": True},
-                            parse_notes=[],
-                        )
+                records.append(
+                    UnifiedResultRecord(
+                        test_base_path=str(node.directory.relative_to(base_dir.resolve())),
+                        distinguishing_labels=labels,
+                        metrics=metrics,
+                        run_identity={"guidellm": True},
+                        parse_notes=[],
                     )
+                )
 
         logging.info(f"GuideLLM parser created {len(records)} unified result records")
         return ParseResult(records=records, warnings=warnings)
