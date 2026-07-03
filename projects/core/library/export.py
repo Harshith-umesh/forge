@@ -21,6 +21,16 @@ from projects.core.ci_entrypoint.prepare_ci import CI_METADATA_DIRNAME
 from projects.core.library import ci as ci_lib
 from projects.core.library import config, env, run
 
+
+class StepStatus(StrEnum):
+    """Status of a step execution."""
+
+    SUCCESS = "success"
+    FAILURE = "failure"
+    ONGOING = "ongoing"
+    UNKNOWN = "unknown"
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -457,7 +467,7 @@ def _process_step_logs(mlflow_run_url: str) -> list[str]:
 
             step_name = step_dir.name.replace("__", " ").replace("_", " ").title()
             duration_str = _read_step_duration(step_dir)
-            exit_status_emoji = _read_step_exit_status(step_dir, current_step_name)
+            exit_status_emoji, exit_status = _read_step_exit_status(step_dir, current_step_name)
 
             if duration_str:
                 step_log_links.append(
@@ -497,30 +507,69 @@ def _process_postprocess_status(mlflow_run_url: str | None = None) -> list[str]:
     return postprocess_links
 
 
-def _read_step_exit_status(step_dir: Path, current_step_name: str | None = None) -> str:
-    """Read exit status from step directory and return appropriate emoji."""
+def _read_step_exit_status(
+    step_dir: Path, current_step_name: str | None = None
+) -> tuple[str, StepStatus]:
+    """Read exit status from step directory and return emoji and status enum."""
     try:
         exit_status_file = step_dir / CI_METADATA_DIRNAME / "exit_status.yaml"
         if not exit_status_file.exists():
             # Check if this is the current ongoing step
             if current_step_name and step_dir.name == current_step_name:
-                return "🔄"  # Ongoing step
-            return "❓"  # Unknown status if file doesn't exist
+                return "🔄", StepStatus.ONGOING  # Ongoing step
+            return "❓", StepStatus.UNKNOWN  # Unknown status if file doesn't exist
 
         with open(exit_status_file, encoding="utf-8") as f:
             exit_data = yaml.safe_load(f)
 
         return_code = exit_data.get("return_code")
         if return_code is None or return_code == 0:
-            return "✅"
+            return "✅", StepStatus.SUCCESS
         else:
-            return "❌"
+            return "❌", StepStatus.FAILURE
     except Exception as e:
         logger.warning(f"Failed to read exit status from {step_dir}: {e}")
         # Check if this is the current ongoing step even on error
         if current_step_name and step_dir.name == current_step_name:
-            return "🔄"  # Ongoing step
-        return "❓"  # Unknown status on error
+            return "🔄", StepStatus.ONGOING  # Ongoing step
+        return "❓", StepStatus.UNKNOWN  # Unknown status on error
+
+
+def _get_overall_status_from_steps() -> str:
+    """Check all step exit statuses and return overall status emoji."""
+    try:
+        parent_dir = Path(env.BASE_ARTIFACT_DIR).parent
+        current_step_name = Path(env.BASE_ARTIFACT_DIR).name
+
+        step_statuses = []
+
+        for step_dir in sorted(parent_dir.iterdir()):
+            if not step_dir.is_dir():
+                continue
+            if step_dir.name.startswith("."):
+                continue
+
+            # Only check directories that have run.log (actual steps)
+            run_log = step_dir / "run.log"
+            if not run_log.exists():
+                continue
+
+            emoji, status = _read_step_exit_status(step_dir, current_step_name)
+            step_statuses.append(status)
+
+        # Priority: failure > ongoing > unknown > success
+        if StepStatus.FAILURE in step_statuses:
+            return "🔴"  # Any failure = red
+        elif StepStatus.ONGOING in step_statuses:
+            return "🟡"  # Ongoing = yellow
+        elif StepStatus.UNKNOWN in step_statuses:
+            return "🟠"  # Unknown = orange
+        else:
+            return "🟢"  # All successful = green
+
+    except Exception as e:
+        logger.warning(f"Failed to check step statuses: {e}")
+        return "🔴"  # Error checking = red
 
 
 def _build_enhanced_notification(
@@ -529,7 +578,8 @@ def _build_enhanced_notification(
     """Build enhanced notification with fournos job config and artifact links."""
     fjob_project, fjob_args_str = _get_project_and_args(project)
 
-    status_emoji = "🟢" if finish_reason == FinishReason.SUCCESS else "🔴"
+    # Check all step statuses for overall status emoji (takes priority over finish_reason)
+    status_emoji = _get_overall_status_from_steps()
     base_status = f"<strong>{status_emoji} Execution of `{fjob_project}` {fjob_args_str} {status_emoji}</strong>"
     notification_parts = [base_status, "---"]
 
