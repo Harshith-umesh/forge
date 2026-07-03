@@ -318,6 +318,7 @@ class GuideLLMParser:
             "request_latency_p95": [],
             "completed_requests": [],
             "failed_requests": [],
+            "request_concurrency": [],  # Add concurrency to curves
         }
 
         for benchmark in sorted_benchmarks:
@@ -338,6 +339,9 @@ class GuideLLMParser:
             curves["request_latency_p95"].append(benchmark.request_latency_p95)
             curves["completed_requests"].append(benchmark.completed_requests)
             curves["failed_requests"].append(benchmark.failed_requests)
+            curves["request_concurrency"].append(
+                benchmark.request_concurrency
+            )  # Add concurrency per rate point
 
         # Add request_rate and performance curves to metrics
         metrics["request_rate"] = request_rates
