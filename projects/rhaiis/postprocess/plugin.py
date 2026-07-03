@@ -22,8 +22,8 @@ class RhaiisPlugin(PostProcessingPlugin):
         self.parser = RhaiisParser()
         self.kpi_handler = RhaiisKpiHandler()
 
-    def parse(self, base_dir: Path, nodes: list[TestBaseNode]) -> ParseResult:
-        return self.parser.parse(base_dir, nodes)
+    def parse(self, nodes: list[TestBaseNode]) -> ParseResult:
+        return self.parser.parse(nodes)
 
     def get_available_reports(self) -> dict[str, dict[str, str]]:
         return {}
