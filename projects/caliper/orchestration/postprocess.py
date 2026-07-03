@@ -439,16 +439,14 @@ def _export_test_entries_with_artifacts(
 
     exported_entries = []
 
-    # Get the specific files we want to copy from the plugin
-    target_files = plugin.get_ai_eval_artifact_files(model)
-
     for idx, record in enumerate(model.unified_result_records):
         # Create directory for this test entry
         test_entry_dir = ai_eval_dir / f"test_entry_{idx:03d}"
         test_entry_dir.mkdir(parents=True, exist_ok=True)
 
         # Load test labels from __test_labels__.yaml if available
-        test_labels = _load_test_labels(base_dir / record.test_base_path)
+        test_dir = base_dir / record.test_base_path
+        test_labels = _load_test_labels(test_dir)
 
         # Record test entry metadata
         entry_info = {
@@ -460,36 +458,20 @@ def _export_test_entries_with_artifacts(
             "missing_files": [],
         }
 
-        # Filter target files to only include files relevant to this test entry
-        # Extract the top-level test directory from test_base_path (e.g., "001__llmd_test" from "001__llmd_test/003__benchmark_short")
-        test_top_dir = (
-            record.test_base_path.split("/")[0]
-            if "/" in record.test_base_path
-            else record.test_base_path
-        )
-
-        relevant_files = []
-        for target_file in target_files:
-            # Check if this file belongs to the current test's top-level directory
-            if target_file.startswith(test_top_dir + "/") or target_file == test_top_dir:
-                relevant_files.append(target_file)
-            # Also include shared files that don't belong to any specific test directory
-            elif not any(
-                target_file.startswith(r.test_base_path.split("/")[0] + "/")
-                for r in model.unified_result_records
-            ):
-                relevant_files.append(target_file)
+        # Get artifact files specific to this test directory only (plugin is scoped to test directory)
+        relevant_files = plugin.get_ai_eval_artifact_files_for_test(test_dir)
 
         logger.debug(
-            f"Test entry {idx}: {len(relevant_files)} relevant files out of {len(target_files)} total"
+            f"Test entry {idx}: found {len(relevant_files)} artifact files in test directory {test_dir}"
         )
 
         # Copy relevant files for this test entry (preserving directory structure)
         for target_file in relevant_files:
-            source_file = base_dir / target_file
+            # source is test_dir + test_relative_path, target is test_entry_dir + test_relative_path
+            source_file = test_dir / target_file
+            target_path = test_entry_dir / target_file
+
             if source_file.exists():
-                # Preserve the full relative path structure in the target
-                target_path = test_entry_dir / target_file
                 target_path.parent.mkdir(parents=True, exist_ok=True)
 
                 try:

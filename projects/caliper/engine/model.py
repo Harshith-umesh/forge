@@ -108,19 +108,23 @@ class PostProcessingPlugin(ABC):
         """Structured JSON for AI agent evaluation."""
         return {"schema_version": "1", "run_id": "", "metrics": {}}
 
-    def get_ai_eval_artifact_files(self, model: UnifiedRunModel) -> list[str]:
-        """Return list of artifact files to copy for AI evaluation export.
+    def get_ai_eval_artifact_files_for_test(self, test_dir: Path) -> list[str]:
+        """Return list of artifact files to copy for AI evaluation export from a specific test directory.
+
+        This method is called once per test record and should only search within the provided test_dir,
+        not across the entire base directory. This provides better security isolation.
 
         Args:
-            model: Unified model containing test results
+            test_dir: The specific test directory to search within (where __test_labels__.yaml is located)
 
         Returns:
-            List of relative file paths from the base directory to copy for AI evaluation
+            List of relative file paths from test_dir to copy for AI evaluation
 
         Example:
             return [
-                "004__capture_llmisvc_state/artifacts/llminferenceservice.json",
-                "001__llmd_test/003__benchmark_short/000__run_guidellm_benchmark/artifacts/results/benchmarks.json"
+                "003__benchmark/000__run_benchmark/artifacts/results/results.json",
+                "004__capture_service_state/artifacts/service_state.json"
             ]
         """
         return []
+
