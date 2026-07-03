@@ -36,6 +36,7 @@ PLOT_REGISTRY = {
         "function": generate_kpi_report,
         "type": "report",
         "kwargs": {
+            "report_number": 1,
             "report_title": "GuideLLM KPI Summary",
         },
         "description": "KPI summary with test conditions and metrics",
