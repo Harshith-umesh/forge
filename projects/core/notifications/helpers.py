@@ -208,7 +208,7 @@ def format_kpi_value(value: float | None, unit: str) -> str:
     """Format a single KPI value with its unit."""
     if value is None:
         return "n/a"
-    if unit == "%":
+    if unit == "%" or unit == "ratio":
         return f"{value * 100:.2f}%"
     if unit == "ms":
         return f"{value:.1f} ms"

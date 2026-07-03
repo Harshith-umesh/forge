@@ -21,7 +21,6 @@ from projects.core.notifications.helpers import (
     build_comparison_table,
     build_current_kpis_list,
     extract_mlflow_url,
-    find_kpis_jsonl,
     get_label_value,
     get_test_artifacts_root,
     read_test_duration,
@@ -35,7 +34,7 @@ TARGET_KPIS = [
     ("mcp_gw_requests_per_second", "RPS", "req/s"),
     ("mcp_gw_p95_ms", "P95 latency", "ms"),
     ("mcp_gw_p99_ms", "P99 latency", "ms"),
-    ("mcp_gw_failure_rate", "Failure rate", "%"),
+    ("mcp_gw_failure_rate", "Failure rate", "ratio"),
 ]
 
 # Mapping from kpis.jsonl IDs to MLflow metrics.json keys (logged via mlflow.log_metric)
@@ -203,29 +202,62 @@ def _format_failure_info(context: NotificationContext) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _find_kpis_json(artifact_dir):
+    """Find kpis.json (schema v2) or fallback to kpis.jsonl in artifact tree."""
+    # Prefer new kpis.json format
+    direct = artifact_dir / "kpis.json"
+    if direct.exists():
+        return direct
+    for f in artifact_dir.glob("**/kpis.json"):
+        return f
+
+    # Fallback to legacy kpis.jsonl
+    direct = artifact_dir / "kpis.jsonl"
+    if direct.exists():
+        return direct
+    for f in artifact_dir.glob("**/kpis.jsonl"):
+        return f
+
+    return None
+
+
 def _load_current_kpis(context: NotificationContext) -> dict[str, float]:
-    """Read KPI values from kpis.jsonl in the artifact directory."""
+    """Read KPI values from kpis.json (schema v2) or kpis.jsonl in the artifact directory."""
     test_root = get_test_artifacts_root(context)
     if not test_root:
         return {}
 
-    kpis_file = find_kpis_jsonl(test_root)
+    kpis_file = _find_kpis_json(test_root)
     if not kpis_file:
         return {}
 
+    target_ids = {k[0] for k in TARGET_KPIS}
     kpis: dict[str, float] = {}
+
     try:
         with open(kpis_file) as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                record = json.loads(line)
-                kpi_id = record.get("kpi_id", "")
-                if kpi_id in {k[0] for k in TARGET_KPIS}:
-                    kpis[kpi_id] = record.get("value", 0)
+            if kpis_file.suffix == ".json":
+                data = json.load(f)
+                # Schema v2: {"schema_version": "2", "tests": [{..., "kpis": [...]}]}
+                for test in data.get("tests", []):
+                    for kpi_record in test.get("kpis", []):
+                        kpi_id = kpi_record.get("id", "")
+                        if kpi_id in target_ids:
+                            value = kpi_record.get("value")
+                            if value is not None:
+                                kpis[kpi_id] = float(value)
+            else:
+                # Legacy kpis.jsonl: one JSON record per line
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    record = json.loads(line)
+                    kpi_id = record.get("kpi_id", "")
+                    if kpi_id in target_ids:
+                        kpis[kpi_id] = record.get("value", 0)
     except Exception as e:
-        logger.warning("Failed to read kpis.jsonl: %s", e)
+        logger.warning("Failed to read KPI file %s: %s", kpis_file, e)
 
     return kpis
 

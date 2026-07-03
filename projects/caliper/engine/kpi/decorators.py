@@ -165,7 +165,7 @@ def get_kpi_functions(module) -> dict[str, Callable]:
 
     for name, obj in inspect.getmembers(module, inspect.isfunction):
         if (
-            name.startswith(("guidellm_", "matbench_", "kpi_"))
+            name.startswith(("guidellm_", "matbench_", "kpi_", "mcp_gw_"))
             and hasattr(obj, "_kpi_help")
             and hasattr(obj, "_kpi_unit")
             and hasattr(obj, "_kpi_higher_is_better")
