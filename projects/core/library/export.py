@@ -87,11 +87,12 @@ def _update_fjob_export_status(status: dict):
             os.environ["KUBECONFIG"] = original_kubeconfig
 
 
-def send_notification(status: dict[str, Any]) -> None:
+def send_notification(status: dict[str, Any], notification_provider=None) -> None:
     """Send job completion notifications based on caliper export status.
 
     Args:
         status: Caliper export status object containing backend results and metadata
+        notification_provider: Optional per-project SlackNotificationProvider instance
     """
     # Extract notification parameters from status object
     project = _extract_project_from_status(status)
@@ -135,6 +136,28 @@ def send_notification(status: dict[str, Any]) -> None:
             logger.warning("GitHub notification sending failed")
     except Exception as e:
         logger.warning(f"Failed to send GitHub notification: {e}")
+
+    # Per-project Slack notification via provider
+    if notification_provider:
+        try:
+            from projects.core.notifications.provider import NotificationContext
+
+            artifact_dir = Path(env.ARTIFACT_DIR) if env.ARTIFACT_DIR else None
+            context = NotificationContext(
+                status=status,
+                finish_reason=str(finish_reason),
+                project_name=project or "unknown",
+                pr_number=os.environ.get("PULL_NUMBER"),
+                job_type=os.environ.get("JOB_TYPE"),
+                artifact_dir=artifact_dir,
+            )
+            ok = notification_provider.notify(context)
+            if ok:
+                logger.info("Successfully sent per-project Slack notification")
+            else:
+                logger.warning("Per-project Slack notification failed")
+        except Exception as e:
+            logger.warning(f"Failed to send per-project Slack notification: {e}")
 
 
 def _get_project_and_args(project: str) -> tuple[str, str]:
@@ -497,6 +520,8 @@ def run_caliper_orchestration_export(*, artifact_directory: Path | None):
 def caliper_export_entrypoint(_ctx, artifact_directory: Path | None):
     """Export the file artifacts."""
 
+    notification_provider = getattr(getattr(_ctx, "obj", None), "notification_provider", None)
+
     status = None
     try:
         status = run_caliper_orchestration_export(artifact_directory=artifact_directory)
@@ -515,7 +540,7 @@ def caliper_export_entrypoint(_ctx, artifact_directory: Path | None):
         # Send completion notifications regardless of success/failure
         if status:
             try:
-                send_notification(status)
+                send_notification(status, notification_provider=notification_provider)
             except Exception as e:
                 logger.warning(f"Failed to send notifications: {e}")
                 # Don't fail the entire job if notifications fail
