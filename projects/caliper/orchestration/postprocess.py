@@ -394,6 +394,32 @@ def _run_ai_eval_export(
         return {"status": "failed", "error": str(e), "completed_at": time.time()}
 
 
+def _load_test_labels(test_dir: Path) -> dict[str, Any]:
+    """Load test labels from __test_labels__.yaml file if it exists.
+
+    Args:
+        test_dir: Directory to search for __test_labels__.yaml
+
+    Returns:
+        Dictionary containing test labels, or empty dict if file doesn't exist
+    """
+    import yaml
+
+    test_labels_file = test_dir / "__test_labels__.yaml"
+    if test_labels_file.exists():
+        try:
+            with open(test_labels_file, encoding="utf-8") as f:
+                labels = yaml.safe_load(f)
+                logger.debug(f"Loaded test labels from {test_labels_file}: {labels}")
+                return labels or {}
+        except Exception as e:
+            logger.warning(f"Failed to load test labels from {test_labels_file}: {e}")
+            return {}
+    else:
+        logger.debug(f"No test labels file found at {test_labels_file}")
+        return {}
+
+
 def _export_test_entries_with_artifacts(
     model, ai_eval_dir: Path, base_dir: Path, plugin
 ) -> list[dict]:
@@ -421,21 +447,49 @@ def _export_test_entries_with_artifacts(
         test_entry_dir = ai_eval_dir / f"test_entry_{idx:03d}"
         test_entry_dir.mkdir(parents=True, exist_ok=True)
 
+        # Load test labels from __test_labels__.yaml if available
+        test_labels = _load_test_labels(base_dir / record.test_base_path)
+
         # Record test entry metadata
         entry_info = {
             "entry_id": f"test_entry_{idx:03d}",
             "test_base_path": str(record.test_base_path),
             "distinguishing_labels": record.distinguishing_labels,
+            "test_labels": test_labels,
             "copied_files": [],
             "missing_files": [],
         }
 
-        # Copy target files if they exist
+        # Filter target files to only include files relevant to this test entry
+        # Extract the top-level test directory from test_base_path (e.g., "001__llmd_test" from "001__llmd_test/003__benchmark_short")
+        test_top_dir = (
+            record.test_base_path.split("/")[0]
+            if "/" in record.test_base_path
+            else record.test_base_path
+        )
+
+        relevant_files = []
         for target_file in target_files:
+            # Check if this file belongs to the current test's top-level directory
+            if target_file.startswith(test_top_dir + "/") or target_file == test_top_dir:
+                relevant_files.append(target_file)
+            # Also include shared files that don't belong to any specific test directory
+            elif not any(
+                target_file.startswith(r.test_base_path.split("/")[0] + "/")
+                for r in model.unified_result_records
+            ):
+                relevant_files.append(target_file)
+
+        logger.debug(
+            f"Test entry {idx}: {len(relevant_files)} relevant files out of {len(target_files)} total"
+        )
+
+        # Copy relevant files for this test entry (preserving directory structure)
+        for target_file in relevant_files:
             source_file = base_dir / target_file
             if source_file.exists():
-                # Create target directory structure
-                target_path = test_entry_dir / Path(target_file).name
+                # Preserve the full relative path structure in the target
+                target_path = test_entry_dir / target_file
                 target_path.parent.mkdir(parents=True, exist_ok=True)
 
                 try:
@@ -444,6 +498,7 @@ def _export_test_entries_with_artifacts(
                         {
                             "source": str(source_file),
                             "target": str(target_path),
+                            "relative_path": target_file,
                             "size_bytes": source_file.stat().st_size,
                         }
                     )
