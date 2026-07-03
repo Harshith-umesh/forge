@@ -354,12 +354,11 @@ class GuideLLMParser:
 
         return metrics
 
-    def parse(self, base_dir: Path, nodes: list[TestBaseNode]) -> ParseResult:
+    def parse(self, nodes: list[TestBaseNode]) -> ParseResult:
         """
         Parse test nodes containing GuideLLM benchmarks.json files.
 
         Args:
-            base_dir: Base directory for the test run
             nodes: List of test nodes to parse
 
         Returns:
@@ -378,7 +377,7 @@ class GuideLLMParser:
                 labels = _labels_from_node(node)
                 records.append(
                     UnifiedResultRecord(
-                        test_base_path=str(node.directory.relative_to(base_dir.resolve())),
+                        test_base_path=str(node.test_path),
                         distinguishing_labels=labels,
                         metrics={"no_benchmarks_found": True},
                         run_identity={"guidellm": True},
@@ -407,7 +406,7 @@ class GuideLLMParser:
 
                 records.append(
                     UnifiedResultRecord(
-                        test_base_path=str(node.directory.relative_to(base_dir.resolve())),
+                        test_base_path=str(node.test_path),
                         distinguishing_labels=labels,
                         metrics=metrics,
                         run_identity={"guidellm": True},

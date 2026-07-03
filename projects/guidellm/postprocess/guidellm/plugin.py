@@ -53,9 +53,9 @@ class GuideLLMPlugin(PostProcessingPlugin):
         self.kpi_handler = GuideLLMKpiHandler()
         self.ai_evaluator = GuideLLMAIEvaluator()
 
-    def parse(self, base_dir: Path, nodes: list[TestBaseNode]) -> ParseResult:
+    def parse(self, nodes: list[TestBaseNode]) -> ParseResult:
         """Parse test nodes using the GuideLLM parser."""
-        return self.parser.parse(base_dir, nodes)
+        return self.parser.parse(nodes)
 
     def get_available_reports(self) -> dict[str, dict[str, str]]:
         """Get a structured dictionary of available reports and plots with their types and descriptions."""
@@ -221,9 +221,10 @@ class GuideLLMPlugin(PostProcessingPlugin):
         else:
             logger.debug(f"No benchmark files found in {test_dir}")
 
-        logger.info(f"AI eval export will copy {len(artifact_files)} artifact files from {test_dir}")
+        logger.info(
+            f"AI eval export will copy {len(artifact_files)} artifact files from {test_dir}"
+        )
         return artifact_files
-
 
 
 def get_plugin() -> PostProcessingPlugin:
