@@ -176,50 +176,54 @@ class GuideLLMPlugin(PostProcessingPlugin):
 
     def build_ai_eval_payload(self, model: UnifiedRunModel) -> dict[str, Any]:
         """Build AI evaluation payload from the unified model."""
-        return self.ai_evaluator.build_payload(model)
+        return self.ai_evaluator.build_payload(model, self)
 
-    def get_ai_eval_artifact_files(self, model: UnifiedRunModel) -> list[str]:
-        """Return list of artifact files to copy for AI evaluation export."""
-        from pathlib import Path
+    def get_ai_eval_artifact_files_for_test(self, test_dir: Path) -> list[str]:
+        """Return list of artifact files to copy for AI evaluation export from a specific test directory.
 
-        base_dir = Path(model.base_directory)
+        Args:
+            test_dir: The specific test directory to search within
+
+        Returns:
+            List of relative paths from test_dir to relevant artifact files
+        """
         artifact_files = []
 
-        # LLMInferenceService state files - expect one or zero matches
+        # LLMInferenceService state files - search within this test directory only
         llmisvc_patterns = [
             "*__capture_llmisvc_state/artifacts/llminferenceservice.json",
             "*__capture_llmisvc_state/artifacts/llminferenceservice.deployments.json",
         ]
 
         for pattern in llmisvc_patterns:
-            matches = list(base_dir.glob(pattern))
+            matches = list(test_dir.glob(pattern))
             if matches:
-                # Take the first match (should be only one)
-                relative_path = str(matches[0].relative_to(base_dir))
-                artifact_files.append(relative_path)
-                logger.debug(f"Found LLMInferenceService artifact: {relative_path}")
-                if len(matches) > 1:
-                    logger.warning(
-                        f"Multiple matches for pattern {pattern}, using first: {relative_path}"
-                    )
+                logger.debug(
+                    f"Found {len(matches)} LLMInferenceService files in {test_dir} for pattern {pattern}"
+                )
+                for match in matches:
+                    relative_path = str(match.relative_to(test_dir))
+                    artifact_files.append(relative_path)
+                    logger.debug(f"Found LLMInferenceService artifact: {relative_path}")
             else:
-                logger.debug(f"No matches found for pattern: {pattern}")
+                logger.debug(f"No matches found in {test_dir} for pattern: {pattern}")
 
-        # GuideLLM benchmark results - may have multiple files
-        benchmark_pattern = "*__llmd_test/*__benchmark_*/*__run_guidellm_benchmark/artifacts/results/benchmarks.json"
-        benchmark_matches = list(base_dir.glob(benchmark_pattern))
+        # GuideLLM benchmark results - search within this test directory only
+        benchmark_pattern = "**/*__run_guidellm_benchmark/artifacts/results/benchmarks*.json"
+        benchmark_matches = list(test_dir.glob(benchmark_pattern))
 
         if benchmark_matches:
-            logger.debug(f"Found {len(benchmark_matches)} GuideLLM benchmark files")
+            logger.debug(f"Found {len(benchmark_matches)} GuideLLM benchmark files in {test_dir}")
             for match in benchmark_matches:
-                relative_path = str(match.relative_to(base_dir))
+                relative_path = str(match.relative_to(test_dir))
                 artifact_files.append(relative_path)
                 logger.debug(f"Found GuideLLM benchmark artifact: {relative_path}")
         else:
-            logger.debug(f"No matches found for pattern: {benchmark_pattern}")
+            logger.debug(f"No benchmark files found in {test_dir}")
 
-        logger.info(f"AI eval export will copy {len(artifact_files)} artifact files")
+        logger.info(f"AI eval export will copy {len(artifact_files)} artifact files from {test_dir}")
         return artifact_files
+
 
 
 def get_plugin() -> PostProcessingPlugin:
