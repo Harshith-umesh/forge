@@ -68,6 +68,14 @@ class KPICsvRow:
     test_base_path: str = ""
     plugin_module: str = ""
 
+    # 2D KPI specific fields (for curve/dimensional data)
+    is_2d: bool = False
+    point_index: int | str = ""  # Index of this point in 2D series
+    x_value: float | str = ""  # X coordinate value
+    y_value: float | str = ""  # Y coordinate value (same as value for 2D KPIs)
+    x_unit: str = ""  # Unit for X axis
+    y_unit: str = ""  # Unit for Y axis
+
 
 @dataclass
 class KPICsvSchema:
@@ -109,9 +117,16 @@ class KPICsvSchema:
             # Metadata
             "uuid",
             "notes",
-            # Source tracking (usually last)
+            # Source tracking
             "test_base_path",
             "plugin_module",
+            # 2D KPI fields (for curve/dimensional data)
+            "is_2d",
+            "point_index",
+            "x_value",
+            "y_value",
+            "x_unit",
+            "y_unit",
         ]
     )
 
@@ -154,6 +169,13 @@ class KPICsvSchema:
             # Source tracking
             "test_base_path": "File path where test artifacts are stored",
             "plugin_module": "Caliper plugin that processed this test",
+            # 2D KPI fields
+            "is_2d": "Whether this is a 2D KPI data point (true/false)",
+            "point_index": "Index of this point in 2D series (0, 1, 2, ...)",
+            "x_value": "X coordinate value for 2D KPIs",
+            "y_value": "Y coordinate value for 2D KPIs (same as value)",
+            "x_unit": "Unit of measurement for X axis",
+            "y_unit": "Unit of measurement for Y axis",
         }
     )
 
@@ -170,6 +192,13 @@ class KPICsvSchema:
             "timestamp": str,
             "schema_version": str,
             # All other fields are strings (labels, metadata, etc.)
+            # 2D KPI field types
+            "is_2d": bool,
+            "point_index": int,
+            "x_value": float,
+            "y_value": float,
+            "x_unit": str,
+            "y_unit": str,
         }
     )
 
@@ -185,12 +214,20 @@ class KPICsvSchema:
             value = row_dict.get(col, "")
 
             # Handle special type conversions
-            if col == "higher_is_better" and isinstance(value, bool):
+            if col in ["higher_is_better", "is_2d"] and isinstance(value, bool):
                 cleaned[col] = str(value).lower()  # Convert bool to string
-            elif col == "value":
+            elif col in ["value", "x_value", "y_value"]:
                 # Keep numeric values as-is, convert others to string
                 if isinstance(value, int | float):
                     cleaned[col] = value
+                else:
+                    cleaned[col] = str(value)
+            elif col == "point_index":
+                # Convert to int if possible, otherwise string
+                if isinstance(value, int):
+                    cleaned[col] = value
+                elif isinstance(value, str) and value.isdigit():
+                    cleaned[col] = int(value)
                 else:
                     cleaned[col] = str(value)
             else:
@@ -214,6 +251,56 @@ class KPICsvSchema:
 
         header_lines.append("#")
         return header_lines
+
+
+def create_csv_rows_from_kpi_record(kpi_record: dict[str, Any]) -> list[KPICsvRow]:
+    """
+    Convert a KPI record (from compute_kpis) to CSV row model(s).
+
+    For scalar KPIs, returns a single row.
+    For 2D KPIs, returns multiple rows (one per data point).
+
+    Args:
+        kpi_record: KPI record dictionary from GuideLLMKpiHandler.compute_kpis()
+
+    Returns:
+        List of KPICsvRow instances
+    """
+    is_2d = kpi_record.get("is_2d", False)
+
+    if not is_2d:
+        # Scalar KPI - single row
+        return [create_csv_row_from_kpi_record(kpi_record)]
+
+    # 2D KPI - expand into multiple rows
+    value = kpi_record.get("value", [])
+    if not isinstance(value, list) or not value:
+        # Invalid 2D data - treat as scalar with empty value
+        return [create_csv_row_from_kpi_record(kpi_record)]
+
+    rows = []
+    x_unit = kpi_record.get("x_unit", "")
+    y_unit = kpi_record.get("y_unit", kpi_record.get("unit", ""))
+
+    for idx, point in enumerate(value):
+        if not isinstance(point, list | tuple) or len(point) != 2:
+            continue  # Skip invalid data points
+
+        x_val, y_val = point
+
+        # Create a modified record for this specific point
+        point_record = kpi_record.copy()
+        point_record["value"] = y_val  # Y value becomes the main value
+        point_record["is_2d"] = True
+        point_record["point_index"] = idx
+        point_record["x_value"] = x_val
+        point_record["y_value"] = y_val
+        point_record["x_unit"] = x_unit
+        point_record["y_unit"] = y_unit
+
+        rows.append(create_csv_row_from_kpi_record(point_record))
+
+    return rows
 
 
 def create_csv_row_from_kpi_record(kpi_record: dict[str, Any]) -> KPICsvRow:
@@ -245,6 +332,13 @@ def create_csv_row_from_kpi_record(kpi_record: dict[str, Any]) -> KPICsvRow:
         kpi_help=kpi_record.get("help", ""),
         higher_is_better=labels.get("higher_is_better", False),
         value=kpi_record.get("value"),
+        # 2D KPI info
+        is_2d=kpi_record.get("is_2d", False),
+        point_index=kpi_record.get("point_index", ""),
+        x_value=kpi_record.get("x_value", ""),
+        y_value=kpi_record.get("y_value", ""),
+        x_unit=kpi_record.get("x_unit", ""),
+        y_unit=kpi_record.get("y_unit", ""),
         # System info
         run_id=kpi_record.get("run_id", ""),
         timestamp=kpi_record.get("timestamp", ""),

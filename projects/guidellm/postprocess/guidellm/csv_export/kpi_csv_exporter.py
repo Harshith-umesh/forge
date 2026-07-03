@@ -8,18 +8,21 @@ from typing import Any
 
 from projects.caliper.engine.model import UnifiedRunModel
 
-from .kpi_csv_model import KPICsvSchema, create_csv_row_from_kpi_record
+from .kpi_csv_model import (
+    KPICsvSchema,
+    create_csv_rows_from_kpi_record,
+)
 
 
 class KPICsvExporter:
     """Export KPI data to CSV format."""
 
-    def __init__(self, include_2d_kpis: bool = False):
+    def __init__(self, include_2d_kpis: bool = True):
         """
         Initialize the CSV exporter.
 
         Args:
-            include_2d_kpis: Whether to include 2D KPIs in export (currently not supported)
+            include_2d_kpis: Whether to include 2D KPIs in export (expanded as multiple rows)
         """
         self.schema = KPICsvSchema()
         self.include_2d_kpis = include_2d_kpis
@@ -41,29 +44,23 @@ class KPICsvExporter:
         Returns:
             Path to the generated CSV file
         """
-        # Filter out 2D KPIs if not including them
-        scalar_records = []
-        skipped_2d_count = 0
-
-        for record in kpi_records:
-            if record.get("is_2d", False):
-                if self.include_2d_kpis:
-                    # TODO: Implement 2D KPI export
-                    scalar_records.append(record)
-                else:
-                    skipped_2d_count += 1
-            else:
-                scalar_records.append(record)
-
         # Ensure output directory exists
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Convert KPI records to CSV rows
+        # Convert KPI records to CSV rows (handling 2D KPI expansion)
         csv_rows = []
-        for record in scalar_records:
+        skipped_2d_count = 0
+
+        for record in kpi_records:
             try:
-                csv_row = create_csv_row_from_kpi_record(record)
-                csv_rows.append(csv_row)
+                if record.get("is_2d", False) and not self.include_2d_kpis:
+                    # Skip 2D KPIs if not including them
+                    skipped_2d_count += 1
+                    continue
+
+                # Use new function that handles both scalar and 2D KPIs
+                rows = create_csv_rows_from_kpi_record(record)
+                csv_rows.extend(rows)
             except Exception as e:
                 print(f"Warning: Failed to convert KPI record to CSV row: {e}")
                 continue
@@ -95,7 +92,12 @@ class KPICsvExporter:
         total_written = len(csv_rows)
         print(f"Exported {total_written} KPI records to {output_path}")
         if skipped_2d_count > 0:
-            print(f"Skipped {skipped_2d_count} 2D KPIs (not supported in CSV export)")
+            print(f"Skipped {skipped_2d_count} 2D KPIs (include_2d_kpis=False)")
+
+        # Count 2D KPI expansion
+        total_2d_rows = sum(1 for row in csv_rows if getattr(row, "is_2d", False))
+        if total_2d_rows > 0:
+            print(f"Expanded 2D KPIs into {total_2d_rows} individual data point rows")
 
         return str(output_path)
 
