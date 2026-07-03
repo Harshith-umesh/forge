@@ -15,6 +15,7 @@ class TestBaseNode:
     directory: Path
     labels: dict[str, Any]
     artifact_paths: list[Path] = field(default_factory=list)
+    test_path: Path = field(default_factory=lambda: Path(""))  # Path relative to base_dir
 
 
 @dataclass
@@ -82,7 +83,7 @@ class PostProcessingPlugin(ABC):
     """Project plugin: parse required; other hooks optional with defaults."""
 
     @abstractmethod
-    def parse(self, base_dir: Path, nodes: list[TestBaseNode]) -> ParseResult:
+    def parse(self, nodes: list[TestBaseNode]) -> ParseResult:
         """Parse each labeled test base into unified records."""
 
     def visualize(
@@ -127,4 +128,3 @@ class PostProcessingPlugin(ABC):
             ]
         """
         return []
-
