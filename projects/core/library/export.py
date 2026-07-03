@@ -21,6 +21,16 @@ from projects.core.ci_entrypoint.prepare_ci import CI_METADATA_DIRNAME
 from projects.core.library import ci as ci_lib
 from projects.core.library import config, env, run
 
+
+class StepStatus(StrEnum):
+    """Status of a step execution."""
+
+    SUCCESS = "success"
+    FAILURE = "failure"
+    ONGOING = "ongoing"
+    UNKNOWN = "unknown"
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -274,6 +284,74 @@ def _create_mlflow_url(mlflow_run_url: str, step_dir_name: str) -> str | None:
         return f"{base_url}/artifacts/{step_dir_name}/run.log{workspace_param}"
 
 
+def _create_mlflow_step_url(mlflow_run_url: str, step_dir_name: str) -> str | None:
+    """Create MLflow URL for step directory (for file access)."""
+    if "/artifacts" not in mlflow_run_url:
+        logger.warning(f"Unexpected MLflow URL format: {mlflow_run_url}")
+        return None
+
+    if "#" in mlflow_run_url:
+        base_domain, hash_fragment = mlflow_run_url.split("#", 1)
+        if "/artifacts" not in hash_fragment:
+            raise ValueError("Artifacts not found in hash fragment")
+
+        hash_base, artifacts_part = hash_fragment.split("/artifacts", 1)
+        # Extract workspace parameter if present, ignoring existing path
+        workspace_param = ""
+        if "?workspace=" in artifacts_part:
+            workspace_param = artifacts_part[artifacts_part.find("?") :]
+        return f"{base_domain}#{hash_base}/artifacts/{step_dir_name}{workspace_param}"
+    else:
+        base_url, artifacts_part = mlflow_run_url.split("/artifacts", 1)
+        # Extract workspace parameter if present, ignoring existing path
+        workspace_param = ""
+        if "?workspace=" in artifacts_part:
+            workspace_param = artifacts_part[artifacts_part.find("?") :]
+        return f"{base_url}/artifacts/{step_dir_name}{workspace_param}"
+
+
+def _create_mlflow_file_url_for_step(
+    mlflow_run_url: str, step_dir_name: str, file_path: str
+) -> str:
+    """Create MLflow URL for a specific file within a step directory.
+
+    Args:
+        mlflow_run_url: Base MLflow run URL
+        step_dir_name: Name of the step directory
+        file_path: Relative path to file from step directory
+
+    Returns:
+        Full MLflow URL to the file
+
+    Raises:
+        ValueError: If URL format is unexpected
+    """
+    if "/artifacts" not in mlflow_run_url:
+        raise ValueError(f"Unexpected MLflow URL format: {mlflow_run_url}")
+
+    # Clean file path
+    file_clean = file_path.lstrip("/")
+
+    if "#" in mlflow_run_url:
+        base_domain, hash_fragment = mlflow_run_url.split("#", 1)
+        if "/artifacts" not in hash_fragment:
+            raise ValueError("Artifacts not found in hash fragment")
+
+        hash_base, artifacts_part = hash_fragment.split("/artifacts", 1)
+        # Extract workspace parameter if present, ignoring existing path
+        workspace_param = ""
+        if "?workspace=" in artifacts_part:
+            workspace_param = artifacts_part[artifacts_part.find("?") :]
+        return f"{base_domain}#{hash_base}/artifacts/{step_dir_name}/{file_clean}{workspace_param}"
+    else:
+        base_url, artifacts_part = mlflow_run_url.split("/artifacts", 1)
+        # Extract workspace parameter if present, ignoring existing path
+        workspace_param = ""
+        if "?workspace=" in artifacts_part:
+            workspace_param = artifacts_part[artifacts_part.find("?") :]
+        return f"{base_url}/artifacts/{step_dir_name}/{file_clean}{workspace_param}"
+
+
 def _read_step_duration(step_dir: Path) -> str:
     """Read step duration from timing file."""
     timing_file = step_dir / CI_METADATA_DIRNAME / "test_duration.yaml"
@@ -289,6 +367,49 @@ def _read_step_duration(step_dir: Path) -> str:
     except Exception as timing_error:
         logger.warning(f"Failed to read timing file {timing_file}: {timing_error}")
         return ""
+
+
+def _process_caliper_postprocess_status(
+    step_dir: Path, step_log_links: list[str], mlflow_run_url: str | None = None
+) -> None:
+    """Search for and process caliper_postprocess_status.yaml files in step directory."""
+    status_files = list(step_dir.glob("**/caliper_postprocess_status.yaml"))
+
+    for status_file in status_files:
+        try:
+            with open(status_file, encoding="utf-8") as f:
+                status_data = yaml.safe_load(f)
+
+            if not status_data:
+                continue
+
+            # Import notification functions from caliper
+            from projects.caliper.orchestration.notification import (
+                format_postprocess_status_notification,
+                parse_postprocess_result,
+            )
+
+            # Parse status data into structured object
+            result = parse_postprocess_result(status_data)
+            if not result:
+                continue
+
+            # Create file link generator function
+            get_file_link = None
+            if mlflow_run_url:
+
+                def get_file_link(file_path: str) -> str:
+                    return _create_mlflow_file_url_for_step(
+                        mlflow_run_url, step_dir.name, file_path
+                    )
+
+            # Generate notification text from the structured result
+            notification_text = format_postprocess_status_notification(result, get_file_link)
+            if notification_text:
+                step_log_links.append(notification_text)
+
+        except Exception as e:
+            logger.warning(f"Failed to process caliper postprocess status file {status_file}: {e}")
 
 
 def _process_notification_files(step_dir: Path, step_log_links: list[str]) -> None:
@@ -346,7 +467,7 @@ def _process_step_logs(mlflow_run_url: str) -> list[str]:
 
             step_name = step_dir.name.replace("__", " ").replace("_", " ").title()
             duration_str = _read_step_duration(step_dir)
-            exit_status_emoji = _read_step_exit_status(step_dir, current_step_name)
+            exit_status_emoji, exit_status = _read_step_exit_status(step_dir, current_step_name)
 
             if duration_str:
                 step_log_links.append(
@@ -364,30 +485,91 @@ def _process_step_logs(mlflow_run_url: str) -> list[str]:
     return step_log_links
 
 
-def _read_step_exit_status(step_dir: Path, current_step_name: str | None = None) -> str:
-    """Read exit status from step directory and return appropriate emoji."""
+def _process_postprocess_status(mlflow_run_url: str | None = None) -> list[str]:
+    """Process post-processing status from all step directories."""
+    if not mlflow_run_url:
+        return []
+
+    postprocess_links = []
+    parent_dir = Path(env.BASE_ARTIFACT_DIR).parent
+
+    for step_dir in sorted(parent_dir.iterdir()):
+        if not step_dir.is_dir():
+            continue
+        if step_dir.name.startswith("."):
+            continue
+
+        try:
+            _process_caliper_postprocess_status(step_dir, postprocess_links, mlflow_run_url)
+        except Exception as e:
+            logger.warning(f"Failed to process postprocess status for {step_dir.name}: {e}")
+
+    return postprocess_links
+
+
+def _read_step_exit_status(
+    step_dir: Path, current_step_name: str | None = None
+) -> tuple[str, StepStatus]:
+    """Read exit status from step directory and return emoji and status enum."""
     try:
         exit_status_file = step_dir / CI_METADATA_DIRNAME / "exit_status.yaml"
         if not exit_status_file.exists():
             # Check if this is the current ongoing step
             if current_step_name and step_dir.name == current_step_name:
-                return "🔄"  # Ongoing step
-            return "❓"  # Unknown status if file doesn't exist
+                return "🔄", StepStatus.ONGOING  # Ongoing step
+            return "❓", StepStatus.UNKNOWN  # Unknown status if file doesn't exist
 
         with open(exit_status_file, encoding="utf-8") as f:
             exit_data = yaml.safe_load(f)
 
         return_code = exit_data.get("return_code")
         if return_code is None or return_code == 0:
-            return "✅"
+            return "✅", StepStatus.SUCCESS
         else:
-            return "❌"
+            return "❌", StepStatus.FAILURE
     except Exception as e:
         logger.warning(f"Failed to read exit status from {step_dir}: {e}")
         # Check if this is the current ongoing step even on error
         if current_step_name and step_dir.name == current_step_name:
-            return "🔄"  # Ongoing step
-        return "❓"  # Unknown status on error
+            return "🔄", StepStatus.ONGOING  # Ongoing step
+        return "❓", StepStatus.UNKNOWN  # Unknown status on error
+
+
+def _get_overall_status_from_steps() -> str:
+    """Check all step exit statuses and return overall status emoji."""
+    try:
+        parent_dir = Path(env.BASE_ARTIFACT_DIR).parent
+        current_step_name = Path(env.BASE_ARTIFACT_DIR).name
+
+        step_statuses = []
+
+        for step_dir in sorted(parent_dir.iterdir()):
+            if not step_dir.is_dir():
+                continue
+            if step_dir.name.startswith("."):
+                continue
+
+            # Only check directories that have run.log (actual steps)
+            run_log = step_dir / "run.log"
+            if not run_log.exists():
+                continue
+
+            emoji, status = _read_step_exit_status(step_dir, current_step_name)
+            step_statuses.append(status)
+
+        # Priority: failure > ongoing > unknown > success
+        if StepStatus.FAILURE in step_statuses:
+            return "🔴"  # Any failure = red
+        elif StepStatus.ONGOING in step_statuses:
+            return "🟡"  # Ongoing = yellow
+        elif StepStatus.UNKNOWN in step_statuses:
+            return "🟠"  # Unknown = orange
+        else:
+            return "🟢"  # All successful = green
+
+    except Exception as e:
+        logger.warning(f"Failed to check step statuses: {e}")
+        return "🔴"  # Error checking = red
 
 
 def _build_enhanced_notification(
@@ -396,7 +578,8 @@ def _build_enhanced_notification(
     """Build enhanced notification with fournos job config and artifact links."""
     fjob_project, fjob_args_str = _get_project_and_args(project)
 
-    status_emoji = "🟢" if finish_reason == FinishReason.SUCCESS else "🔴"
+    # Check all step statuses for overall status emoji (takes priority over finish_reason)
+    status_emoji = _get_overall_status_from_steps()
     base_status = f"<strong>{status_emoji} Execution of `{fjob_project}` {fjob_args_str} {status_emoji}</strong>"
     notification_parts = [base_status, "---"]
 
@@ -408,6 +591,7 @@ def _build_enhanced_notification(
     try:
         artifact_links, mlflow_run_url = _extract_artifact_links(status)
         step_log_links = _process_step_logs(mlflow_run_url)
+        postprocess_status_links = _process_postprocess_status(mlflow_run_url)
 
         if artifact_links:
             notification_parts.append("")
@@ -420,6 +604,10 @@ def _build_enhanced_notification(
             notification_parts.append("")
             notification_parts.append("**Test Logs**")
             notification_parts.extend(step_log_links)
+
+        if postprocess_status_links:
+            notification_parts.append("")
+            notification_parts.extend(postprocess_status_links)
 
     except Exception as e:
         logger.warning(f"Failed to extract artifact links: {e}")
@@ -516,7 +704,7 @@ def run_caliper_orchestration_export(*, artifact_directory: Path | None):
     help="If set, overrides caliper.export.from (artifact root directory).",
 )
 @click.pass_context
-@ci_lib.safe_ci_command
+@ci_lib.safe_ci_entrypoint
 def caliper_export_entrypoint(_ctx, artifact_directory: Path | None):
     """Export the file artifacts."""
 

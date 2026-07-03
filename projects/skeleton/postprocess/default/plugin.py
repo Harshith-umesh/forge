@@ -34,9 +34,9 @@ class SkeletonDefaultPlugin(PostProcessingPlugin):
             "throughput_chart": ThroughputChartPlot,
         }
 
-    def parse(self, base_dir: Path, nodes: list[TestBaseNode]) -> ParseResult:
+    def parse(self, nodes: list[TestBaseNode]) -> ParseResult:
         """Parse test nodes using the skeleton parser."""
-        return self.parser.parse(base_dir, nodes)
+        return self.parser.parse(nodes)
 
     def visualize(
         self,

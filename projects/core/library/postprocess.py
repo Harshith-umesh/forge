@@ -192,7 +192,7 @@ def run_postprocess_after_test(
 
     Uses ``artifact_root`` (typically :data:`env.ARTIFACT_BASE_DIR`) as the Caliper artifact tree,
     and :func:`env.NextArtifactDir` ``(\"postprocessing\")`` as the workspace for visualize output,
-    KPI JSONL, and regression artifacts.
+    KPI JSON, and regression artifacts.
 
     ``test_outcome`` feeds ``final_status`` computation together with parse/visualize/KPI outcomes.
     """
@@ -345,9 +345,10 @@ def run_orchestration_postprocess(
     ),
 )
 @click.pass_context
-@ci_lib.safe_ci_command
+@ci_lib.safe_ci_entrypoint
 def postprocess_command(_ctx, artifact_dir: Path, output_dir: Path):
     """Run the post-processing pipeline."""
+
     status = run_orchestration_postprocess(
         artifact_dir=artifact_dir,
         test_outcome=TestPhaseOutcome("NOT_AVAILABLE"),

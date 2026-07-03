@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from projects.caliper.engine.kpi.import_export import load_kpis_jsonl
+from projects.caliper.engine.kpi.import_export import load_kpis_json
 from projects.caliper.engine.kpi.rules import DEFAULT_RULE
 from projects.caliper.engine.model import RegressionFinding
 
@@ -26,8 +26,8 @@ def run_analyze(
     baseline_path: Any,
     output_path: Any,
 ) -> list[RegressionFinding]:
-    current = load_kpis_jsonl(current_path)
-    baseline = load_kpis_jsonl(baseline_path)
+    current = load_kpis_json(current_path)
+    baseline = load_kpis_json(baseline_path)
     base_by_id = {b["kpi_id"]: b for b in baseline}
     findings: list[RegressionFinding] = []
     rule = DEFAULT_RULE

@@ -38,6 +38,7 @@ def compute_final_postprocess_status(
     visualize_failed: bool,
     kpi_generate_failed: bool,
     kpi_export_failed: bool,
+    ai_eval_failed: bool,
     analyze_failed: bool,
     has_regression: bool,
     has_improvement: bool,
@@ -45,14 +46,14 @@ def compute_final_postprocess_status(
     """
     Single authoritative label for CI / dashboards.
 
-    Priority (first match wins): test failure → parse/viz failure → KPI/analyze pipeline failure →
+    Priority (first match wins): test failure → parse/viz failure → KPI/analyze/ai_eval pipeline failure →
     regression → improvement → success.
     """
     if test_outcome.phase == "FAILED":
         return FINAL_TEST_FAILED
     if parse_failed or visualize_failed:
         return FINAL_PARSE_VISUALIZE_FAILED
-    if kpi_generate_failed or kpi_export_failed or analyze_failed:
+    if kpi_generate_failed or kpi_export_failed or ai_eval_failed or analyze_failed:
         return FINAL_KPI_PIPELINE_FAILED
     if has_regression:
         return FINAL_PERFORMANCE_REGRESSION

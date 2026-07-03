@@ -53,13 +53,13 @@ class CaliperOrchestrationVisualizeSection(BaseModel):
 
 
 class CaliperOrchestrationKpiGenerateSection(BaseModel):
-    """Emit KPI JSONL via plugin ``compute_kpis``."""
+    """Emit KPI JSON via plugin ``compute_kpis``."""
 
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
     output: str | None = Field(
-        default="kpis.jsonl",
+        default="kpis.json",
         description="Filename or path; relative paths resolve under the post-processing artifact dir.",
     )
 
@@ -70,6 +70,22 @@ class CaliperOrchestrationKpiExportSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
+
+
+class CaliperOrchestrationKpiCsvExportSection(BaseModel):
+    """Export KPI data to CSV format."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    output: str | None = Field(
+        default="kpis.csv",
+        description="CSV filename or path; relative paths resolve under the post-processing artifact dir.",
+    )
+    include_header_comments: bool = Field(
+        default=True,
+        description="Whether to include descriptive header comments in the CSV file.",
+    )
 
 
 class CaliperOrchestrationKpiSection(BaseModel):
@@ -84,17 +100,20 @@ class CaliperOrchestrationKpiSection(BaseModel):
     export: CaliperOrchestrationKpiExportSection = Field(
         default_factory=CaliperOrchestrationKpiExportSection
     )
+    csv_export: CaliperOrchestrationKpiCsvExportSection = Field(
+        default_factory=CaliperOrchestrationKpiCsvExportSection
+    )
 
 
 class CaliperOrchestrationAnalyzeSection(BaseModel):
-    """``caliper.postprocess.analyze`` — regression vs baseline KPI JSONL."""
+    """``caliper.postprocess.analyze`` — regression vs baseline KPI JSON."""
 
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
     baseline: str | None = Field(
         default=None,
-        description="Baseline KPI JSONL path (relative → artifact tree root unless absolute).",
+        description="Baseline KPI JSON path (relative → artifact tree root unless absolute).",
     )
     output: str | None = Field(
         default="kpi_analyze.json",

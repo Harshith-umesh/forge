@@ -46,8 +46,8 @@ def generate_caliper_reports_index(
         if html_file.name not in ignored_files:
             html_files.append(html_file)
 
-    # Include JSON and JSONL files
-    for data_file in sorted(list(output_dir.glob("*.json")) + list(output_dir.glob("*.jsonl"))):
+    # Include JSON and JSON files
+    for data_file in sorted(output_dir.glob("*.json")):
         if data_file.name not in ignored_files:
             data_files.append(data_file)
 

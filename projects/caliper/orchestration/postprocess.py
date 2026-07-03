@@ -10,6 +10,7 @@ Computes ``final_status`` from the FORGE test phase outcome plus all enabled ste
 from __future__ import annotations
 
 import logging
+import time
 import traceback
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,18 @@ from projects.caliper.orchestration.postprocess_outcome import (
     TestPhaseOutcome,
     compute_final_postprocess_status,
 )
+from projects.caliper.orchestration.step_logging import (
+    cleanup_step_logging,
+    log_ai_eval_command,
+    log_analyze_command,
+    log_kpi_csv_export_command,
+    log_kpi_export_command,
+    log_kpi_generate_command,
+    log_parse_command,
+    log_visualize_command,
+    step_logging,
+)
+from projects.core.library import env
 
 logger = logging.getLogger(__name__)
 
@@ -92,64 +105,273 @@ def _load_plugin(
     return mod_str, load_plugin(mod_str)
 
 
+def _transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
+    """
+    Transform flat KPI list into hierarchical JSON structure.
+
+    Groups KPIs by test (run_id), extracting common labels and organizing
+    KPI metadata (name, help, unit, etc.) for improved readability.
+
+    Args:
+        kpis: List of flat KPI records from compute_kpis
+        model: Unified model for accessing plugin metadata
+
+    Returns:
+        Hierarchical JSON structure organized by test
+    """
+    from collections import defaultdict
+
+    from projects.caliper.engine.kpi.decorators import get_kpi_functions
+
+    if not kpis:
+        return {"schema_version": "2", "tests": []}
+
+    # Group KPIs by test (run_id)
+    tests_data = defaultdict(lambda: {"kpis": [], "labels": {}, "metadata": {}})
+
+    # Get KPI function metadata from the plugin module
+    try:
+        plugin_module = __import__(model.plugin_module, fromlist=[""])
+        kpi_functions = get_kpi_functions(plugin_module)
+    except (ImportError, AttributeError):
+        kpi_functions = {}
+
+    for kpi in kpis:
+        run_id = kpi.get("run_id", "unknown")
+        test_data = tests_data[run_id]
+
+        # Extract common labels (excluding KPI-specific ones)
+        kpi_labels = kpi.get("labels", {})
+        test_labels = {
+            k: v for k, v in kpi_labels.items() if k not in ["higher_is_better"]
+        }  # Exclude KPI-specific labels
+
+        # Merge test labels (they should be the same for all KPIs in a test)
+        if not test_data["labels"]:
+            test_data["labels"] = test_labels
+
+        # Store test metadata from first KPI
+        if not test_data["metadata"]:
+            test_data["metadata"] = {
+                "timestamp": kpi.get("timestamp"),
+                "source": kpi.get("source", {}),
+                "run_id": run_id,
+            }
+
+        # Create KPI record with metadata
+        kpi_id = kpi.get("kpi_id")
+        raw_value = kpi.get("value")
+
+        # Transform 2D KPI values to structured format
+        if isinstance(raw_value, list) and raw_value and len(raw_value) > 0:
+            # Check if this looks like 2D data: list of tuples/lists with 2 elements
+            first_item = raw_value[0]
+            if isinstance(first_item, list | tuple) and len(first_item) == 2:
+                try:
+                    # Convert list of tuples [(x1, y1), (x2, y2), ...] to structured format
+                    structured_value = {
+                        "data_points": [{"x": float(x), "y": float(y)} for x, y in raw_value],
+                        "count": len(raw_value),
+                    }
+                    final_value = structured_value
+                except (ValueError, TypeError, IndexError):
+                    # If conversion fails, keep original value
+                    final_value = raw_value
+            else:
+                final_value = raw_value
+        else:
+            final_value = raw_value
+
+        kpi_record = {
+            "id": kpi_id,
+            "value": final_value,
+            "unit": kpi.get("unit"),
+            "higher_is_better": kpi_labels.get("higher_is_better", True),
+        }
+
+        # Add KPI metadata from function decorator if available
+        if kpi_id in kpi_functions:
+            func = kpi_functions[kpi_id]
+            kpi_record.update(
+                {
+                    "name": (
+                        func.__doc__.replace(" KPI.", "")
+                        if func.__doc__
+                        else kpi_id.replace("_", " ").title()
+                    ),
+                    "help": getattr(func, "_kpi_help", ""),
+                }
+            )
+
+            # Add 2D-specific metadata if present
+            if getattr(func, "_kpi_is_2d", False):
+                kpi_record.update(
+                    {
+                        "is_2d": True,
+                        "x_unit": getattr(func, "_kpi_x_unit", ""),
+                        "x_help": getattr(func, "_kpi_x_help", ""),
+                        "y_unit": getattr(func, "_kpi_y_unit", None) or kpi_record["unit"],
+                        "y_help": getattr(func, "_kpi_y_help", None)
+                        or getattr(func, "_kpi_help", ""),
+                    }
+                )
+            else:
+                kpi_record["is_2d"] = False
+
+            # Add formatting info if available
+            if hasattr(func, "_kpi_format"):
+                kpi_record["format"] = func._kpi_format
+        else:
+            # Fallback if no function metadata available
+            kpi_record.update(
+                {
+                    "name": kpi_id.replace("_", " ").title(),
+                    "help": f"KPI: {kpi_id}",
+                    "is_2d": isinstance(kpi.get("value"), list),
+                }
+            )
+
+        test_data["kpis"].append(kpi_record)
+
+    # Convert to final structure
+    tests_list = []
+    for run_id, test_data in tests_data.items():
+        tests_list.append(
+            {
+                "run_id": run_id,
+                "labels": test_data["labels"],
+                "metadata": test_data["metadata"],
+                "kpis": test_data["kpis"],
+            }
+        )
+
+    return {"schema_version": "2", "tests": tests_list}
+
+
 def _run_kpi_generate(
     postprocess_config: CaliperOrchestrationPostprocessConfig,
     plugin,
     model,
     output_dir: Path,
+    plugin_module: str,
+    base_dir: Path,
 ) -> dict[str, Any]:
-    """Generate KPI JSONL using the plugin's compute_kpis method."""
+    """Generate KPI JSON using the plugin's compute_kpis method."""
+
     if not postprocess_config.kpi.enabled:
-        return {"status": "skipped", "reason": "kpi disabled"}
+        return {"status": "skipped", "reason": "kpi disabled", "completed_at": time.time()}
     if not postprocess_config.kpi.generate.enabled:
-        return {"status": "skipped", "reason": "kpi.generate disabled"}
+        return {
+            "status": "skipped",
+            "reason": "kpi.generate disabled",
+            "completed_at": time.time(),
+        }
 
     try:
-        kpis = plugin.compute_kpis(model)
-
-        # Write KPI JSONL
+        # Write KPI JSON
         output_file = output_dir / postprocess_config.kpi.generate.output
+
+        # Log command to reproduce this step
+        log_kpi_generate_command(
+            base_dir=base_dir,
+            plugin_module=plugin_module,
+            output_file=output_file,
+        )
+
+        kpis = plugin.compute_kpis(model)
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
         import json
 
-        with open(output_file, "w") as f:
-            for kpi in kpis:
-                f.write(json.dumps(kpi) + "\n")
+        # Transform flat KPI list into hierarchical structure
+        hierarchical_data = _transform_kpis_to_hierarchical_format(kpis, model)
 
-        logger.info(f"Generated {len(kpis)} KPI records in {output_file}")
-        return {"status": "success", "kpi_count": len(kpis), "output_file": str(output_file)}
+        with open(output_file, "w") as f:
+            json.dump(hierarchical_data, f, indent=2)
+
+        logger.info(
+            f"Generated hierarchical KPI structure with {len(kpis)} total records in {output_file}"
+        )
+        return {
+            "status": "success",
+            "kpi_count": len(kpis),
+            "output_file": str(output_file),
+            "completed_at": time.time(),
+        }
     except Exception as e:
         logger.error(f"KPI generation failed: {e}")
-        return {"status": "failed", "error": str(e)}
+        return {"status": "failed", "error": str(e), "completed_at": time.time()}
 
 
-def _run_kpi_export(postprocess_config: CaliperOrchestrationPostprocessConfig) -> dict[str, Any]:
+def _run_kpi_export(
+    postprocess_config: CaliperOrchestrationPostprocessConfig,
+    output_dir: Path,
+) -> dict[str, Any]:
     """Export KPIs to external system (placeholder for OpenSearch integration)."""
+
     if not postprocess_config.kpi.enabled:
-        return {"status": "skipped", "reason": "kpi disabled"}
+        return {"status": "skipped", "reason": "kpi disabled", "completed_at": time.time()}
     if not postprocess_config.kpi.export.enabled:
-        return {"status": "skipped", "reason": "kpi.export disabled"}
+        return {
+            "status": "skipped",
+            "reason": "kpi.export disabled",
+            "completed_at": time.time(),
+        }
+
+    # Log command to reproduce this step
+    input_path = output_dir / postprocess_config.kpi.generate.output
+    log_kpi_export_command(
+        input_path=input_path,
+        target_system="opensearch",
+    )
 
     # TODO: Implement actual KPI export to OpenSearch when credentials/config available
     logger.info("KPI export is configured but not yet implemented")
-    return {"status": "skipped", "reason": "KPI export not yet implemented"}
+    return {
+        "status": "skipped",
+        "reason": "KPI export not yet implemented",
+        "completed_at": time.time(),
+    }
 
 
 def _run_ai_eval_export(
     plugin,
     model,
     output_dir: Path,
+    plugin_module: str,
+    base_dir: Path,
 ) -> dict[str, Any]:
-    """Export AI evaluation payload using the plugin's build_ai_eval_payload method."""
+    """Export AI evaluation payload with structured directories and copied artifacts."""
     try:
         if not hasattr(plugin, "build_ai_eval_payload"):
-            return {"status": "skipped", "reason": "plugin does not support AI evaluation"}
+            return {
+                "status": "skipped",
+                "reason": "plugin does not support AI evaluation",
+                "completed_at": time.time(),
+            }
 
+        # Create AI evaluation directory structure
+        ai_eval_dir = output_dir / "ai_eval"
+        ai_eval_dir.mkdir(parents=True, exist_ok=True)
+
+        # Log command to reproduce this step
+        output_file = ai_eval_dir / "ai_eval_payload.json"
+        log_ai_eval_command(
+            base_dir=base_dir,
+            plugin_module=plugin_module,
+            output_file=output_file,
+        )
+
+        # Build payload from plugin
         payload = plugin.build_ai_eval_payload(model)
 
-        # Write AI eval payload
-        output_file = output_dir / "ai_eval_payload.json"
+        # Export structured test entries with artifact copying
+        exported_entries = _export_test_entries_with_artifacts(model, ai_eval_dir, base_dir, plugin)
+
+        # Add exported entries info to payload
+        payload["exported_test_entries"] = exported_entries
+
+        # Write main AI eval payload
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
         import json
@@ -158,20 +380,695 @@ def _run_ai_eval_export(
             json.dump(payload, f, indent=2)
 
         logger.info(f"Generated AI evaluation payload in {output_file}")
+        logger.info(f"Exported {len(exported_entries)} test entries with artifacts")
+
         return {
             "status": "success",
             "output_file": str(output_file),
-            "payload_schema_version": payload.get("schema_version", "unknown"),
+            "ai_eval_dir": str(ai_eval_dir),
+            "exported_entries": len(exported_entries),
+            "completed_at": time.time(),
         }
     except Exception as e:
         logger.error(f"AI eval export failed: {e}")
-        return {"status": "failed", "error": str(e)}
+        return {"status": "failed", "error": str(e), "completed_at": time.time()}
 
 
-def _stub_analyze(postprocess_config: CaliperOrchestrationPostprocessConfig) -> dict[str, Any]:
+def _load_test_labels(test_dir: Path) -> dict[str, Any]:
+    """Load test labels from __test_labels__.yaml file if it exists.
+
+    Args:
+        test_dir: Directory to search for __test_labels__.yaml
+
+    Returns:
+        Dictionary containing test labels, or empty dict if file doesn't exist
+    """
+    import yaml
+
+    test_labels_file = test_dir / "__test_labels__.yaml"
+    if test_labels_file.exists():
+        try:
+            with open(test_labels_file, encoding="utf-8") as f:
+                labels = yaml.safe_load(f)
+                logger.debug(f"Loaded test labels from {test_labels_file}: {labels}")
+                return labels or {}
+        except Exception as e:
+            logger.warning(f"Failed to load test labels from {test_labels_file}: {e}")
+            return {}
+    else:
+        logger.debug(f"No test labels file found at {test_labels_file}")
+        return {}
+
+
+def _export_test_entries_with_artifacts(
+    model, ai_eval_dir: Path, base_dir: Path, plugin
+) -> list[dict]:
+    """
+    Export test entries by creating directories and copying specific artifacts.
+
+    Args:
+        model: Unified model containing test results
+        ai_eval_dir: Directory where test entries should be exported
+        base_dir: Base directory of the test artifacts (test directory)
+        plugin: Plugin instance to get artifact file list
+
+    Returns:
+        List of exported test entry information
+    """
+    import shutil
+
+    exported_entries = []
+
+    for idx, record in enumerate(model.unified_result_records):
+        # Create directory for this test entry
+        test_entry_dir = ai_eval_dir / f"test_entry_{idx:03d}"
+        test_entry_dir.mkdir(parents=True, exist_ok=True)
+
+        # Load test labels from __test_labels__.yaml if available
+        test_dir = base_dir / record.test_base_path
+        test_labels = _load_test_labels(test_dir)
+
+        # Record test entry metadata
+        entry_info = {
+            "entry_id": f"test_entry_{idx:03d}",
+            "test_base_path": str(record.test_base_path),
+            "distinguishing_labels": record.distinguishing_labels,
+            "test_labels": test_labels,
+            "copied_files": [],
+            "missing_files": [],
+        }
+
+        # Get artifact files specific to this test directory only (plugin is scoped to test directory)
+        relevant_files = plugin.get_ai_eval_artifact_files_for_test(test_dir)
+
+        logger.debug(
+            f"Test entry {idx}: found {len(relevant_files)} artifact files in test directory {test_dir}"
+        )
+
+        # Copy relevant files for this test entry (preserving directory structure)
+        for target_file in relevant_files:
+            # source is test_dir + test_relative_path, target is test_entry_dir + test_relative_path
+            source_file = test_dir / target_file
+            target_path = test_entry_dir / target_file
+
+            if source_file.exists():
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+
+                try:
+                    shutil.copy2(source_file, target_path)
+                    entry_info["copied_files"].append(
+                        {
+                            "source": str(source_file),
+                            "target": str(target_path),
+                            "relative_path": target_file,
+                            "size_bytes": source_file.stat().st_size,
+                        }
+                    )
+                    logger.debug(f"Copied {source_file} -> {target_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to copy {source_file}: {e}")
+                    entry_info["missing_files"].append({"file": str(source_file), "error": str(e)})
+            else:
+                entry_info["missing_files"].append(
+                    {"file": str(source_file), "error": "File does not exist"}
+                )
+
+        # Write entry metadata
+        entry_metadata_file = test_entry_dir / "entry_metadata.json"
+        import json
+
+        with open(entry_metadata_file, "w") as f:
+            json.dump(entry_info, f, indent=2)
+
+        exported_entries.append(entry_info)
+
+    return exported_entries
+
+
+def _run_kpi_csv_export(
+    postprocess_config: CaliperOrchestrationPostprocessConfig,
+    plugin,
+    model,
+    output_dir: Path,
+    kpi_json_path: Path,
+) -> dict[str, Any]:
+    """Export KPI data to CSV format using the plugin's compute_kpis method."""
+
+    if not postprocess_config.kpi.enabled:
+        return {"status": "skipped", "reason": "kpi disabled", "completed_at": time.time()}
+    if not postprocess_config.kpi.csv_export.enabled:
+        return {
+            "status": "skipped",
+            "reason": "kpi.csv_export disabled",
+            "completed_at": time.time(),
+        }
+
+    try:
+        # Compute KPIs from the model
+        kpi_records = plugin.compute_kpis(model)
+
+        # Create output file path
+        output_file = output_dir / postprocess_config.kpi.csv_export.output
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Log command to reproduce this step
+        log_kpi_csv_export_command(
+            input_path=kpi_json_path,
+            output_path=output_file,
+        )
+
+        # Import and use the CSV exporter
+        from projects.guidellm.postprocess.guidellm.csv_export import quick_export_kpis_to_csv
+
+        result_path = quick_export_kpis_to_csv(
+            records=kpi_records,
+            output_path=output_file,
+            include_header_comments=postprocess_config.kpi.csv_export.include_header_comments,
+        )
+
+        logger.info(f"Exported {len(kpi_records)} KPI records to CSV: {result_path}")
+        return {
+            "status": "success",
+            "kpi_count": len(kpi_records),
+            "output_file": result_path,
+            "completed_at": time.time(),
+        }
+    except Exception as e:
+        logger.error(f"KPI CSV export failed: {e}")
+        return {"status": "failed", "error": str(e), "completed_at": time.time()}
+
+
+def _stub_analyze(
+    postprocess_config: CaliperOrchestrationPostprocessConfig,
+    plugin_module: str,
+    base_dir: Path,
+) -> dict[str, Any]:
     if not postprocess_config.analyze.enabled:
         return {"status": "skipped", "reason": "analyze disabled"}
+
+    # Log command to reproduce this step
+    log_analyze_command(
+        base_dir=base_dir,
+        plugin_module=plugin_module,
+    )
+
     return {"status": "skipped", "reason": _STUB_REASON_ANALYZE}
+
+
+class CaliperPostprocessOrchestrator:
+    """
+    Orchestrator for running Caliper postprocessing steps in sequence.
+
+    Manages the execution of parse, visualize, KPI, AI evaluation, and analysis steps
+    with proper state management, logging, and error handling.
+    """
+
+    def __init__(
+        self,
+        postprocess_config_raw: dict[str, Any] | None,
+        *,
+        artifacts_dir: Path,
+        visualize_output_dir: Path | None = None,
+        test_outcome: TestPhaseOutcome | None = None,
+    ):
+        self.artifacts_dir = artifacts_dir
+        self.visualize_output_dir = visualize_output_dir
+        self.test_outcome = test_outcome or TestPhaseOutcome("NOT_AVAILABLE")
+
+        # State tracking
+        self.steps: dict[str, Any] = {}
+        self.parse_failed = False
+        self.visualize_failed = False
+        self.kpi_generate_failed = False
+        self.kpi_export_failed = False
+        self.ai_eval_failed = False
+        self.analyze_failed = False
+
+        # Configuration
+        try:
+            self.config = CaliperOrchestrationPostprocessConfig.model_validate(
+                postprocess_config_raw or {}
+            )
+        except ValidationError as e:
+            logger.error("Invalid caliper postprocess config: %s", e)
+            raise
+
+        # Resolved paths - will be set in _setup_paths()
+        self.tree_root: Path
+        self.manifest_path: Path | None
+        self.cache_path: Path
+        self.step_logs_dir: Path
+
+    def run(self) -> dict[str, Any]:
+        """
+        Run enabled parse / visualize steps and compute ``final_status``.
+
+        Returns:
+            Dictionary containing final_status, success flag, test_phase info, and step results
+        """
+        try:
+            return self._execute_orchestration()
+        finally:
+            cleanup_step_logging()
+
+    def _execute_orchestration(self) -> dict[str, Any]:
+        """Main orchestration logic."""
+        test_block = {"phase": self.test_outcome.phase, "message": self.test_outcome.message}
+
+        # Check if postprocessing is enabled
+        if not self.config.enabled:
+            logger.info("caliper.postprocess.enabled is false — skipping post-processing steps")
+            return self._build_result(
+                compute_final_postprocess_status(
+                    test_outcome=self.test_outcome,
+                    parse_failed=False,
+                    visualize_failed=False,
+                    kpi_generate_failed=False,
+                    kpi_export_failed=False,
+                    ai_eval_failed=False,
+                    analyze_failed=False,
+                    has_regression=False,
+                    has_improvement=False,
+                ),
+                test_block,
+            )
+
+        # Setup paths and directories
+        self._setup_paths()
+
+        # Check if any steps are enabled
+        if not self._any_step_enabled():
+            logger.info("caliper.postprocess: no parse/visualize/kpi/analyze steps enabled")
+            return self._build_result(
+                compute_final_postprocess_status(
+                    test_outcome=self.test_outcome,
+                    parse_failed=False,
+                    visualize_failed=False,
+                    kpi_generate_failed=False,
+                    kpi_export_failed=False,
+                    ai_eval_failed=False,
+                    analyze_failed=False,
+                    has_regression=False,
+                    has_improvement=False,
+                ),
+                test_block,
+            )
+
+        # Execute steps in sequence
+        logger.info("Starting postprocessing steps")
+        self._run_parse_step()
+        logger.info(f"After parse step: parse_failed={self.parse_failed}")
+        self._run_visualize_step()
+        logger.info(f"After visualize step: visualize_failed={self.visualize_failed}")
+        self._run_kpi_and_ai_eval_steps()
+        logger.info(
+            f"After KPI/AI steps: kpi_generate_failed={self.kpi_generate_failed}, kpi_export_failed={self.kpi_export_failed}"
+        )
+        self._run_analyze_step()
+        logger.info(f"After analyze step: analyze_failed={self.analyze_failed}")
+        logger.info("All postprocessing steps completed")
+
+        # Compute final status and build result
+        final_status = self._compute_final_status()
+        result = self._build_result(final_status, test_block)
+
+        # Generate HTML reports if output directory is available
+        if self.visualize_output_dir:
+            self._generate_reports(result)
+
+        # Save postprocess status YAML for notifications
+        self._save_postprocess_status_yaml(result)
+
+        return result
+
+    def _setup_paths(self) -> None:
+        """Resolve and setup all required paths."""
+        self.tree_root, self.manifest_path, self.cache_path = _resolve_paths(
+            self.config, artifacts_dir=self.artifacts_dir
+        )
+
+        self.step_logs_dir = Path(env.ARTIFACT_DIR)
+        self.step_logs_dir.mkdir(parents=True, exist_ok=True)
+
+    def _any_step_enabled(self) -> bool:
+        """Check if any postprocessing step is enabled."""
+        return (
+            self.config.parse.enabled
+            or self.config.visualize.enabled
+            or self.config.kpi.enabled
+            or self.config.analyze.enabled
+        )
+
+    def _build_result(self, final_status: str, test_block: dict[str, Any]) -> dict[str, Any]:
+        """Build the final result dictionary."""
+        return {
+            "final_status": final_status,
+            "success": final_status == FINAL_SUCCESS,
+            "test_phase": test_block,
+            "steps": self.steps,
+        }
+
+    def _run_parse_step(self) -> None:
+        """Execute the parse step if enabled."""
+        if not self.config.parse.enabled:
+            return
+
+        with step_logging("caliper_parse", self.step_logs_dir):
+            try:
+                mod_str, plugin = _load_plugin(
+                    self.config, tree_root=self.tree_root, manifest_path=self.manifest_path
+                )
+
+                # Log command to reproduce this step
+                log_parse_command(
+                    base_dir=self.tree_root,
+                    plugin_module=mod_str,
+                    use_cache=not self.config.parse.no_cache,
+                    manifest_path=self.manifest_path,
+                )
+
+                model = run_parse(
+                    base_dir=self.tree_root,
+                    plugin_module=mod_str,
+                    plugin=plugin,
+                    use_cache=not self.config.parse.no_cache,
+                )
+
+                self.steps["parse"] = {
+                    "status": "success",
+                    "plugin_module": mod_str,
+                    "record_count": len(model.unified_result_records),
+                    "parse_cache_ref": model.parse_cache_ref,
+                    "completed_at": time.time(),
+                }
+            except Exception as e:  # noqa: BLE001
+                self.parse_failed = True
+                logger.exception("Caliper parse failed")
+                self.steps["parse"] = {
+                    "status": "failure",
+                    "detail": str(e),
+                    "traceback": traceback.format_exc(),
+                    "completed_at": time.time(),
+                }
+
+    def _run_visualize_step(self) -> None:
+        """Execute the visualize step if enabled."""
+        if not self.config.visualize.enabled:
+            return
+
+        with step_logging("caliper_visualize", self.step_logs_dir):
+            try:
+                mod_str, plugin = _load_plugin(
+                    self.config, tree_root=self.tree_root, manifest_path=self.manifest_path
+                )
+
+                viz_cfg_path = _resolve_visualize_config_path(
+                    self.config.visualize.visualize_config,
+                    artifact_tree=self.tree_root,
+                )
+
+                if self.visualize_output_dir is not None:
+                    output_dir = self.visualize_output_dir.expanduser().resolve()
+                else:
+                    output_dir = _resolve_visualize_output_dir(
+                        self.config.visualize.output_dir,
+                    )
+
+                # Log command to reproduce this step
+                log_visualize_command(
+                    base_dir=self.tree_root,
+                    plugin_module=mod_str,
+                    output_dir=output_dir,
+                    reports_csv=self.config.visualize.reports,
+                    report_group=self.config.visualize.report_group,
+                    visualize_config_path=viz_cfg_path,
+                    include_pairs=tuple(self.config.visualize.include_labels),
+                    exclude_pairs=tuple(self.config.visualize.exclude_labels),
+                    use_cache=not self.config.parse.no_cache,
+                )
+
+                paths = run_visualize(
+                    base_dir=self.tree_root,
+                    plugin_module=mod_str,
+                    plugin=plugin,
+                    output_dir=output_dir,
+                    reports_csv=self.config.visualize.reports,
+                    report_group=self.config.visualize.report_group,
+                    visualize_config_path=viz_cfg_path,
+                    include_pairs=tuple(self.config.visualize.include_labels),
+                    exclude_pairs=tuple(self.config.visualize.exclude_labels),
+                    use_cache=not self.config.parse.no_cache,
+                    cache_path=self.cache_path,
+                )
+
+                # Convert paths to relative paths from output_dir
+                relative_paths = []
+                for path in paths:
+                    try:
+                        path_obj = Path(path)
+                        relative_path = path_obj.relative_to(output_dir)
+                        relative_paths.append(str(relative_path))
+                    except ValueError:
+                        # If path is not under output_dir, keep as-is
+                        relative_paths.append(str(path))
+
+                self.steps["visualize"] = {
+                    "status": "success",
+                    "plugin_module": mod_str,
+                    "output_dir": str(output_dir),
+                    "paths": relative_paths,
+                    "completed_at": time.time(),
+                }
+
+            except Exception as e:  # noqa: BLE001
+                self.visualize_failed = True
+                logger.exception("Caliper visualize failed")
+                self.steps["visualize"] = {
+                    "status": "failure",
+                    "detail": str(e),
+                    "traceback": traceback.format_exc(),
+                    "completed_at": time.time(),
+                }
+
+    def _run_kpi_and_ai_eval_steps(self) -> None:
+        """Execute KPI generation, CSV export, KPI export, and AI evaluation steps."""
+        if not self.config.kpi.enabled:
+            return
+
+        try:
+            # Determine output directory
+            if self.config.visualize.enabled and self.visualize_output_dir:
+                output_dir = Path(self.visualize_output_dir)
+            else:
+                output_dir = Path(self.artifacts_dir) / "postprocess_output"
+                output_dir.mkdir(parents=True, exist_ok=True)
+
+            # Load plugin and model
+            mod_str, plugin = _load_plugin(
+                self.config, tree_root=self.tree_root, manifest_path=self.manifest_path
+            )
+            model = run_parse(
+                base_dir=self.tree_root,
+                plugin_module=mod_str,
+                plugin=plugin,
+                use_cache=not self.config.parse.no_cache,
+            )
+
+            # KPI JSON generation
+            self._run_kpi_generate_step(plugin, model, output_dir, mod_str)
+
+            # KPI CSV export
+            self._run_kpi_csv_export_step(plugin, model, output_dir)
+
+            # KPI export to external systems
+            self._run_kpi_export_step(output_dir)
+
+            # AI evaluation export
+            self._run_ai_eval_export_step(plugin, model, output_dir, mod_str)
+
+        except Exception as e:
+            completion_time = time.time()
+            logger.error(f"Failed to run KPI/AI eval operations: {e}")
+            self.steps.update(
+                {
+                    "kpi_generate": {
+                        "status": "failed",
+                        "error": str(e),
+                        "completed_at": completion_time,
+                    },
+                    "kpi_csv_export": {
+                        "status": "failed",
+                        "error": str(e),
+                        "completed_at": completion_time,
+                    },
+                    "kpi_export": {
+                        "status": "skipped",
+                        "reason": "failed to load plugin",
+                        "completed_at": completion_time,
+                    },
+                    "ai_eval_export": {
+                        "status": "failed",
+                        "error": str(e),
+                        "completed_at": completion_time,
+                    },
+                }
+            )
+            self.kpi_generate_failed = True
+            self.kpi_export_failed = True
+            self.ai_eval_failed = True
+
+    def _run_kpi_generate_step(
+        self, plugin: Any, model: Any, output_dir: Path, mod_str: str
+    ) -> None:
+        """Execute the KPI generation step."""
+        if self.config.kpi.generate.enabled:
+            with step_logging("caliper_kpi_generate", self.step_logs_dir):
+                result = _run_kpi_generate(
+                    self.config, plugin, model, output_dir, mod_str, self.tree_root
+                )
+                self.steps["kpi_generate"] = result
+                if result.get("status") == "failed":
+                    self.kpi_generate_failed = True
+        else:
+            self.steps["kpi_generate"] = {
+                "status": "skipped",
+                "reason": "kpi.generate disabled",
+                "completed_at": time.time(),
+            }
+
+    def _run_kpi_csv_export_step(self, plugin: Any, model: Any, output_dir: Path) -> None:
+        """Execute the KPI CSV export step."""
+        if self.config.kpi.csv_export.enabled:
+            with step_logging("caliper_kpi_csv_export", self.step_logs_dir):
+                # Path to the JSON file for reference in command logging
+                kpi_json_path = output_dir / self.config.kpi.generate.output
+                result = _run_kpi_csv_export(self.config, plugin, model, output_dir, kpi_json_path)
+                self.steps["kpi_csv_export"] = result
+                if result.get("status") == "failed":
+                    # CSV export failure doesn't affect overall status - it's supplementary
+                    logger.warning("KPI CSV export failed but continuing execution")
+        else:
+            self.steps["kpi_csv_export"] = {
+                "status": "skipped",
+                "reason": "kpi.csv_export disabled",
+                "completed_at": time.time(),
+            }
+
+    def _run_kpi_export_step(self, output_dir: Path) -> None:
+        """Execute the KPI export step."""
+        if self.config.kpi.export.enabled:
+            with step_logging("caliper_kpi_export", self.step_logs_dir):
+                result = _run_kpi_export(self.config, output_dir)
+                self.steps["kpi_export"] = result
+                if result.get("status") == "failed":
+                    self.kpi_export_failed = True
+        else:
+            self.steps["kpi_export"] = {
+                "status": "skipped",
+                "reason": "kpi.export disabled",
+                "completed_at": time.time(),
+            }
+
+    def _run_ai_eval_export_step(
+        self, plugin: Any, model: Any, output_dir: Path, mod_str: str
+    ) -> None:
+        """Execute the AI evaluation export step."""
+        with step_logging("caliper_ai_eval_export", self.step_logs_dir):
+            try:
+                result = _run_ai_eval_export(plugin, model, output_dir, mod_str, self.tree_root)
+                self.steps["ai_eval_export"] = result
+                logger.info(f"AI eval export result: {result}")
+
+                # Check if the result indicates failure (since _run_ai_eval_export catches exceptions)
+                if result.get("status") == "failed":
+                    self.ai_eval_failed = True
+
+            except Exception as e:
+                logger.exception("AI eval export failed")
+                self.steps["ai_eval_export"] = {"status": "failed", "error": str(e)}
+                self.ai_eval_failed = True
+
+    def _run_analyze_step(self) -> None:
+        """Execute the analyze step if enabled."""
+        if not self.config.analyze.enabled:
+            return
+
+        with step_logging("caliper_analyze", self.step_logs_dir):
+            # Load plugin info for analyze step
+            mod_str, _ = _load_plugin(
+                self.config, tree_root=self.tree_root, manifest_path=self.manifest_path
+            )
+            self.steps["analyze"] = _stub_analyze(self.config, mod_str, self.tree_root)
+
+    def _compute_final_status(self) -> str:
+        """Compute the final postprocessing status."""
+        # Debug logging to identify what's causing failures
+        logger.info("Computing final status with failure flags:")
+        logger.info(f"  test_outcome.phase: {self.test_outcome.phase}")
+        logger.info(f"  parse_failed: {self.parse_failed}")
+        logger.info(f"  visualize_failed: {self.visualize_failed}")
+        logger.info(f"  kpi_generate_failed: {self.kpi_generate_failed}")
+        logger.info(f"  kpi_export_failed: {self.kpi_export_failed}")
+        logger.info(f"  ai_eval_failed: {self.ai_eval_failed}")
+        logger.info(f"  analyze_failed: {self.analyze_failed}")
+
+        final_status = compute_final_postprocess_status(
+            test_outcome=self.test_outcome,
+            parse_failed=self.parse_failed,
+            visualize_failed=self.visualize_failed,
+            kpi_generate_failed=self.kpi_generate_failed,
+            kpi_export_failed=self.kpi_export_failed,
+            ai_eval_failed=self.ai_eval_failed,
+            analyze_failed=self.analyze_failed,
+            has_regression=False,
+            has_improvement=False,
+        )
+
+        logger.info(f"Computed final status: {final_status}")
+        return final_status
+
+    def _generate_reports(self, result: dict[str, Any]) -> None:
+        """Generate HTML reports if output directory is available."""
+        output_dir = self.visualize_output_dir.resolve()
+
+        # Import here to avoid circular imports
+        from projects.core.library.postprocess import generate_postprocess_status_report
+        from projects.core.library.reports_index import generate_caliper_reports_index
+
+        try:
+            generate_caliper_reports_index(result, output_dir, "reports_index.html")
+        except Exception as e:
+            logger.warning("Failed to generate reports index: %s", e)
+
+        try:
+            generate_postprocess_status_report(result, output_dir, "postprocess_status.html")
+        except Exception as e:
+            logger.warning("Failed to generate postprocessing status report: %s", e)
+
+    def _save_postprocess_status_yaml(self, result: dict[str, Any]) -> None:
+        """Save postprocess status as YAML for GitHub notifications."""
+        try:
+            import yaml
+
+            # Use ARTIFACT_DIR if available, otherwise use the visualize output directory
+            if env.ARTIFACT_DIR:
+                output_dir = Path(env.ARTIFACT_DIR)
+            elif self.visualize_output_dir:
+                output_dir = Path(self.visualize_output_dir)
+            else:
+                logger.warning("No output directory available for postprocess status YAML")
+                return
+
+            output_dir.mkdir(parents=True, exist_ok=True)
+            status_file = output_dir / "caliper_postprocess_status.yaml"
+
+            with open(status_file, "w", encoding="utf-8") as f:
+                yaml.dump(result, f, default_flow_style=False, sort_keys=True)
+
+            logger.info(f"Saved postprocess status to {status_file}")
+
+        except Exception as e:
+            logger.warning(f"Failed to save postprocess status YAML: {e}")
 
 
 def run_postprocess_from_orchestration_config(
@@ -188,252 +1085,10 @@ def run_postprocess_from_orchestration_config(
 
     Parse/visualize use ``artifacts_dir`` and ``visualize_output_dir``.
     """
-    outcome = test_outcome or TestPhaseOutcome("NOT_AVAILABLE")
-    steps: dict[str, Any] = {}
-    parse_failed = False
-    visualize_failed = False
-
-    try:
-        postprocess_config = CaliperOrchestrationPostprocessConfig.model_validate(
-            postprocess_config_raw or {}
-        )
-    except ValidationError as e:
-        logger.error("Invalid caliper postprocess config: %s", e)
-        raise
-
-    test_block = {"phase": outcome.phase, "message": outcome.message}
-
-    if not postprocess_config.enabled:
-        logger.info("caliper.postprocess.enabled is false — skipping post-processing steps")
-        final = compute_final_postprocess_status(
-            test_outcome=outcome,
-            parse_failed=False,
-            visualize_failed=False,
-            kpi_generate_failed=False,
-            kpi_export_failed=False,
-            analyze_failed=False,
-            has_regression=False,
-            has_improvement=False,
-        )
-        return {
-            "final_status": final,
-            "test_phase": test_block,
-            "steps": {},
-        }
-
-    tree_root, manifest_path, cache_path = _resolve_paths(
-        postprocess_config, artifacts_dir=artifacts_dir
+    orchestrator = CaliperPostprocessOrchestrator(
+        postprocess_config_raw,
+        artifacts_dir=artifacts_dir,
+        visualize_output_dir=visualize_output_dir,
+        test_outcome=test_outcome,
     )
-
-    def _run_parse() -> dict[str, Any]:
-        nonlocal parse_failed
-        if not postprocess_config.parse.enabled:
-            return {"status": "skipped", "reason": "parse disabled"}
-        try:
-            mod_str, plugin = _load_plugin(
-                postprocess_config, tree_root=tree_root, manifest_path=manifest_path
-            )
-            model = run_parse(
-                base_dir=tree_root,
-                plugin_module=mod_str,
-                plugin=plugin,
-                use_cache=not postprocess_config.parse.no_cache,
-            )
-            return {
-                "status": "ok",
-                "plugin_module": mod_str,
-                "record_count": len(model.unified_result_records),
-                "parse_cache_ref": model.parse_cache_ref,
-            }
-        except Exception as e:  # noqa: BLE001
-            parse_failed = True
-            logger.exception("Caliper parse failed")
-            return {"status": "failure", "detail": str(e), "traceback": traceback.format_exc()}
-
-    def _run_visualize() -> dict[str, Any]:
-        nonlocal visualize_failed
-        if not postprocess_config.visualize.enabled:
-            return {"status": "skipped", "reason": "visualize disabled"}
-        try:
-            mod_str, plugin = _load_plugin(
-                postprocess_config, tree_root=tree_root, manifest_path=manifest_path
-            )
-            viz_cfg_path = _resolve_visualize_config_path(
-                postprocess_config.visualize.visualize_config,
-                artifact_tree=tree_root,
-            )
-            if visualize_output_dir is not None:
-                output_dir = visualize_output_dir.expanduser().resolve()
-            else:
-                output_dir = _resolve_visualize_output_dir(
-                    postprocess_config.visualize.output_dir,
-                )
-            paths = run_visualize(
-                base_dir=tree_root,
-                plugin_module=mod_str,
-                plugin=plugin,
-                output_dir=output_dir,
-                reports_csv=postprocess_config.visualize.reports,
-                report_group=postprocess_config.visualize.report_group,
-                visualize_config_path=viz_cfg_path,
-                include_pairs=tuple(postprocess_config.visualize.include_labels),
-                exclude_pairs=tuple(postprocess_config.visualize.exclude_labels),
-                use_cache=not postprocess_config.parse.no_cache,
-                cache_path=cache_path,
-            )
-            # Convert paths to relative paths from output_dir
-            relative_paths = []
-            for path in paths:
-                try:
-                    path_obj = Path(path)
-                    relative_path = path_obj.relative_to(output_dir)
-                    relative_paths.append(str(relative_path))
-                except ValueError:
-                    # If path is not under output_dir, keep as-is
-                    relative_paths.append(str(path))
-
-            result = {
-                "status": "ok",
-                "plugin_module": mod_str,
-                "output_dir": str(output_dir),
-                "paths": relative_paths,
-            }
-
-            return result
-        except Exception as e:  # noqa: BLE001
-            visualize_failed = True
-            logger.exception("Caliper visualize failed")
-            return {"status": "failure", "detail": str(e), "traceback": traceback.format_exc()}
-
-    any_step = (
-        postprocess_config.parse.enabled
-        or postprocess_config.visualize.enabled
-        or postprocess_config.kpi.enabled
-        or postprocess_config.analyze.enabled
-    )
-    if not any_step:
-        logger.info("caliper.postprocess: no parse/visualize/kpi/analyze steps enabled")
-        final = compute_final_postprocess_status(
-            test_outcome=outcome,
-            parse_failed=False,
-            visualize_failed=False,
-            kpi_generate_failed=False,
-            kpi_export_failed=False,
-            analyze_failed=False,
-            has_regression=False,
-            has_improvement=False,
-        )
-        return {"final_status": final, "test_phase": test_block, "steps": {}}
-
-    kpi_generate_failed = False
-    kpi_export_failed = False
-
-    if postprocess_config.parse.enabled:
-        steps["parse"] = _run_parse()
-
-    if postprocess_config.visualize.enabled:
-        steps["visualize"] = _run_visualize()
-
-    def _run_kpi_and_ai_eval():
-        """Load plugin and model specifically for KPI and AI eval operations."""
-        try:
-            # Determine output directory
-            if postprocess_config.visualize.enabled and visualize_output_dir:
-                output_dir = Path(visualize_output_dir)
-            else:
-                output_dir = Path(artifacts_dir) / "postprocess_output"
-                output_dir.mkdir(parents=True, exist_ok=True)
-
-            # Load plugin and model
-            mod_str, plugin = _load_plugin(
-                postprocess_config, tree_root=tree_root, manifest_path=manifest_path
-            )
-            model = run_parse(
-                base_dir=tree_root,
-                plugin_module=mod_str,
-                plugin=plugin,
-                use_cache=not postprocess_config.parse.no_cache,
-            )
-
-            # Run KPI and AI eval operations
-            kpi_results = {}
-            ai_eval_results = {}
-
-            if postprocess_config.kpi.generate.enabled:
-                kpi_results["kpi_generate"] = _run_kpi_generate(
-                    postprocess_config, plugin, model, output_dir
-                )
-            else:
-                kpi_results["kpi_generate"] = {
-                    "status": "skipped",
-                    "reason": "kpi.generate disabled",
-                }
-
-            if postprocess_config.kpi.export.enabled:
-                kpi_results["kpi_export"] = _run_kpi_export(postprocess_config)
-            else:
-                kpi_results["kpi_export"] = {"status": "skipped", "reason": "kpi.export disabled"}
-
-            # Always try AI eval export
-            ai_eval_results["ai_eval_export"] = _run_ai_eval_export(plugin, model, output_dir)
-
-            return {**kpi_results, **ai_eval_results}
-
-        except Exception as e:
-            logger.error(f"Failed to run KPI/AI eval operations: {e}")
-            return {
-                "kpi_generate": {"status": "failed", "error": str(e)},
-                "kpi_export": {"status": "skipped", "reason": "failed to load plugin"},
-                "ai_eval_export": {"status": "failed", "error": str(e)},
-            }
-
-    if postprocess_config.kpi.enabled:
-        kpi_ai_results = _run_kpi_and_ai_eval()
-        steps.update(kpi_ai_results)
-
-        # Track failures
-        if steps.get("kpi_generate", {}).get("status") == "failed":
-            kpi_generate_failed = True
-        if steps.get("kpi_export", {}).get("status") == "failed":
-            kpi_export_failed = True
-
-    if postprocess_config.analyze.enabled:
-        steps["analyze"] = _stub_analyze(postprocess_config)
-
-    final = compute_final_postprocess_status(
-        test_outcome=outcome,
-        parse_failed=parse_failed,
-        visualize_failed=visualize_failed,
-        kpi_generate_failed=kpi_generate_failed,
-        kpi_export_failed=kpi_export_failed,
-        analyze_failed=False,
-        has_regression=False,
-        has_improvement=False,
-    )
-
-    result = {
-        "final_status": final,
-        "success": final == FINAL_SUCCESS,
-        "test_phase": test_block,
-        "steps": steps,
-    }
-
-    # Generate HTML reports if we have an output directory
-    if visualize_output_dir is not None:
-        output_dir = visualize_output_dir.resolve()
-
-        # Import here to avoid circular imports
-        from projects.core.library.postprocess import generate_postprocess_status_report
-        from projects.core.library.reports_index import generate_caliper_reports_index
-
-        try:
-            generate_caliper_reports_index(result, output_dir, "reports_index.html")
-        except Exception as e:
-            logger.warning("Failed to generate reports index: %s", e)
-
-        try:
-            generate_postprocess_status_report(result, output_dir, "postprocess_status.html")
-        except Exception as e:
-            logger.warning("Failed to generate postprocessing status report: %s", e)
-
-    return result
+    return orchestrator.run()
