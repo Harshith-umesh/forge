@@ -166,7 +166,7 @@ def _transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
         if isinstance(raw_value, list) and raw_value and len(raw_value) > 0:
             # Check if this looks like 2D data: list of tuples/lists with 2 elements
             first_item = raw_value[0]
-            if isinstance(first_item, (list, tuple)) and len(first_item) == 2:
+            if isinstance(first_item, list | tuple) and len(first_item) == 2:
                 try:
                     # Convert list of tuples [(x1, y1), (x2, y2), ...] to structured format
                     structured_value = {
@@ -564,6 +564,7 @@ class CaliperPostprocessOrchestrator:
         self.visualize_failed = False
         self.kpi_generate_failed = False
         self.kpi_export_failed = False
+        self.ai_eval_failed = False
         self.analyze_failed = False
 
         # Configuration
@@ -607,6 +608,7 @@ class CaliperPostprocessOrchestrator:
                     visualize_failed=False,
                     kpi_generate_failed=False,
                     kpi_export_failed=False,
+                    ai_eval_failed=False,
                     analyze_failed=False,
                     has_regression=False,
                     has_improvement=False,
@@ -627,6 +629,7 @@ class CaliperPostprocessOrchestrator:
                     visualize_failed=False,
                     kpi_generate_failed=False,
                     kpi_export_failed=False,
+                    ai_eval_failed=False,
                     analyze_failed=False,
                     has_regression=False,
                     has_improvement=False,
@@ -875,6 +878,7 @@ class CaliperPostprocessOrchestrator:
             )
             self.kpi_generate_failed = True
             self.kpi_export_failed = True
+            self.ai_eval_failed = True
 
     def _run_kpi_generate_step(
         self, plugin: Any, model: Any, output_dir: Path, mod_str: str
@@ -937,10 +941,15 @@ class CaliperPostprocessOrchestrator:
                 result = _run_ai_eval_export(plugin, model, output_dir, mod_str, self.tree_root)
                 self.steps["ai_eval_export"] = result
                 logger.info(f"AI eval export result: {result}")
+
+                # Check if the result indicates failure (since _run_ai_eval_export catches exceptions)
+                if result.get("status") == "failed":
+                    self.ai_eval_failed = True
+
             except Exception as e:
                 logger.exception("AI eval export failed")
                 self.steps["ai_eval_export"] = {"status": "failed", "error": str(e)}
-                # Note: AI eval failures don't affect overall postprocessing status
+                self.ai_eval_failed = True
 
     def _run_analyze_step(self) -> None:
         """Execute the analyze step if enabled."""
@@ -963,6 +972,7 @@ class CaliperPostprocessOrchestrator:
         logger.info(f"  visualize_failed: {self.visualize_failed}")
         logger.info(f"  kpi_generate_failed: {self.kpi_generate_failed}")
         logger.info(f"  kpi_export_failed: {self.kpi_export_failed}")
+        logger.info(f"  ai_eval_failed: {self.ai_eval_failed}")
         logger.info(f"  analyze_failed: {self.analyze_failed}")
 
         final_status = compute_final_postprocess_status(
@@ -971,6 +981,7 @@ class CaliperPostprocessOrchestrator:
             visualize_failed=self.visualize_failed,
             kpi_generate_failed=self.kpi_generate_failed,
             kpi_export_failed=self.kpi_export_failed,
+            ai_eval_failed=self.ai_eval_failed,
             analyze_failed=self.analyze_failed,
             has_regression=False,
             has_improvement=False,
