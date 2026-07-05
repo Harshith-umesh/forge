@@ -34,7 +34,7 @@ TARGET_KPIS = [
     ("mcp_gw_requests_per_second", "RPS", "req/s"),
     ("mcp_gw_p95_ms", "P95 latency", "ms"),
     ("mcp_gw_p99_ms", "P99 latency", "ms"),
-    ("mcp_gw_failure_rate", "Failure rate", "ratio"),
+    ("mcp_gw_failure_rate", "Failure rate", "%"),
 ]
 
 # Mapping from kpis.jsonl IDs to MLflow metrics.json keys (logged via mlflow.log_metric)

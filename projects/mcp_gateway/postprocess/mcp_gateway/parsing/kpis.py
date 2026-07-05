@@ -76,7 +76,7 @@ def mcp_gw_p99_ms(unified_record) -> float:
 
 @LowerBetter()
 @Format("{:.5f}")
-@KPIMetadata(help="Fraction of failed requests", unit="ratio")
+@KPIMetadata(help="Fraction of failed requests", unit="%")
 def mcp_gw_failure_rate(unified_record) -> float:
     """Failure Rate KPI."""
     value = unified_record.metrics.get("failure_rate")
