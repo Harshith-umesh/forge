@@ -62,6 +62,9 @@ caliper:
         enabled: true
         output: kpis.csv
         include_header_comments: true
+      ai_eval_export:
+        enabled: true
+        output_dir: ai_eval
       export:
         enabled: true
 
