@@ -335,6 +335,7 @@ def _run_kpi_export(
 
 
 def _run_ai_eval_export(
+    postprocess_config,
     plugin,
     model,
     output_dir: Path,
@@ -350,8 +351,8 @@ def _run_ai_eval_export(
                 "completed_at": time.time(),
             }
 
-        # Create AI evaluation directory structure
-        ai_eval_dir = output_dir / "ai_eval"
+        # Create AI evaluation directory structure using configured output directory
+        ai_eval_dir = output_dir / postprocess_config.kpi.ai_eval_export.output_dir
         ai_eval_dir.mkdir(parents=True, exist_ok=True)
 
         # Log command to reproduce this step
@@ -973,20 +974,29 @@ class CaliperPostprocessOrchestrator:
         self, plugin: Any, model: Any, output_dir: Path, mod_str: str
     ) -> None:
         """Execute the AI evaluation export step."""
-        with step_logging("caliper_ai_eval_export", self.step_logs_dir):
-            try:
-                result = _run_ai_eval_export(plugin, model, output_dir, mod_str, self.tree_root)
-                self.steps["ai_eval_export"] = result
-                logger.info(f"AI eval export result: {result}")
+        if self.config.kpi.ai_eval_export.enabled:
+            with step_logging("caliper_ai_eval_export", self.step_logs_dir):
+                try:
+                    result = _run_ai_eval_export(
+                        self.config, plugin, model, output_dir, mod_str, self.tree_root
+                    )
+                    self.steps["ai_eval_export"] = result
+                    logger.info(f"AI eval export result: {result}")
 
-                # Check if the result indicates failure (since _run_ai_eval_export catches exceptions)
-                if result.get("status") == "failed":
+                    # Check if the result indicates failure (since _run_ai_eval_export catches exceptions)
+                    if result.get("status") == "failed":
+                        self.ai_eval_failed = True
+
+                except Exception as e:
+                    logger.exception("AI eval export failed")
+                    self.steps["ai_eval_export"] = {"status": "failed", "error": str(e)}
                     self.ai_eval_failed = True
-
-            except Exception as e:
-                logger.exception("AI eval export failed")
-                self.steps["ai_eval_export"] = {"status": "failed", "error": str(e)}
-                self.ai_eval_failed = True
+        else:
+            self.steps["ai_eval_export"] = {
+                "status": "skipped",
+                "reason": "kpi.ai_eval_export disabled",
+                "completed_at": time.time(),
+            }
 
     def _run_analyze_step(self) -> None:
         """Execute the analyze step if enabled."""

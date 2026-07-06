@@ -88,6 +88,18 @@ class CaliperOrchestrationKpiCsvExportSection(BaseModel):
     )
 
 
+class CaliperOrchestrationKpiAiEvalExportSection(BaseModel):
+    """Export AI evaluation payload with structured test entries and artifact files."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    output_dir: str | None = Field(
+        default="ai_eval",
+        description="Directory name for AI evaluation export; relative paths resolve under the post-processing artifact dir.",
+    )
+
+
 class CaliperOrchestrationKpiSection(BaseModel):
     """``caliper.postprocess.kpi``."""
 
@@ -102,6 +114,9 @@ class CaliperOrchestrationKpiSection(BaseModel):
     )
     csv_export: CaliperOrchestrationKpiCsvExportSection = Field(
         default_factory=CaliperOrchestrationKpiCsvExportSection
+    )
+    ai_eval_export: CaliperOrchestrationKpiAiEvalExportSection = Field(
+        default_factory=CaliperOrchestrationKpiAiEvalExportSection
     )
 
 
