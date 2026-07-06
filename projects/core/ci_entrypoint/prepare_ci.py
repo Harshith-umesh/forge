@@ -821,8 +821,8 @@ def postchecks(
     if finish_reason != FinishReason.SUCCESS or (
         failures_file.exists() and failures_file.stat().st_size > 0
     ):
-        status = f"❌ Execution of '{project} {operation}' failed{duration_str}."
+        status = f"❌ Execution of '{project} {operation}' failed after{duration_str}."
     else:
-        status = f"✅ Execution of '{project} {operation}' succeeded{duration_str}."
+        status = f"✅ Execution of '{project} {operation}' succeeded after{duration_str}."
 
     return status
