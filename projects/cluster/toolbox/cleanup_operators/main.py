@@ -111,6 +111,14 @@ def _discover_installplan_subscription_owners(subscription_name: str, namespace:
         log_stdout=False,
     )
 
+    if result.returncode != 0:
+        logger.warning(
+            f"Failed to list InstallPlans for subscription {subscription_name} "
+            f"in namespace {namespace} (exit {result.returncode}); "
+            f"related subscriptions may not be fully discovered: {result.stderr}"
+        )
+        return []
+
     try:
         installplans = yaml.safe_load(result.stdout) or {}
     except yaml.YAMLError as e:
