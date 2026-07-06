@@ -1,9 +1,6 @@
 vaults:
   all: []
-  all-optional:
-  - psap-forge-notifications
-  - psap-forge-mlflow-export
-  - psap-models-corp-rh
+  all-optional: []
   prepare: []
   prepare-optional: []
   test: []
@@ -45,6 +42,9 @@ caliper:
           tags: {}
           parameters: {}
           metrics: {}
+    notifications:
+      enabled: true
+      vault: psap-forge-notifications
 
   replot:
     url: null  # Set via /replot.url directive
