@@ -203,26 +203,18 @@ def _format_failure_info(context: NotificationContext) -> str:
 
 
 def _find_kpis_json(artifact_dir):
-    """Find kpis.json (schema v2) or fallback to kpis.jsonl in artifact tree."""
-    # Prefer new kpis.json format
+    """Find kpis.json in artifact tree."""
     direct = artifact_dir / "kpis.json"
     if direct.exists():
         return direct
     for f in artifact_dir.glob("**/kpis.json"):
         return f
 
-    # Fallback to legacy kpis.jsonl
-    direct = artifact_dir / "kpis.jsonl"
-    if direct.exists():
-        return direct
-    for f in artifact_dir.glob("**/kpis.jsonl"):
-        return f
-
     return None
 
 
 def _load_current_kpis(context: NotificationContext) -> dict[str, float]:
-    """Read KPI values from kpis.json (schema v2) or kpis.jsonl in the artifact directory."""
+    """Read KPI values from kpis.json in the artifact directory."""
     test_root = get_test_artifacts_root(context)
     if not test_root:
         return {}
@@ -236,26 +228,14 @@ def _load_current_kpis(context: NotificationContext) -> dict[str, float]:
 
     try:
         with open(kpis_file) as f:
-            if kpis_file.suffix == ".json":
-                data = json.load(f)
-                # Schema v2: {"schema_version": "2", "tests": [{..., "kpis": [...]}]}
-                for test in data.get("tests", []):
-                    for kpi_record in test.get("kpis", []):
-                        kpi_id = kpi_record.get("id", "")
-                        if kpi_id in target_ids:
-                            value = kpi_record.get("value")
-                            if value is not None:
-                                kpis[kpi_id] = float(value)
-            else:
-                # Legacy kpis.jsonl: one JSON record per line
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    record = json.loads(line)
-                    kpi_id = record.get("kpi_id", "")
+            data = json.load(f)
+            for test in data.get("tests", []):
+                for kpi_record in test.get("kpis", []):
+                    kpi_id = kpi_record.get("id", "")
                     if kpi_id in target_ids:
-                        kpis[kpi_id] = record.get("value", 0)
+                        value = kpi_record.get("value")
+                        if value is not None:
+                            kpis[kpi_id] = float(value)
     except Exception as e:
         logger.warning("Failed to read KPI file %s: %s", kpis_file, e)
 

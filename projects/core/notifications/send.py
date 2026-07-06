@@ -510,12 +510,12 @@ def send_notification_to_slack(
 
 
 def get_pr_number():
-    if os.environ.get("OPENSHIFT_CI") == "true":
-        return os.environ.get("PULL_NUMBER")
+    pull_number = os.environ.get("PULL_NUMBER")
+    if pull_number:
+        return pull_number
 
-    else:
-        logger.warning("Test not running from a well-known CI engine, cannot extract a PR number.")
-        return
+    logger.warning("Cannot extract a PR number from the environment.")
+    return
 
 
 # returns a tuple (base_link, link_suffix)
