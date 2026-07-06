@@ -6,6 +6,7 @@ from projects.cluster.toolbox.cleanup_operators import main as cleanup_operators
 def test_subscription_owner_refs_from_installplans() -> None:
     installplans = {
         "items": [
+            {"metadata": {"ownerReferences": [{"kind": "Subscription", "name": "other-operator"}]}},
             {
                 "metadata": {
                     "ownerReferences": [
@@ -15,38 +16,73 @@ def test_subscription_owner_refs_from_installplans() -> None:
                         {"kind": "Subscription", "name": "authorino-operator"},
                     ]
                 }
-            }
+            },
         ]
     }
 
-    assert cleanup_operators._subscription_owner_refs_from_installplans(installplans) == [
-        "authorino-operator",
-        "dns-operator",
-    ]
+    assert cleanup_operators._subscription_owner_refs_from_installplans(
+        installplans, "authorino-operator"
+    ) == ["dns-operator"]
 
 
 def test_expand_operators_with_installplan_owners(monkeypatch) -> None:
-    discovered_owners = {
-        ("rhods-operator", "redhat-ods-operator"): [
-            "authorino-operator-stable-redhat-operators-openshift-marketplace",
-            "dns-operator-stable-redhat-operators-openshift-marketplace",
-            "limitador-operator-stable-redhat-operators-openshift-marketplace",
-            "rhcl-operator",
-            "rhods-operator",
-        ],
-        (
-            "authorino-operator-stable-redhat-operators-openshift-marketplace",
-            "redhat-ods-operator",
-        ): ["rhods-operator"],
+    installplans_by_namespace = {
+        "redhat-ods-operator": {
+            "items": [
+                {
+                    "metadata": {
+                        "ownerReferences": [
+                            {"kind": "Subscription", "name": "rhods-operator"},
+                            {
+                                "kind": "Subscription",
+                                "name": "authorino-operator-stable-redhat-operators-openshift-marketplace",
+                            },
+                            {
+                                "kind": "Subscription",
+                                "name": "dns-operator-stable-redhat-operators-openshift-marketplace",
+                            },
+                            {
+                                "kind": "Subscription",
+                                "name": "limitador-operator-stable-redhat-operators-openshift-marketplace",
+                            },
+                            {"kind": "Subscription", "name": "rhcl-operator"},
+                        ]
+                    }
+                },
+                {
+                    "metadata": {
+                        "ownerReferences": [
+                            {
+                                "kind": "Subscription",
+                                "name": "authorino-operator-stable-redhat-operators-openshift-marketplace",
+                            },
+                            {"kind": "Subscription", "name": "rhods-operator"},
+                        ]
+                    }
+                },
+            ]
+        },
+        "openshift-operators": {
+            "items": [
+                {
+                    "metadata": {
+                        "ownerReferences": [{"kind": "Subscription", "name": "rhcl-operator"}]
+                    }
+                }
+            ]
+        },
     }
 
-    def fake_discover(subscription_name: str, namespace: str) -> list[str]:
-        return discovered_owners.get((subscription_name, namespace), [])
+    fetch_count = {}
+
+    def fake_fetch(namespace: str) -> dict:
+        fetch_count[namespace] = fetch_count.get(namespace, 0) + 1
+        return installplans_by_namespace[namespace]
 
     monkeypatch.setattr(
         cleanup_operators,
-        "_discover_installplan_subscription_owners",
-        fake_discover,
+        "_fetch_installplans",
+        fake_fetch,
     )
 
     assert cleanup_operators._expand_operators_with_installplan_owners(
@@ -71,3 +107,4 @@ def test_expand_operators_with_installplan_owners(monkeypatch) -> None:
         ),
         ("rhcl-operator", "redhat-ods-operator"),
     ]
+    assert fetch_count == {"redhat-ods-operator": 1, "openshift-operators": 1}

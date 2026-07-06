@@ -79,6 +79,7 @@ def _expand_operators_with_installplan_owners(
     expanded_operators = []
     seen_operators = set(operators)
     pending_operators = deque(operators)
+    installplans_by_namespace: dict[str, dict] = {}
 
     while pending_operators:
         operator_name, namespace = pending_operators.popleft()
@@ -86,7 +87,13 @@ def _expand_operators_with_installplan_owners(
 
         # Follow ownerReferences transitively because dependency InstallPlans can
         # point back to the root subscription or to other related subscriptions.
-        owner_names = _discover_installplan_subscription_owners(operator_name, namespace)
+        if namespace not in installplans_by_namespace:
+            installplans_by_namespace[namespace] = _fetch_installplans(namespace)
+
+        owner_names = _subscription_owner_refs_from_installplans(
+            installplans_by_namespace[namespace],
+            operator_name,
+        )
         for owner_name in owner_names:
             owner_key = (owner_name, namespace)
             if owner_key in seen_operators:
@@ -102,48 +109,52 @@ def _expand_operators_with_installplan_owners(
     return expanded_operators
 
 
-def _discover_installplan_subscription_owners(subscription_name: str, namespace: str) -> list[str]:
+def _fetch_installplans(namespace: str) -> dict:
     result = shell.run(
-        f"oc get installplan -n {namespace} "
-        f"-l operators.coreos.com/{subscription_name}.{namespace} "
-        "-o yaml",
+        f"oc get installplan -n {namespace} -o yaml",
         check=False,
         log_stdout=False,
     )
 
     if result.returncode != 0:
         logger.warning(
-            f"Failed to list InstallPlans for subscription {subscription_name} "
-            f"in namespace {namespace} (exit {result.returncode}); "
-            f"related subscriptions may not be fully discovered: {result.stderr}"
+            f"Failed to list InstallPlans in namespace {namespace} "
+            f"(exit {result.returncode}); related subscriptions may not be fully discovered: "
+            f"{result.stderr}"
         )
-        return []
+        return {}
 
     try:
-        installplans = yaml.safe_load(result.stdout) or {}
+        return yaml.safe_load(result.stdout) or {}
     except yaml.YAMLError as e:
-        logger.warning(
-            f"Could not parse InstallPlans for subscription {subscription_name} "
-            f"in namespace {namespace}: {e}"
-        )
-        return []
-
-    return _subscription_owner_refs_from_installplans(installplans)
+        logger.warning(f"Could not parse InstallPlans in namespace {namespace}: {e}")
+        return {}
 
 
-def _subscription_owner_refs_from_installplans(installplans: dict) -> list[str]:
+def _subscription_owner_refs_from_installplans(
+    installplans: dict,
+    subscription_name: str,
+) -> list[str]:
     owner_names = []
     seen_owner_names = set()
     for installplan in installplans.get("items", []):
-        for owner_reference in installplan.get("metadata", {}).get("ownerReferences", []):
-            owner_name = owner_reference.get("name")
-            if (
-                owner_reference.get("kind") == "Subscription"
-                and owner_name
-                and owner_name not in seen_owner_names
-            ):
-                seen_owner_names.add(owner_name)
-                owner_names.append(owner_name)
+        owner_references = installplan.get("metadata", {}).get("ownerReferences", [])
+        subscription_owner_names = dict.fromkeys(
+            owner_reference.get("name")
+            for owner_reference in owner_references
+            if owner_reference.get("kind") == "Subscription" and owner_reference.get("name")
+        )
+        if subscription_name not in subscription_owner_names:
+            continue
+
+        for owner_name in subscription_owner_names:
+            if owner_name == subscription_name:
+                continue
+            if owner_name in seen_owner_names:
+                continue
+
+            seen_owner_names.add(owner_name)
+            owner_names.append(owner_name)
 
     return owner_names
 
