@@ -222,11 +222,20 @@ class VaultManager:
 
                 if filename not in defined_files:
                     msg = f"Vault '{vault_name}' contains extra file '{filename}' at '{file_path}' not defined in specification"
-                    if effective_strict:
-                        logger.error(msg)
-                        all_valid = False
-                    else:
-                        logger.warning(msg)
+                    # Always warn for extra files, never fail validation
+                    logger.warning(msg)
+
+                    # Add CI notification for extra vault files
+                    from projects.core.library import ci as ci_lib
+
+                    notification_msg = f"Extra vault file detected: {vault_name}/{filename}\n\nThis file exists in the vault but is not defined in the vault specification. This is not an error but should be reviewed for security purposes."
+                    ci_lib.add_notification_file(
+                        name=f"vault_extra_file_{vault_name}_{filename}",
+                        message=notification_msg,
+                    )
+                    logger.debug(
+                        f"Added notification for extra vault file: {vault_name}/{filename}"
+                    )
 
         if all_valid:
             logger.info(f"Vault '{vault_name}' validation passed")
@@ -486,7 +495,7 @@ def _phase_vault_get_for_phase(phase: str) -> list[str]:
     from projects.core.library import config
 
     # Get vaults for specific phase, defaulting to empty list if phase doesn't exist
-    return config.project.get_config(f"vaults.{phase}", [])
+    return config.project.get_config(f"vaults.{phase}", [], warn=False)
 
 
 def phase_vault_init(phase: str) -> None:
