@@ -7,6 +7,7 @@ spec.secretRefs with vault information from project configuration.
 
 import logging
 import os
+import sys
 from collections.abc import Callable
 
 import click
@@ -16,6 +17,11 @@ from projects.core.library import ci as ci_lib
 from projects.core.library import env, run
 
 logger = logging.getLogger(__name__)
+
+
+def is_interactive_tty() -> bool:
+    """Check if running in an interactive TTY environment."""
+    return sys.stdin.isatty() and sys.stdout.isatty()
 
 
 def fetch_fournos_job() -> tuple[str, str, dict]:
@@ -124,15 +130,25 @@ def resolve_fournos_config(
         ValueError: If required environment variables are missing
         RuntimeError: If FournosJob operations fail
     """
+    # Check if we're in an interactive TTY environment
+    is_tty = is_interactive_tty()
+
     # Fetch the FournosJob object
     try:
         job_name, namespace, fjob_obj = fetch_fournos_job()
 
         logger.info(f"Resolving FournosJob: {job_name} in namespace: {namespace}")
-    except ValueError:
-        if not dry_run:
+    except ValueError as e:
+        if not dry_run and not is_tty:
             raise
-        logger.info("DRY RUN: not using any existing FournosJob")
+
+        if is_tty:
+            logger.warning(f"TTY MODE: {e}")
+            logger.warning(
+                "Running in interactive mode - will show vault configuration without applying to cluster"
+            )
+        else:
+            logger.info("DRY RUN: not using any existing FournosJob")
 
         fjob_obj = {"spec": {}}
 
@@ -141,6 +157,10 @@ def resolve_fournos_config(
 
     # Create secretRefs list with vault names
     fjob_obj["spec"]["secretRefs"] = list(vaults)
+
+    logger.info(f"Vault configuration ({len(vaults)} vault references):")
+    for i, vault_name in enumerate(vaults, 1):
+        logger.info(f"  {i}. {vault_name}")
 
     logger.info(f"Updated spec.secretRefs with {len(vaults)} vault references")
 
@@ -171,6 +191,11 @@ def resolve_fournos_config(
 
     if dry_run:
         logger.info("DRY RUN: Not applying changes to cluster")
+        return 0
+
+    # Check if we have valid job info for cluster update
+    if is_tty and ("job_name" not in locals() or "namespace" not in locals()):
+        logger.info("TTY MODE: Not applying changes to cluster (no FournosJob available)")
         return 0
 
     # Update the FournosJob object
