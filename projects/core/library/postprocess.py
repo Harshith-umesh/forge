@@ -32,13 +32,16 @@ from projects.core.library.status_to_html import convert_status_yaml_to_html
 logger = logging.getLogger(__name__)
 
 
-def write_test_labels(directory: Path, labels: dict[str, str], *, version: str = "1") -> Path:
+def write_test_labels(
+    directory: Path, labels: dict[str, str], *, version: str = "1", dump_config: bool = True
+) -> Path:
     """Write a __test_labels__.yaml file to mark a directory as a Caliper test base.
 
     Args:
         directory: Directory to create the test labels file in
         labels: Dictionary of label key-value pairs
         version: Version string for the test labels format (default: "1")
+        dump_config: Whether to save project configuration to config.yaml (default: True)
 
     Returns:
         Path to the created __test_labels__.yaml file
@@ -63,6 +66,18 @@ def write_test_labels(directory: Path, labels: dict[str, str], *, version: str =
     test_labels_path.parent.mkdir(parents=True, exist_ok=True)
     with test_labels_path.open("w", encoding="utf-8") as handle:
         yaml.safe_dump(payload, handle, sort_keys=False)
+
+    # Optionally save project configuration
+    if dump_config:
+        from projects.core.library import config
+
+        try:
+            if config.project is not None:
+                config_path = directory / "config.yaml"
+                config.project.save_config(dest=config_path)
+                logger.info(f"Saved project configuration to {config_path}")
+        except Exception as e:
+            logger.warning(f"Failed to save project configuration: {e}")
 
     return test_labels_path
 
