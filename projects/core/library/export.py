@@ -577,7 +577,7 @@ def _get_overall_status_from_steps() -> str:
         if StepStatus.FAILURE in step_statuses:
             return "🔴"  # Any failure = red
         elif StepStatus.ONGOING in step_statuses:
-            return "🟡"  # Ongoing = yellow
+            return "🟢"  # Ongoing --> success
         elif StepStatus.UNKNOWN in step_statuses:
             return "🟠"  # Unknown = orange
         else:
@@ -720,7 +720,9 @@ def run_caliper_orchestration_export(*, artifact_directory: Path | None):
             # Check if vault manager is already initialized
             try:
                 vault.get_vault_manager()
-                logger.info(f"Vault manager already initialized, checking {len(export_vaults)} export vaults")
+                logger.info(
+                    f"Vault manager already initialized, checking {len(export_vaults)} export vaults"
+                )
                 manager_already_initialized = True
             except RuntimeError:
                 logger.info(f"Initializing vault manager with {len(export_vaults)} export vaults")
@@ -731,7 +733,9 @@ def run_caliper_orchestration_export(*, artifact_directory: Path | None):
             if manager_already_initialized:
                 logger.info(f"Export vault check completed for {len(export_vaults)} vaults")
             else:
-                logger.info(f"Successfully initialized vault manager with {len(export_vaults)} vaults for export")
+                logger.info(
+                    f"Successfully initialized vault manager with {len(export_vaults)} vaults for export"
+                )
         else:
             logger.info("No vaults needed for export operation")
 
