@@ -29,6 +29,7 @@ from projects.caliper.orchestration.postprocess_outcome import (
     TestPhaseOutcome,
     compute_final_postprocess_status,
 )
+from projects.caliper.orchestration.s3_export import run_s3_export
 from projects.caliper.orchestration.step_logging import (
     cleanup_step_logging,
     log_ai_eval_command,
@@ -603,6 +604,7 @@ class CaliperPostprocessOrchestrator:
         self.kpi_generate_failed = False
         self.kpi_export_failed = False
         self.ai_eval_failed = False
+        self.s3_export_failed = False
         self.analyze_failed = False
 
         # Configuration
@@ -647,6 +649,7 @@ class CaliperPostprocessOrchestrator:
                     kpi_generate_failed=False,
                     kpi_export_failed=False,
                     ai_eval_failed=False,
+                    s3_export_failed=False,
                     analyze_failed=False,
                     has_regression=False,
                     has_improvement=False,
@@ -668,6 +671,7 @@ class CaliperPostprocessOrchestrator:
                     kpi_generate_failed=False,
                     kpi_export_failed=False,
                     ai_eval_failed=False,
+                    s3_export_failed=False,
                     analyze_failed=False,
                     has_regression=False,
                     has_improvement=False,
@@ -887,6 +891,9 @@ class CaliperPostprocessOrchestrator:
             # AI evaluation export
             self._run_ai_eval_export_step(plugin, model, output_dir, mod_str)
 
+            # S3 export
+            self._run_s3_export_step(output_dir)
+
         except Exception as e:
             completion_time = time.time()
             logger.error(f"Failed to run KPI/AI eval operations: {e}")
@@ -912,11 +919,17 @@ class CaliperPostprocessOrchestrator:
                         "error": str(e),
                         "completed_at": completion_time,
                     },
+                    "s3_export": {
+                        "status": "skipped",
+                        "reason": "failed to load plugin",
+                        "completed_at": completion_time,
+                    },
                 }
             )
             self.kpi_generate_failed = True
             self.kpi_export_failed = True
             self.ai_eval_failed = True
+            self.s3_export_failed = True
 
     def _run_kpi_generate_step(
         self, plugin: Any, model: Any, output_dir: Path, mod_str: str
@@ -998,6 +1011,41 @@ class CaliperPostprocessOrchestrator:
                 "completed_at": time.time(),
             }
 
+    def _run_s3_export_step(self, output_dir: Path) -> None:
+        """Execute the S3 export step."""
+        if self.config.s3_export.enabled:
+            with step_logging("caliper_s3_export", self.step_logs_dir):
+                try:
+                    # Determine AI eval directory if it was generated
+                    ai_eval_dir = None
+                    if (
+                        self.config.kpi.ai_eval_export.enabled
+                        and self.steps.get("ai_eval_export", {}).get("status") == "success"
+                    ):
+                        ai_eval_dir = output_dir / self.config.kpi.ai_eval_export.output_dir
+
+                    result = run_s3_export(self.config, output_dir, ai_eval_dir)
+                    self.steps["s3_export"] = result
+
+                    if result.get("status") == "success":
+                        logger.info(f"S3 export completed: {result}")
+                    else:
+                        logger.warning(f"S3 export failed: {result}")
+
+                except Exception as e:
+                    logger.exception("S3 export step failed")
+                    self.steps["s3_export"] = {
+                        "status": "failed",
+                        "error": str(e),
+                        "completed_at": time.time(),
+                    }
+        else:
+            self.steps["s3_export"] = {
+                "status": "skipped",
+                "reason": "s3_export disabled",
+                "completed_at": time.time(),
+            }
+
     def _run_analyze_step(self) -> None:
         """Execute the analyze step if enabled."""
         if not self.config.analyze.enabled:
@@ -1020,6 +1068,7 @@ class CaliperPostprocessOrchestrator:
         logger.info(f"  kpi_generate_failed: {self.kpi_generate_failed}")
         logger.info(f"  kpi_export_failed: {self.kpi_export_failed}")
         logger.info(f"  ai_eval_failed: {self.ai_eval_failed}")
+        logger.info(f"  s3_export_failed: {self.s3_export_failed}")
         logger.info(f"  analyze_failed: {self.analyze_failed}")
 
         final_status = compute_final_postprocess_status(
@@ -1029,6 +1078,7 @@ class CaliperPostprocessOrchestrator:
             kpi_generate_failed=self.kpi_generate_failed,
             kpi_export_failed=self.kpi_export_failed,
             ai_eval_failed=self.ai_eval_failed,
+            s3_export_failed=self.s3_export_failed,
             analyze_failed=self.analyze_failed,
             has_regression=False,
             has_improvement=False,

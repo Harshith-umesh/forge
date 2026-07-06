@@ -94,7 +94,7 @@ class CaliperOrchestrationKpiAiEvalExportSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
-    output_dir: str | None = Field(
+    output_dir: str = Field(
         default="ai_eval",
         description="Directory name for AI evaluation export; relative paths resolve under the post-processing artifact dir.",
     )
@@ -144,6 +144,71 @@ class CaliperOrchestrationAnalyzeSection(BaseModel):
         return self
 
 
+class CaliperOrchestrationS3ExportSection(BaseModel):
+    """Export postprocess artifacts to AWS S3."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    bucket: str | None = Field(
+        default=None,
+        description="S3 bucket name for export (required when enabled).",
+    )
+    prefix: str | None = Field(
+        default=None,
+        description="S3 key prefix/folder path (optional).",
+    )
+    instance: str | None = Field(
+        default=None,
+        description="Instance identifier for S3 export organization (optional).",
+    )
+    directory: str | None = Field(
+        default=None,
+        description="Directory identifier for S3 export organization (optional).",
+    )
+    upload_id: str | None = Field(
+        default=None,
+        description="Custom upload identifier; uses timestamp (YY-MM-DD_HHMMSS) if null.",
+    )
+    dry_run: bool = Field(
+        default=False,
+        description="Show what would be uploaded without actually uploading files.",
+    )
+    include_csv: bool = Field(
+        default=True,
+        description="Whether to include CSV exports in S3 upload.",
+    )
+    include_ai_eval: bool = Field(
+        default=True,
+        description="Whether to include AI evaluation exports in S3 upload.",
+    )
+    vault: str = Field(
+        default="psap-forge-aws-s3-export",
+        description="Vault name containing AWS credentials.",
+    )
+    aws_credentials_file: str = Field(
+        default="aws.credentials",
+        description="File name within vault containing AWS credentials.",
+    )
+
+    @model_validator(mode="after")
+    def _required_fields_when_enabled(self) -> Self:
+        if self.enabled:
+            if not (self.bucket and str(self.bucket).strip()):
+                raise ValueError(
+                    "caliper.postprocess.s3_export.enabled requires non-empty bucket name."
+                )
+            if not (self.instance and str(self.instance).strip()):
+                raise ValueError(
+                    "caliper.postprocess.s3_export.enabled requires non-empty instance."
+                )
+            if not (self.directory and str(self.directory).strip()):
+                raise ValueError(
+                    "caliper.postprocess.s3_export.enabled requires non-empty directory."
+                )
+        return self
+
+
 class CaliperOrchestrationPostprocessConfig(BaseModel):
     """``caliper.postprocess`` — parse, visualize, optional KPI + regression."""
 
@@ -175,6 +240,9 @@ class CaliperOrchestrationPostprocessConfig(BaseModel):
     kpi: CaliperOrchestrationKpiSection = Field(default_factory=CaliperOrchestrationKpiSection)
     analyze: CaliperOrchestrationAnalyzeSection = Field(
         default_factory=CaliperOrchestrationAnalyzeSection
+    )
+    s3_export: CaliperOrchestrationS3ExportSection = Field(
+        default_factory=CaliperOrchestrationS3ExportSection
     )
 
     @model_validator(mode="after")
