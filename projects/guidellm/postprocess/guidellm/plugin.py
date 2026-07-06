@@ -222,6 +222,15 @@ class GuideLLMPlugin(PostProcessingPlugin):
         else:
             logger.debug(f"No benchmark files found in {test_dir}")
 
+        # Project configuration file - include if present
+        config_file = test_dir / "config.yaml"
+        if config_file.exists():
+            relative_path = str(config_file.relative_to(test_dir))
+            artifact_files.append(relative_path)
+            logger.info(f"Found project config artifact: {relative_path}")
+        else:
+            logger.warning(f"No config.yaml found in {test_dir}")
+
         logger.info(
             f"AI eval export will copy {len(artifact_files)} artifact files from {test_dir}"
         )
