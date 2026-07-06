@@ -219,7 +219,7 @@ def _get_project_and_args(project: str) -> tuple[str, str]:
     try:
         from projects.core.library import config
 
-        job_args = config.project.get_config("ci_job.args")
+        job_args = config.project.get_config("ci_job.args", [], warn=False)
         fjob_args_str = " ".join(job_args) if job_args else ""
     except Exception as e:
         logger.warning(f"Failed to get args from config: {e}")
@@ -856,6 +856,7 @@ def _try_update_run_log(status: dict[str, Any] | None) -> None:
     except Exception as e:
         logger.warning("Failed to update run.log in MLflow: %s", e)
 
+
 def caliper_export_list_vaults() -> list[str]:
     """List vaults required for Caliper export operations.
 
@@ -907,16 +908,8 @@ def caliper_export_list_vaults() -> list[str]:
             s3_export_enabled or s3_import_enabled or mlflow_config.get("enabled", False)
         )
 
-        if notification_config.get("enabled", False) and any_export_enabled:
-            # Add notification vault for export completion notifications
-            notification_vault = notification_config.get("vault")
-            if notification_vault:
-                export_vaults.append(notification_vault)
-                logger.info(f"Added notification vault (export enabled): {notification_vault}")
-            else:
-                logger.warning(
-                    "Export notifications enabled but no vault specified in caliper.export.notifications.vault"
-                )
+        # Note: notification vault is handled separately as optional vault
+        # See caliper_export_list_optional_vaults() function
 
         # STUB: Could add other export-related vaults here in the future
         # e.g., for different cloud providers, artifact repositories, etc.
@@ -927,6 +920,49 @@ def caliper_export_list_vaults() -> list[str]:
 
     logger.info(f"Export vault list: {export_vaults}")
     return export_vaults
+
+
+def caliper_export_list_optional_vaults() -> list[str]:
+    """List optional vaults for Caliper export operations.
+
+    Returns:
+        List of optional vault names for export functionality (e.g., notifications)
+    """
+    optional_vaults = []
+
+    try:
+        from projects.core.library import config
+
+        # Check if notifications are enabled and any export backend is enabled
+        notification_config = config.project.get_config("caliper.export.notifications", {})
+
+        # Check if any export operations are enabled
+        s3_export_config = config.project.get_config("caliper.postprocess.s3.export", {})
+        s3_import_config = config.project.get_config("caliper.postprocess.s3.import", {})
+        mlflow_config = config.project.get_config("caliper.export.backend.mlflow", {})
+
+        any_export_enabled = (
+            s3_export_config.get("enabled", False) or
+            s3_import_config.get("enabled", False) or
+            mlflow_config.get("enabled", False)
+        )
+
+        if notification_config.get("enabled", False) and any_export_enabled:
+            # Add notification vault for export completion notifications
+            notification_vault = notification_config.get("vault")
+            if notification_vault:
+                optional_vaults.append(notification_vault)
+                logger.info(f"Added notification vault (export enabled): {notification_vault}")
+            else:
+                logger.warning(
+                    "Export notifications enabled but no vault specified in caliper.export.notifications.vault"
+                )
+
+    except Exception as e:
+        logger.warning(f"Failed to determine optional export vaults from config: {e}")
+
+    logger.info(f"Optional export vault list: {optional_vaults}")
+    return optional_vaults
 
 
 def caliper_agentic_list_vaults() -> list[str]:
