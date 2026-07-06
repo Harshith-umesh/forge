@@ -205,19 +205,32 @@ def resolve_fournos_config(
 
 
 def create_fournos_resolve_entrypoint(
-    vault_list_func: Callable[[], list[str]],
+    vault_list_func: Callable[[], list[str]] | None = None,
+    vault_list_funcs: list[Callable[[], list[str]]] | None = None,
     hardware_resolver_func: Callable[[dict], dict] | None = None,
 ):
     """
     Create a FournosJob resolve command with the given vault list and hardware resolver functions.
 
     Args:
-        vault_list_func: Function that returns a list of vault names
+        vault_list_func: Function that returns a list of vault names (deprecated, use vault_list_funcs)
+        vault_list_funcs: List of functions that each return a list of vault names
         hardware_resolver_func: Optional function that takes spec.hardware dict and returns updated hardware dict
 
     Returns:
         Click command for FournosJob resolution
     """
+    # Handle backward compatibility
+    if vault_list_func is not None and vault_list_funcs is not None:
+        raise ValueError("Cannot specify both vault_list_func and vault_list_funcs")
+
+    if vault_list_func is not None:
+        # Convert single function to list for backward compatibility
+        vault_functions = [vault_list_func]
+    elif vault_list_funcs is not None:
+        vault_functions = vault_list_funcs
+    else:
+        raise ValueError("Must specify either vault_list_func or vault_list_funcs")
 
     @click.command("resolve-fournos-config")
     @click.option(
@@ -245,12 +258,23 @@ def create_fournos_resolve_entrypoint(
         if namespace:
             os.environ["FOURNOS_WORKLOAD_NAMESPACE"] = namespace
 
-        # Get vault list from the provided function
+        # Get vault lists from all provided functions
         try:
-            vaults = vault_list_func()
+            all_vaults = []
+            for i, func in enumerate(vault_functions):
+                func_vaults = func()
+                logger.info(
+                    f"Vault function {i + 1} returned {len(func_vaults)} vaults: {func_vaults}"
+                )
+                all_vaults.extend(func_vaults)
+
+            # Remove duplicates while preserving order
+            vaults = list(dict.fromkeys(all_vaults))
+            logger.info(f"Combined vault list ({len(vaults)} unique vaults): {vaults}")
+
         except Exception as e:
-            logger.error(f"Failed to get vault list: {e}")
-            raise RuntimeError(f"Failed to get vault list: {e}") from e
+            logger.error(f"Failed to get vault lists: {e}")
+            raise RuntimeError(f"Failed to get vault lists: {e}") from e
 
         return resolve_fournos_config(
             dry_run=dry_run, vaults=vaults, hardware_resolver_func=hardware_resolver_func
