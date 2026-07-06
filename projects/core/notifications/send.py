@@ -62,6 +62,8 @@ def send_notification(message, github=True, slack=False, dry_run=False, pr_numbe
     """
     if pr_number is None:
         pr_number = get_pr_number()
+    if not pr_number:
+        logger.warning("PR number not available, cannot send the GH notification")
 
     if not github_api:
         logger.info("Github API not available, don't send notification to github")
@@ -510,12 +512,7 @@ def send_notification_to_slack(
 
 
 def get_pr_number():
-    pull_number = os.environ.get("PULL_NUMBER")
-    if pull_number:
-        return pull_number
-
-    logger.warning("Cannot extract a PR number from the environment.")
-    return
+    return os.environ.get("PULL_NUMBER")
 
 
 # returns a tuple (base_link, link_suffix)
