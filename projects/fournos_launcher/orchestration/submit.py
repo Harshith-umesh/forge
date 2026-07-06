@@ -11,6 +11,7 @@ from datetime import datetime
 import yaml
 
 from projects.core.ci_entrypoint.prepare_ci import format_duration
+from projects.core.dsl.runtime import TaskExecutionError
 from projects.core.dsl.utils.k8s import sanitize_k8s_name
 from projects.core.library import ci as ci_lib
 from projects.core.library import config, env, run, vault
@@ -152,7 +153,13 @@ def send_github_notification(
         # Include error details if provided
         error_section = ""
         if error is not None:
-            error_section = f"\n**Error:** `{type(error).__name__}: {str(error)}`\n"
+            # Extract clean error message from TaskExecutionError if needed
+            if isinstance(error, TaskExecutionError) and error.original_exception:
+                clean_error_name = type(error.original_exception).__name__
+                clean_error_msg = str(error.original_exception)
+                error_section = f"\n**Error:** `{clean_error_name}: {clean_error_msg}`\n"
+            else:
+                error_section = f"\n**Error:** `{type(error).__name__}: {str(error)}`\n"
 
         notification_status = f"""<details>
 <summary>{status_flag} Submission of <code>{project_name} {presets}</code> {status_verb} <code>{duration_str.strip()}</code> {status_flag}</summary>
@@ -401,10 +408,16 @@ def submit_job():
             except Exception as e:
                 logger.error(f"Single job failed: {e}")
                 return_code = 1
+                job_error = e
+            else:
+                job_error = None
 
             # Send simplified GitHub notification
             send_github_notification(
-                success=(return_code == 0), job_type="single", start_time=start_time
+                success=(return_code == 0),
+                job_type="single",
+                start_time=start_time,
+                error=job_error,
             )
 
             # Cleanup the job
