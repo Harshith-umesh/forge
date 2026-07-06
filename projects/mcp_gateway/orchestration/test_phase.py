@@ -162,11 +162,10 @@ def run_one_test(
         )
 
         run_start_time = datetime.now(UTC)
-        results = _run_test(users=users, target=target, num_servers=num_servers)
+        _run_test(users=users, target=target, num_servers=num_servers)
         test_end_time = datetime.now(UTC)
         test_start_time = run_start_time + timedelta(seconds=warmup_seconds)
 
-        _save_locust_artifacts(results, env.ARTIFACT_DIR)
         _capture_pod_logs(namespace=namespace, run_dir=env.ARTIFACT_DIR)
 
         if metrics_cfg.enabled:
@@ -226,28 +225,6 @@ def _deploy_servers(
         )
 
 
-# ---------------------------------------------------------------------------
-# Artifact helpers
-# ---------------------------------------------------------------------------
-
-
-def _save_locust_artifacts(results: LocustResults, run_dir: Path) -> None:
-    """Save raw Locust CSV/log output directly to the run directory."""
-    if results.stats_csv:
-        (run_dir / "stats.csv").write_text(results.stats_csv, encoding="utf-8")
-    if results.stats_history_csv:
-        (run_dir / "stats_history.csv").write_text(results.stats_history_csv, encoding="utf-8")
-    if results.failures_csv:
-        (run_dir / "failures.csv").write_text(results.failures_csv, encoding="utf-8")
-    (run_dir / "master.log").write_text(results.raw_log, encoding="utf-8")
-    logger.info("Locust artifacts saved to %s", run_dir)
-
-
-# ---------------------------------------------------------------------------
-# Deployment helpers
-# ---------------------------------------------------------------------------
-
-
 def _cleanup_servers(*, namespace: str, num_servers: int, mock_server: str) -> None:
     """Remove mock servers and infrastructure after a server-level iteration."""
     from projects.core.dsl.utils.k8s import oc as run_oc
@@ -286,7 +263,7 @@ def _cleanup_servers(*, namespace: str, num_servers: int, mock_server: str) -> N
 
 
 def _run_test(*, users: int, target: str, num_servers: int) -> LocustResults:
-    """Run a single Locust test (artifacts saved separately by the caller)."""
+    """Run a single Locust test (artifacts saved by the run_distributed toolbox)."""
     locust_kwargs = cfg.build_locust_kwargs(
         users=users,
         target=target,
