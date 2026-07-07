@@ -1219,7 +1219,7 @@ def import_command(
         sys.exit(2)
 
 
-@main.command("s3-import")
+@kpi_group.command("s3-import")
 @click.option("--bucket", required=True, help="S3 bucket name")
 @click.option("--prefix", default="", help="S3 object prefix/path")
 @click.option(
@@ -1378,8 +1378,8 @@ def s3_import_cmd(
         sys.exit(2)
 
 
-# Register s3-export command
-main.add_command(s3_export_cmd)
+# Register s3-export command under kpi group
+kpi_group.add_command(s3_export_cmd)
 
 
 def run_cli() -> None:
@@ -1392,11 +1392,21 @@ def run_cli() -> None:
             sys.exit(rv)
     except click.ClickException as exc:
         # Handle click exceptions including NoArgsIsHelpError and MissingParameter
-        if isinstance(exc, click.MissingParameter):
-            click.echo(f"Error: Missing required parameter: {exc.param.name}", err=True)
+        if isinstance(exc, click.UsageError):
+            # Check if this is an invalid command error
+            if "No such command" in str(exc):
+                click.echo(f"❌ Error: {exc}", err=True)
+                click.echo("", err=True)
+            else:
+                click.echo(f"❌ Usage Error: {exc}", err=True)
+                click.echo("", err=True)
+        elif isinstance(exc, click.MissingParameter):
+            click.echo(f"❌ Error: Missing required parameter: {exc.param.name}", err=True)
             if exc.param.name == "output_dir":
                 click.echo("The --output-dir parameter is mandatory for artifact import.", err=True)
             click.echo("", err=True)
+
+        # Show help context if available
         if hasattr(exc, "ctx") and exc.ctx:
             click.echo(exc.ctx.get_help(), err=True)
         else:

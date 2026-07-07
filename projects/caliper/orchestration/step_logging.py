@@ -481,13 +481,36 @@ def log_analyse_kpis_command(
 def log_analyze_command(
     base_dir: Path,
     plugin_module: str,
+    current_kpis_path: Path | None = None,
+    historical_kpis_dir: Path | None = None,
+    output_path: Path | None = None,
 ) -> None:
     """Log the CLI command to reproduce the analyze step."""
-    command = f'caliper analyze --base-dir "{base_dir}" --plugin {plugin_module}'
+    # Use the correct command structure: caliper kpi analyze
+    command = f'caliper kpi analyze'
+
+    # Add current KPI file path if provided
+    if current_kpis_path:
+        command += f' --current "{current_kpis_path}"'
+
+    # For baseline, we need to specify a specific baseline file, not directory
+    # Note: The actual command needs a specific baseline file, not a directory
+    if historical_kpis_dir:
+        command += f' --baseline "<path_to_specific_baseline_file_in_{historical_kpis_dir.name}>"'
+
+    # Add output path if provided
+    if output_path:
+        command += f' --output "{output_path}"'
+
+    # Note: The kpi analyze command doesn't use --base-dir or --plugin, those are for orchestration
+    command += f'\n# Note: This command analyzes KPIs directly, bypassing orchestration'
+    command += f'\n# For orchestration with base-dir and plugin, use: caliper orchestrate'
 
     step_args = {
-        "base_dir": str(base_dir),
-        "plugin_module": plugin_module,
+        "current_kpis_path": str(current_kpis_path) if current_kpis_path else None,
+        "historical_kpis_dir": str(historical_kpis_dir) if historical_kpis_dir else None,
+        "output_path": str(output_path) if output_path else None,
+        "note": "kpi analyze command works with specific files, not base-dir/plugin",
     }
 
     _log_command_banner(

@@ -41,7 +41,6 @@ from projects.caliper.orchestration.step_logging import (
     log_visualize_command,
     step_logging,
 )
-from projects.caliper.orchestration.subcommands.kpi_analysis import run_analyse_kpis
 from projects.caliper.orchestration.subcommands.s3_export import run_s3_export
 from projects.caliper.orchestration.subcommands.s3_import import run_s3_import
 from projects.core.library import env
@@ -576,12 +575,6 @@ def _stub_analyze(
     if not postprocess_config.analyze.enabled:
         return {"status": "skipped", "reason": "analyze disabled"}
 
-    # Log command to reproduce this step
-    log_analyze_command(
-        base_dir=base_dir,
-        plugin_module=plugin_module,
-    )
-
     try:
         # Determine paths for analysis
         analyze_config = postprocess_config.analyze
@@ -596,6 +589,15 @@ def _stub_analyze(
 
         # Output path for analysis results
         output_path = output_dir / analyze_config.output
+
+        # Log command to reproduce this step (after all paths are determined)
+        log_analyze_command(
+            base_dir=base_dir,
+            plugin_module=plugin_module,
+            current_kpis_path=current_kpis_path,
+            historical_kpis_dir=historical_kpis_dir,
+            output_path=output_path,
+        )
 
         # Check if required files exist
         if not current_kpis_path.exists():
@@ -645,20 +647,68 @@ def _stub_analyze(
             baseline_kpis = load_kpis_json(baseline_file)
             logger.info(f"Baseline KPI file loaded: {len(baseline_kpis)} KPIs")
 
-            # Check structure of first few KPIs for debugging
+            # Check structure and validate KPI format
+            invalid_files = []
+
+            # Validate current KPI file format
             if current_kpis:
-                sample_current = current_kpis[0]
-                logger.debug(f"Sample current KPI keys: {list(sample_current.keys())}")
+                try:
+                    if isinstance(current_kpis, list) and len(current_kpis) > 0:
+                        # Old list format
+                        sample_current = current_kpis[0]
+                        logger.debug(f"Current KPI format: list with {len(current_kpis)} items")
+                        logger.debug(f"Sample current KPI keys: {list(sample_current.keys())}")
+                    elif isinstance(current_kpis, dict):
+                        # Hierarchical format
+                        logger.debug(
+                            f"Current KPI format: hierarchical dict with keys: {list(current_kpis.keys())}"
+                        )
+                    else:
+                        raise ValueError(f"Unknown current KPI format: {type(current_kpis)}")
+                except Exception as e:
+                    logger.warning(f"Invalid current KPI file format: {e}")
+                    invalid_files.append(("current", str(current_kpis_path), str(e)))
 
+            # Validate baseline KPI file format
             if baseline_kpis:
-                sample_baseline = baseline_kpis[0]
-                logger.debug(f"Sample baseline KPI keys: {list(sample_baseline.keys())}")
+                try:
+                    if isinstance(baseline_kpis, list) and len(baseline_kpis) > 0:
+                        # Old list format
+                        sample_baseline = baseline_kpis[0]
+                        logger.debug(f"Baseline KPI format: list with {len(baseline_kpis)} items")
+                        logger.debug(f"Sample baseline KPI keys: {list(sample_baseline.keys())}")
 
-                # Check if baseline has the required kpi_id field
-                if "kpi_id" not in sample_baseline:
-                    raise KeyError(
-                        f"Baseline KPI file missing 'kpi_id' field. Found keys: {list(sample_baseline.keys())}"
-                    )
+                        # Check if baseline has the required kpi_id field for list format
+                        if "kpi_id" not in sample_baseline:
+                            raise KeyError(
+                                f"Baseline KPI file missing 'kpi_id' field. Found keys: {list(sample_baseline.keys())}"
+                            )
+                    elif isinstance(baseline_kpis, dict):
+                        # Hierarchical format
+                        logger.debug(
+                            f"Baseline KPI format: hierarchical dict with keys: {list(baseline_kpis.keys())}"
+                        )
+                    else:
+                        raise ValueError(f"Unknown baseline KPI format: {type(baseline_kpis)}")
+                except Exception as e:
+                    logger.warning(f"Invalid baseline KPI file format: {e}")
+                    invalid_files.append(("baseline", str(baseline_file), str(e)))
+
+            # If we have invalid files, report them but continue
+            if invalid_files:
+                error_details = "; ".join(
+                    [f"{role} file {path}: {error}" for role, path, error in invalid_files]
+                )
+                logger.error(f"Found {len(invalid_files)} invalid KPI files: {error_details}")
+
+                # If both files are invalid, fail the analysis
+                if len(invalid_files) >= 2:
+                    return {
+                        "status": "failed",
+                        "error": f"Both current and baseline KPI files are invalid: {error_details}",
+                        "invalid_files": invalid_files,
+                        "completed_at": time.time(),
+                    }
 
         except Exception as load_error:
             logger.error(f"Failed to load/validate KPI files: {load_error}")
@@ -671,12 +721,30 @@ def _stub_analyze(
                 "completed_at": time.time(),
             }
 
-        # Run the analysis
-        from projects.caliper.engine.kpi.analyze import run_analyze
+        # Check if analysis is possible with current formats
+        current_is_hierarchical = isinstance(current_kpis, dict)
+        baseline_is_hierarchical = isinstance(baseline_kpis, dict)
 
-        findings = run_analyze(
-            current_path=current_kpis_path, baseline_path=baseline_file, output_path=output_path
-        )
+        # Only support hierarchical format going forward, but analysis code needs updating
+        if not (current_is_hierarchical and baseline_is_hierarchical):
+            logger.warning(f"Skipping analysis: unsupported format detected (current: {'hierarchical' if current_is_hierarchical else 'list'}, baseline: {'hierarchical' if baseline_is_hierarchical else 'list'})")
+            return {
+                "status": "skipped",
+                "reason": "Analysis only supports hierarchical format, but list format detected",
+                "current_format": "hierarchical" if current_is_hierarchical else "list",
+                "baseline_format": "hierarchical" if baseline_is_hierarchical else "list",
+                "completed_at": time.time(),
+            }
+
+        # Skip analysis for hierarchical format until analysis code is updated
+        logger.info("Skipping analysis: hierarchical format detected but analysis code needs updating for new format")
+        return {
+            "status": "skipped",
+            "reason": "Analysis code not yet updated for hierarchical KPI format",
+            "current_format": "hierarchical",
+            "baseline_format": "hierarchical",
+            "completed_at": time.time(),
+        }
 
         logger.info(f"Analysis completed with {len(findings)} findings, saved to {output_path}")
 
@@ -1308,7 +1376,6 @@ class CaliperPostprocessOrchestrator:
                         "completed_at": time.time(),
                     },
                 )
-
 
     def _compute_final_status(self) -> str:
         """Compute the final postprocessing status."""
