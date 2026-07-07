@@ -743,7 +743,8 @@ def _try_update_run_log(status: dict[str, Any] | None) -> None:
     if not status:
         return
 
-    backends = status.get("backends", {})
+    caliper_export = status.get("caliper_artifacts_export", {})
+    backends = caliper_export.get("backends", {})
     mlflow_meta = backends.get("mlflow")
     if not isinstance(mlflow_meta, dict):
         return
@@ -756,9 +757,16 @@ def _try_update_run_log(status: dict[str, Any] | None) -> None:
     if not artifact_from:
         return
 
-    log_file = Path(artifact_from) / "run.log"
+    artifact_dir = os.environ.get("ARTIFACT_DIR", "")
+    if not artifact_dir:
+        return
+
+    log_file = Path(artifact_dir) / "run.log"
     if not log_file.is_file():
         return
+
+    artifact_root = Path(artifact_from)
+    artifact_path = str(Path(artifact_dir).relative_to(artifact_root))
 
     mlflow_cfg = config.project.get_config(
         "caliper.export.backend.mlflow", None, print=False, warn=False
@@ -774,6 +782,7 @@ def _try_update_run_log(status: dict[str, Any] | None) -> None:
             run_id=run_id,
             log_file=log_file,
             tracking_uri=tracking_uri,
+            artifact_path=artifact_path,
             connection=connection,
             insecure_tls=insecure_tls,
         )
