@@ -625,7 +625,6 @@ def update_run_log_artifact(
     tracking_uri: str | None = None,
     artifact_path: str | None = None,
     connection: dict[str, Any] | None = None,
-    insecure_tls: bool = False,
 ) -> None:
     """Re-upload a run.log file to an existing MLflow run, replacing the previous copy.
 
@@ -640,17 +639,13 @@ def update_run_log_artifact(
         ) from e
 
     def _upload(uri: str | None) -> None:
+        import os
+
         if uri:
             assert_tracking_uri_has_no_userinfo(uri)
             mlflow.set_tracking_uri(uri)
 
-        if insecure_tls:
-            try:
-                import urllib3
-
-                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-            except Exception:
-                pass
+        os.environ["MLFLOW_TRACKING_INSECURE_TLS"] = "true"
 
         for handler in logging.getLogger().handlers:
             handler.flush()

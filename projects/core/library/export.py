@@ -773,7 +773,6 @@ def _try_update_run_log(status: dict[str, Any] | None) -> None:
     )
     connection = mlflow_cfg.get("connection") if isinstance(mlflow_cfg, dict) else None
     tracking_uri = mlflow_meta.get("tracking_uri")
-    insecure_tls = bool(mlflow_cfg.get("config", {}).get("insecure_tls")) if mlflow_cfg else False
 
     try:
         from projects.caliper.engine.file_export.mlflow_backend import update_run_log_artifact
@@ -784,7 +783,6 @@ def _try_update_run_log(status: dict[str, Any] | None) -> None:
             tracking_uri=tracking_uri,
             artifact_path=artifact_path,
             connection=connection,
-            insecure_tls=insecure_tls,
         )
         logger.info("Updated run.log in MLflow run %s", run_id)
     except Exception as e:
