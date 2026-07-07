@@ -575,30 +575,20 @@ def _stub_analyze(
     if not postprocess_config.analyze.enabled:
         return {"status": "disabled", "reason": "analyze disabled"}
 
+    current_kpis_path = output_dir / "kpis.json"
+
+    # Determine paths for analysis
+    analyze_config = postprocess_config.analyze
+
+    # Historical KPIs directory path
+    historical_kpis_dir = Path(analyze_config.historical_kpis)
+    if not historical_kpis_dir.is_absolute():
+        historical_kpis_dir = output_dir / historical_kpis_dir
+
+    # Output path for analysis results
+    output_path = output_dir / analyze_config.output
+
     try:
-        # Determine paths for analysis
-        analyze_config = postprocess_config.analyze
-
-        # Current KPI file should be in the postprocess output directory
-        current_kpis_path = output_dir / "kpis.json"
-
-        # Historical KPIs directory path
-        historical_kpis_dir = Path(analyze_config.historical_kpis)
-        if not historical_kpis_dir.is_absolute():
-            historical_kpis_dir = output_dir / historical_kpis_dir
-
-        # Output path for analysis results
-        output_path = output_dir / analyze_config.output
-
-        # Log command to reproduce this step (after all paths are determined)
-        log_analyze_command(
-            base_dir=base_dir,
-            plugin_module=plugin_module,
-            current_kpis_path=current_kpis_path,
-            historical_kpis_dir=historical_kpis_dir,
-            output_path=output_path,
-        )
-
         # Check if required files exist
         if not current_kpis_path.exists():
             return {
@@ -626,110 +616,39 @@ def _stub_analyze(
 
         # Use the most recently modified KPI file as baseline
         baseline_file = max(kpi_files, key=lambda p: p.stat().st_mtime)
-        baseline_path = historical_kpis_dir  # Use the directory path instead of specific file
 
-        logger.info(
-            f"Found {len(kpi_files)} historical KPI files, using most recent: {baseline_file}"
+        # Log command to reproduce this step
+        log_analyze_command(
+            base_dir=base_dir,
+            plugin_module=plugin_module,
+            current_kpis_path=current_kpis_path,
+            baseline_file=baseline_file,
+            historical_kpis_dir=historical_kpis_dir,
+            output_path=output_path,
         )
-        logger.info(f"Historical data directory: {baseline_path}")
 
-        logger.info(f"Running KPI regression analysis: {current_kpis_path} vs {baseline_file}")
+        # Load plugin for KPI definitions
+        from projects.caliper.engine.load_plugin import load_plugin
 
-        # Add debug logging to understand the KPI structure before analysis
-        try:
-            from projects.caliper.engine.kpi.import_export import load_kpis_json
+        plugin = load_plugin(plugin_module)
 
-            logger.debug("Loading current KPI file for structure validation...")
-            current_kpis = load_kpis_json(current_kpis_path)
-            logger.info(f"Current KPI file loaded: {len(current_kpis)} KPIs")
+        # Run hierarchical KPI analysis using core engine
+        from projects.caliper.engine.kpi.analyze_hierarchical import analyze_hierarchical_kpis
 
-            logger.debug("Loading baseline KPI file for structure validation...")
-            baseline_kpis = load_kpis_json(baseline_file)
-            logger.info(f"Baseline KPI file loaded: {len(baseline_kpis)} KPIs")
-
-            # Check structure and validate KPI format
-            invalid_files = []
-
-            # Validate current KPI file format
-            if current_kpis:
-                try:
-                    if isinstance(current_kpis, list) and len(current_kpis) > 0:
-                        # Old list format
-                        sample_current = current_kpis[0]
-                        logger.debug(f"Current KPI format: list with {len(current_kpis)} items")
-                        logger.debug(f"Sample current KPI keys: {list(sample_current.keys())}")
-                    elif isinstance(current_kpis, dict):
-                        # Hierarchical format
-                        logger.debug(
-                            f"Current KPI format: hierarchical dict with keys: {list(current_kpis.keys())}"
-                        )
-                    else:
-                        raise ValueError(f"Unknown current KPI format: {type(current_kpis)}")
-                except Exception as e:
-                    logger.warning(f"Invalid current KPI file format: {e}")
-                    invalid_files.append(("current", str(current_kpis_path), str(e)))
-
-            # Validate baseline KPI file format
-            if baseline_kpis:
-                try:
-                    if isinstance(baseline_kpis, list) and len(baseline_kpis) > 0:
-                        # Old list format
-                        sample_baseline = baseline_kpis[0]
-                        logger.debug(f"Baseline KPI format: list with {len(baseline_kpis)} items")
-                        logger.debug(f"Sample baseline KPI keys: {list(sample_baseline.keys())}")
-
-                        # Check if baseline has the required kpi_id field for list format
-                        if "kpi_id" not in sample_baseline:
-                            raise KeyError(
-                                f"Baseline KPI file missing 'kpi_id' field. Found keys: {list(sample_baseline.keys())}"
-                            )
-                    elif isinstance(baseline_kpis, dict):
-                        # Hierarchical format
-                        logger.debug(
-                            f"Baseline KPI format: hierarchical dict with keys: {list(baseline_kpis.keys())}"
-                        )
-                    else:
-                        raise ValueError(f"Unknown baseline KPI format: {type(baseline_kpis)}")
-                except Exception as e:
-                    logger.warning(f"Invalid baseline KPI file format: {e}")
-                    invalid_files.append(("baseline", str(baseline_file), str(e)))
-
-            # If we have invalid files, report them but continue
-            if invalid_files:
-                error_details = "; ".join(
-                    [f"{role} file {path}: {error}" for role, path, error in invalid_files]
-                )
-                logger.error(f"Found {len(invalid_files)} invalid KPI files: {error_details}")
-
-                # If both files are invalid, fail the analysis
-                if len(invalid_files) >= 2:
-                    return {
-                        "status": "failed",
-                        "error": f"Both current and baseline KPI files are invalid: {error_details}",
-                        "invalid_files": invalid_files,
-                        "completed_at": time.time(),
-                    }
-
-        except Exception as load_error:
-            logger.error(f"Failed to load/validate KPI files: {load_error}")
-            return {
-                "status": "failed",
-                "error": f"KPI file validation failed: {load_error}",
-                "current_kpis_path": str(current_kpis_path),
-                "baseline_path": str(baseline_path),
-                "baseline_file_used": str(baseline_file),
-                "completed_at": time.time(),
-            }
-
-        # Skip analysis for hierarchical format until analysis code is updated
-        logger.info(
-            "Skipping analysis: hierarchical format detected but analysis code needs updating for new format"
+        logger.info(f"Running KPI analysis: {current_kpis_path} vs {baseline_file}")
+        result = analyze_hierarchical_kpis(
+            current_kpis_path=current_kpis_path,
+            baseline_kpis_path=baseline_file,
+            output_path=output_path,
+            plugin=plugin,
         )
-        return {
-            "status": "skipped",
-            "reason": "not implemented",
-            "completed_at": time.time(),
-        }
+
+        if result["status"] == "success":
+            logger.info(
+                f"Analysis completed: {result['regressions_count']} regressions, {result['improvements_count']} improvements"
+            )
+
+        return result
 
     except Exception as e:
         error_msg = f"{type(e).__name__}: {str(e)}"
@@ -738,11 +657,6 @@ def _stub_analyze(
             "status": "failed",
             "error": error_msg,
             "error_type": type(e).__name__,
-            "current_kpis_path": str(current_kpis_path)
-            if "current_kpis_path" in locals()
-            else "unknown",
-            "baseline_path": str(baseline_path) if "baseline_path" in locals() else "unknown",
-            "baseline_file_used": str(baseline_file) if "baseline_file" in locals() else "unknown",
             "completed_at": time.time(),
         }
 

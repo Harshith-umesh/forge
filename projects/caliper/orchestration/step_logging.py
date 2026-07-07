@@ -482,6 +482,7 @@ def log_analyze_command(
     base_dir: Path,
     plugin_module: str,
     current_kpis_path: Path | None = None,
+    baseline_file: Path | None = None,
     historical_kpis_dir: Path | None = None,
     output_path: Path | None = None,
 ) -> None:
@@ -493,24 +494,33 @@ def log_analyze_command(
     if current_kpis_path:
         command += f' --current "{current_kpis_path}"'
 
-    # For baseline, we need to specify a specific baseline file, not directory
-    # Note: The actual command needs a specific baseline file, not a directory
+    # Add the historical directory, not the specific file
     if historical_kpis_dir:
-        command += f' --baseline "<path_to_specific_baseline_file_in_{historical_kpis_dir.name}>"'
+        command += f' --baseline-dir "{historical_kpis_dir}"'
 
     # Add output path if provided
     if output_path:
         command += f' --output "{output_path}"'
 
-    # Note: The kpi analyze command doesn't use --base-dir or --plugin, those are for orchestration
-    command += "\n# Note: This command analyzes KPIs directly, bypassing orchestration"
-    command += "\n# For orchestration with base-dir and plugin, use: caliper orchestrate"
+    # Add plugin module
+    command += f" --plugin {plugin_module}"
+
+    # Add helpful context
+    command += "\n# Analyzes hierarchical KPI format for regressions"
+    command += "\n# The tool will automatically find the most recent kpis.json file in the baseline directory"
+    command += "\n# To re-run this analysis step independently, use the command above"
+    command += f"\n# Plugin: {plugin_module}"
+    command += f"\n# Base dir: {base_dir}"
+    if baseline_file:
+        command += f"\n# Most recent baseline file found: {baseline_file}"
 
     step_args = {
         "current_kpis_path": str(current_kpis_path) if current_kpis_path else None,
         "historical_kpis_dir": str(historical_kpis_dir) if historical_kpis_dir else None,
+        "baseline_file_selected": str(baseline_file) if baseline_file else None,
         "output_path": str(output_path) if output_path else None,
-        "note": "kpi analyze command works with specific files, not base-dir/plugin",
+        "plugin_module": plugin_module,
+        "base_dir": str(base_dir),
     }
 
     _log_command_banner(

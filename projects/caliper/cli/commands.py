@@ -321,22 +321,67 @@ def kpi_import(ctx: click.Context, snapshot: Path) -> None:
 
 
 @click.command("analyze")
-@click.option("--current", type=click.Path(path_type=Path), required=True)
-@click.option("--baseline", type=click.Path(path_type=Path), required=True)
-@click.option("--output", type=click.Path(path_type=Path), required=True)
+@click.option(
+    "--current", type=click.Path(path_type=Path), required=True, help="Current KPI file to analyze"
+)
+@click.option(
+    "--baseline-dir",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Directory containing historical KPI files (will use most recent)",
+)
+@click.option(
+    "--output",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Output file for analysis results",
+)
+@click.option(
+    "--plugin",
+    "plugin_module",
+    metavar="MODULE",
+    required=True,
+    help="Plugin module for KPI definitions and analysis rules",
+)
 @click.pass_context
 def kpi_analyze(
     ctx: click.Context,
     current: Path,
-    baseline: Path,
+    baseline_dir: Path,
     output: Path,
+    plugin_module: str,
 ) -> None:
+    """Analyze KPIs for regressions using hierarchical format."""
     try:
-        run_analyze(current_path=current, baseline_path=baseline, output_path=output)
+        from projects.caliper.engine.kpi.analyze_hierarchical import find_most_recent_baseline
+        from projects.caliper.engine.load_plugin import load_plugin
+
+        # Load plugin for KPI definitions and analysis rules
+        plugin = load_plugin(plugin_module)
+        if not plugin:
+            click.echo(f"❌ Failed to load plugin: {plugin_module}", err=True)
+            sys.exit(1)
+
+        click.echo(f"🔌 Using plugin: {plugin_module}")
+
+        # Find the most recent baseline file in the directory
+        baseline_file = find_most_recent_baseline(baseline_dir)
+        if not baseline_file:
+            click.echo(
+                f"❌ No kpis.json files found in baseline directory: {baseline_dir}", err=True
+            )
+            sys.exit(1)
+
+        click.echo(f"📊 Using baseline: {baseline_file}")
+
+        # Run analysis with plugin context
+        run_analyze(
+            current_path=current, baseline_path=baseline_file, output_path=output, plugin=plugin
+        )
+        click.echo(f"✅ Analysis complete. Results written to: {output}")
     except Exception as e:  # noqa: BLE001
-        click.echo(f"kpi analyze failed: {e}", err=True)
+        click.echo(f"❌ kpi analyze failed: {e}", err=True)
         sys.exit(3)
-    click.echo(f"Wrote {output}")
 
 
 @click.command("s3-import")
