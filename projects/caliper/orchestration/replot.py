@@ -18,6 +18,23 @@ from projects.core.library import vault as vault_lib
 logger = logging.getLogger(__name__)
 
 
+def _get_step_from_list(steps_list: list, step_name: str) -> dict:
+    """
+    Get a step result by name from the list-based steps structure.
+
+    Args:
+        steps_list: List of step dictionaries with step name as key
+        step_name: Name of the step to retrieve
+
+    Returns:
+        Step dictionary if found, empty dict if not found
+    """
+    for step in steps_list:
+        if step_name in step:
+            return step[step_name]
+    return {}
+
+
 def _download_mlflow_artifacts_via_import(
     replot_url: str,
     replot_download_dir: Path,
@@ -222,7 +239,7 @@ def run_replot_from_orchestration_config(
                     {
                         "download_status": "skipped",
                         "downloaded_files": len(existing_files),
-                        "skip_reason": "no_url_provided",
+                        "note": "no_url_provided",
                     }
                 )
             else:
@@ -231,7 +248,7 @@ def run_replot_from_orchestration_config(
                     {
                         "download_status": "skipped",
                         "downloaded_files": 0,
-                        "skip_reason": "no_url_provided",
+                        "note": "no_url_provided",
                     }
                 )
         else:
@@ -263,7 +280,7 @@ def run_replot_from_orchestration_config(
                     {
                         "download_status": "skipped",
                         "downloaded_files": len(existing_files),
-                        "skip_reason": "directory_already_exists",
+                        "note": "directory_already_exists",
                     }
                 )
             else:
@@ -300,20 +317,25 @@ def run_replot_from_orchestration_config(
             logger.info("Artifacts directory not found")
             postprocess_result = {
                 "success": True,
-                "steps": {
-                    "visualize": {
-                        "status": "skipped",
-                        "message": "No artifacts found",
-                        "artifact_directory": artifact_directory,
+                "steps": [
+                    {
+                        "visualize": {
+                            "status": "skipped",
+                            "message": "No artifacts found",
+                            "artifact_directory": str(artifact_directory),
+                        }
                     }
-                },
+                ],
             }
 
         # Log post-processing results
-        if postprocess_result.get("steps", {}).get("visualize", {}).get("status") == "skipped":
+        steps_list = postprocess_result.get("steps", [])
+        visualize_step = _get_step_from_list(steps_list, "visualize")
+
+        if visualize_step.get("status") == "skipped":
             logger.info("Post-processing completed (visualizations skipped)")
-        elif postprocess_result.get("steps", {}).get("visualize", {}).get("paths"):
-            viz_paths = postprocess_result["steps"]["visualize"]["paths"]
+        elif visualize_step.get("paths"):
+            viz_paths = visualize_step["paths"]
             logger.info(f"Post-processing completed with {len(viz_paths)} visualizations generated")
         else:
             logger.info("Post-processing completed (parsing only)")

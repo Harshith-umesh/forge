@@ -39,7 +39,6 @@ def compute_final_postprocess_status(
     artifacts_to_kpis_failed: bool,
     ai_data_failed: bool,
     s3_import_failed: bool,
-    analyse_kpis_failed: bool,
     s3_export_failed: bool,
     analyze_failed: bool,
     has_regression: bool,
@@ -59,7 +58,6 @@ def compute_final_postprocess_status(
         artifacts_to_kpis_failed
         or ai_data_failed
         or s3_import_failed
-        or analyse_kpis_failed
         or s3_export_failed
         or analyze_failed
     ):

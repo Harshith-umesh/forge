@@ -733,9 +733,8 @@ class CaliperPostprocessOrchestrator:
         self.artifacts_to_kpis_failed = False
         self.ai_data_failed = False
         self.s3_import_failed = False
-        self.analyse_kpis_failed = False
-        self.s3_export_failed = False
         self.analyze_failed = False
+        self.s3_export_failed = False
 
         # Configuration
         try:
@@ -779,9 +778,8 @@ class CaliperPostprocessOrchestrator:
                     artifacts_to_kpis_failed=False,
                     ai_data_failed=False,
                     s3_import_failed=False,
-                    analyse_kpis_failed=False,
-                    s3_export_failed=False,
                     analyze_failed=False,
+                    s3_export_failed=False,
                     has_regression=False,
                     has_improvement=False,
                 ),
@@ -802,9 +800,8 @@ class CaliperPostprocessOrchestrator:
                     artifacts_to_kpis_failed=False,
                     ai_data_failed=False,
                     s3_import_failed=False,
-                    analyse_kpis_failed=False,
-                    s3_export_failed=False,
                     analyze_failed=False,
+                    s3_export_failed=False,
                     has_regression=False,
                     has_improvement=False,
                 ),
@@ -821,8 +818,6 @@ class CaliperPostprocessOrchestrator:
         logger.info(
             f"After KPI/AI steps: artifacts_to_kpis_failed={self.artifacts_to_kpis_failed}, ai_data_failed={self.ai_data_failed}"
         )
-        self._run_analyze_step()
-        logger.info(f"After analyze step: analyze_failed={self.analyze_failed}")
         logger.info("All postprocessing steps completed")
 
         # Compute final status and build result
@@ -849,13 +844,13 @@ class CaliperPostprocessOrchestrator:
 
     def _add_step(self, step_name: str, step_data: dict[str, Any]) -> None:
         """Add a step result to the steps list."""
-        self.steps.append({"name": step_name, **step_data})
+        self.steps.append({step_name: step_data})
 
     def _get_step(self, step_name: str) -> dict[str, Any]:
         """Get a step result by name."""
         for step in self.steps:
-            if step.get("name") == step_name:
-                return step
+            if step_name in step:
+                return step[step_name]
         return {}
 
     def _any_step_enabled(self) -> bool:
@@ -1046,8 +1041,8 @@ class CaliperPostprocessOrchestrator:
             # S3 import (historical data)
             self._run_s3_import_step(output_dir)
 
-            # Analyze KPIs (current vs historical)
-            self._run_analyse_kpis_step(output_dir)
+            # Analyze KPIs (current vs historical) - moved before S3 export
+            self._run_analyse_kpis_step(output_dir, mod_str)
 
             # S3 export
             self._run_s3_export_step(output_dir)
@@ -1106,7 +1101,7 @@ class CaliperPostprocessOrchestrator:
             self.artifacts_to_kpis_failed = True
             self.ai_data_failed = True
             self.s3_import_failed = True
-            self.analyse_kpis_failed = True
+            self.analyze_failed = True
             self.s3_export_failed = True
 
     def _run_artifacts_to_kpis_step(
@@ -1212,14 +1207,14 @@ class CaliperPostprocessOrchestrator:
                 self._add_step("s3_import", {"status": "failed", "error": str(e)})
                 self.s3_import_failed = True
 
-    def _run_analyse_kpis_step(self, output_dir: Path) -> None:
+    def _run_analyse_kpis_step(self, output_dir: Path, plugin_module: str) -> None:
         """Execute the KPI analysis step."""
-        if not self.config.analyse_kpis.enabled:
+        if not self.config.analyze.enabled:
             self._add_step(
                 "analyse_kpis",
                 {
                     "status": "skipped",
-                    "reason": "analyse_kpis disabled",
+                    "reason": "analyze disabled",
                     "completed_at": time.time(),
                 },
             )
@@ -1227,17 +1222,17 @@ class CaliperPostprocessOrchestrator:
 
         with step_logging("caliper_analyse_kpis", self.step_logs_dir):
             try:
-                result = run_analyse_kpis(self.config, output_dir)
+                result = _stub_analyze(self.config, plugin_module, self.tree_root, output_dir)
                 self._add_step("analyse_kpis", result)
                 logger.info(f"KPI analysis result: {result}")
 
                 if result.get("status") == "failed":
-                    self.analyse_kpis_failed = True
+                    self.analyze_failed = True
 
             except Exception as e:
                 logger.exception("KPI analysis failed")
                 self._add_step("analyse_kpis", {"status": "failed", "error": str(e)})
-                self.analyse_kpis_failed = True
+                self.analyze_failed = True
 
     def _run_s3_export_step(self, output_dir: Path) -> None:
         """Execute the S3 export step."""
@@ -1270,13 +1265,16 @@ class CaliperPostprocessOrchestrator:
                 if export_config.prefix:
                     export_path += f"/{export_config.prefix}"
 
+                # Only include AI data if it was actually generated successfully
+                include_ai_data_actual = export_config.include_ai_data and ai_data_dir is not None
+
                 log_s3_export_command(
                     bucket=s3_parent_config.bucket,
                     export_path=export_path,
                     from_dir=output_dir,
                     include_csv=export_config.include_csv,
                     include_kpis_json=export_config.include_kpis_json,
-                    include_ai_data=export_config.include_ai_data,
+                    include_ai_data=include_ai_data_actual,
                 )
 
                 result = run_s3_export(self.config, output_dir, ai_data_dir)
@@ -1311,24 +1309,6 @@ class CaliperPostprocessOrchestrator:
                     },
                 )
 
-    def _run_analyze_step(self) -> None:
-        """Execute the analyze step if enabled."""
-        if not self.config.analyze.enabled:
-            return
-
-        with step_logging("caliper_analyze", self.step_logs_dir):
-            # Load plugin info for analyze step
-            mod_str, _ = _load_plugin(
-                self.config, tree_root=self.tree_root, manifest_path=self.manifest_path
-            )
-            # Compute output directory like other steps
-            output_dir = Path(self.artifacts_dir) / "postprocess_output"
-            result = _stub_analyze(self.config, mod_str, self.tree_root, output_dir)
-            self._add_step("analyze", result)
-
-            # Set failure flag if analyze step failed
-            if result.get("status") == "failed":
-                self.analyze_failed = True
 
     def _compute_final_status(self) -> str:
         """Compute the final postprocessing status."""
@@ -1340,7 +1320,7 @@ class CaliperPostprocessOrchestrator:
         logger.info(f"  artifacts_to_kpis_failed: {self.artifacts_to_kpis_failed}")
         logger.info(f"  ai_data_failed: {self.ai_data_failed}")
         logger.info(f"  s3_import_failed: {self.s3_import_failed}")
-        logger.info(f"  analyse_kpis_failed: {self.analyse_kpis_failed}")
+        logger.info(f"  analyze_failed: {self.analyze_failed}")
         logger.info(f"  s3_export_failed: {self.s3_export_failed}")
         logger.info(f"  analyze_failed: {self.analyze_failed}")
 
@@ -1351,9 +1331,8 @@ class CaliperPostprocessOrchestrator:
             artifacts_to_kpis_failed=self.artifacts_to_kpis_failed,
             ai_data_failed=self.ai_data_failed,
             s3_import_failed=self.s3_import_failed,
-            analyse_kpis_failed=self.analyse_kpis_failed,
-            s3_export_failed=self.s3_export_failed,
             analyze_failed=self.analyze_failed,
+            s3_export_failed=self.s3_export_failed,
             has_regression=False,
             has_improvement=False,
         )

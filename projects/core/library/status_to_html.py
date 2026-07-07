@@ -47,7 +47,16 @@ def convert_status_yaml_to_html(
     # Extract status information
     final_status = status_data.get("final_status", "unknown")
     test_phase = status_data.get("test_phase", {})
-    steps = status_data.get("steps", {})
+    steps_raw = status_data.get("steps", [])
+
+    # Convert steps to iterable format for processing
+    steps_list = []
+    if isinstance(steps_raw, list):
+        # New list-based format with {step_name: step_data} structure
+        steps_list = steps_raw
+    elif isinstance(steps_raw, dict):
+        # Legacy dict format - convert to new list format
+        steps_list = [{name: step_data} for name, step_data in steps_raw.items()]
 
     # Determine overall status styling
     if final_status in ["passed", "success"]:
@@ -62,14 +71,15 @@ def convert_status_yaml_to_html(
 
     # Count step statuses for summary
     step_counts = {"success": 0, "failed": 0, "skipped": 0}
-    for step_info in steps.values():
-        step_status = step_info.get("status", "unknown")
-        if step_status in ["ok", "success"]:
-            step_counts["success"] += 1
-        elif step_status == "failed":
-            step_counts["failed"] += 1
-        elif step_status == "skipped":
-            step_counts["skipped"] += 1
+    for step_dict in steps_list:
+        for step_name, step_info in step_dict.items():
+            step_status = step_info.get("status", "unknown")
+            if step_status in ["ok", "success"]:
+                step_counts["success"] += 1
+            elif step_status == "failed":
+                step_counts["failed"] += 1
+            elif step_status == "skipped":
+                step_counts["skipped"] += 1
 
     # Generate HTML
     html_content = f"""<!DOCTYPE html>
@@ -254,17 +264,38 @@ def convert_status_yaml_to_html(
         <h2>Processing Steps</h2>"""
 
     # Generate step cards
-    step_order = ["parse", "visualize", "kpi_generate", "kpi_export", "ai_eval_export", "analyze"]
+    step_order = [
+        "parse",
+        "visualize",
+        "artifacts_to_kpis",
+        "kpis_to_csv",
+        "artifacts_to_ai_data",
+        "analyze",
+    ]
+
+    # Create step lookup for easy access
+    step_lookup = {}
+    for step_dict in steps_list:
+        for step_name, step_data in step_dict.items():
+            step_lookup[step_name] = step_data
 
     for step_name in step_order:
-        if step_name not in steps:
+        if step_name not in step_lookup:
             continue
 
-        step_info = steps[step_name]
+        step_info = step_lookup[step_name]
         step_status = step_info.get("status", "unknown")
 
         # Format step name
-        step_display = step_name.replace("_", " ").title()
+        step_display_map = {
+            "artifacts_to_kpis": "KPI Generation",
+            "kpis_to_csv": "KPI CSV Export",
+            "artifacts_to_ai_data": "AI Data Export",
+            "s3_import": "S3 Import",
+            "s3_export": "S3 Export",
+            "analyse_kpis": "KPI Analysis",
+        }
+        step_display = step_display_map.get(step_name, step_name.replace("_", " ").title())
 
         # Determine status styling
         if step_status in ["ok", "success"]:
@@ -318,12 +349,12 @@ def convert_status_yaml_to_html(
                 ]
             )
 
-        elif step_name == "kpi_generate" and step_status in ["ok", "success"]:
+        elif step_name == "artifacts_to_kpis" and step_status in ["ok", "success"]:
             kpi_count = step_info.get("kpi_count", 0)
             output_file = step_info.get("output_file", "")
             details.extend([("KPI Records", str(kpi_count))])
 
-        elif step_name == "ai_eval_export" and step_status in ["ok", "success"]:
+        elif step_name == "artifacts_to_ai_data" and step_status in ["ok", "success"]:
             schema_version = step_info.get("payload_schema_version", "unknown")
             output_file = step_info.get("output_file", "")
             details.extend([("Schema Version", str(schema_version))])
@@ -380,13 +411,13 @@ def convert_status_yaml_to_html(
             if len(paths) > 8:
                 file_links.append((f"... and {len(paths) - 8} more files", ""))
 
-        elif step_name == "kpi_generate" and step_status in ["ok", "success"]:
+        elif step_name == "artifacts_to_kpis" and step_status in ["ok", "success"]:
             output_file = step_info.get("output_file", "")
             if output_file:
                 file_name = Path(output_file).name
                 file_links.append((f"📈 {file_name}", output_file))
 
-        elif step_name == "ai_eval_export" and step_status in ["ok", "success"]:
+        elif step_name == "artifacts_to_ai_data" and step_status in ["ok", "success"]:
             output_file = step_info.get("output_file", "")
             if output_file:
                 file_name = Path(output_file).name

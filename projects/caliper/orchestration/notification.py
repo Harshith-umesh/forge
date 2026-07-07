@@ -22,6 +22,10 @@ class PostprocessStepResult:
     reason: str | None = None
     output_file: str | None = None
     ai_eval_dir: str | None = None
+    exported_path: str | None = None
+    uploaded_files: int | None = None
+    downloaded_files: int | None = None
+    failed_files: int | None = None
 
 
 @dataclass
@@ -82,7 +86,7 @@ def format_postprocess_status_notification(
             # Add specific file links for certain steps
             if step_result.status == "success" and get_file_link:
                 if (
-                    step_name == "kpi_generate"
+                    step_name == "artifacts_to_kpis"
                     and hasattr(step_result, "output_file")
                     and step_result.output_file
                 ):
@@ -100,7 +104,7 @@ def format_postprocess_status_notification(
                         lines.append(f"  - 📄 {filename}")
 
                 elif (
-                    step_name == "kpi_csv_export"
+                    step_name == "kpis_to_csv"
                     and hasattr(step_result, "output_file")
                     and step_result.output_file
                 ):
@@ -116,7 +120,7 @@ def format_postprocess_status_notification(
                         filename = step_result.output_file.split("/")[-1]
                         lines.append(f"  - 📊 {filename}")
 
-                elif step_name == "ai_eval_export":
+                elif step_name == "artifacts_to_ai_data":
                     if hasattr(step_result, "ai_eval_dir") and step_result.ai_eval_dir:
                         try:
                             dir_url = get_file_link("")  # Get base directory URL
@@ -148,6 +152,28 @@ def format_postprocess_status_notification(
                         except Exception:
                             filename = step_result.output_file.split("/")[-1]
                             lines.append(f"  - 📄 {filename}")
+
+                elif step_name == "s3_export":
+                    # Show exported path
+                    if hasattr(step_result, "exported_path") and step_result.exported_path:
+                        lines.append(f"  - 📤 Exported to: `{step_result.exported_path}`")
+
+                    # Show uploaded files count
+                    if hasattr(step_result, "uploaded_files") and step_result.uploaded_files is not None:
+                        lines.append(f"  - ✅ Uploaded files: {step_result.uploaded_files}")
+
+                    # Show failed files count if > 0
+                    if hasattr(step_result, "failed_files") and step_result.failed_files and step_result.failed_files > 0:
+                        lines.append(f"  - ❌ Failed files: {step_result.failed_files}")
+
+                elif step_name == "s3_import":
+                    # Show downloaded files count
+                    if hasattr(step_result, "downloaded_files") and step_result.downloaded_files is not None:
+                        lines.append(f"  - ⬇️ Downloaded files: {step_result.downloaded_files}")
+
+                    # Show failed files count if > 0
+                    if hasattr(step_result, "failed_files") and step_result.failed_files and step_result.failed_files > 0:
+                        lines.append(f"  - ❌ Failed files: {step_result.failed_files}")
 
             # Add general file links if available (for visualize step, etc.)
             if step_result.paths and get_file_link:
@@ -270,19 +296,25 @@ def parse_postprocess_result(status_data: dict) -> PostprocessResult | None:
     steps_raw = status_data.get("steps", [])
 
     if isinstance(steps_raw, list):
-        # List-based format with embedded step names
-        for step_data in steps_raw:
-            if isinstance(step_data, dict) and "name" in step_data:
-                step_name = step_data["name"]
-                steps_dict[step_name] = PostprocessStepResult(
-                    status=step_data.get("status", "unknown"),
-                    message=step_data.get("message"),
-                    paths=step_data.get("paths"),
-                    completed_at=step_data.get("completed_at"),
-                    reason=step_data.get("reason"),
-                    output_file=step_data.get("output_file"),
-                    ai_eval_dir=step_data.get("ai_eval_dir"),
-                )
+        # List-based format with step name as dictionary key
+        for step_dict in steps_raw:
+            if isinstance(step_dict, dict):
+                # Each item in the list is {step_name: step_data}
+                for step_name, step_data in step_dict.items():
+                    if isinstance(step_data, dict):
+                        steps_dict[step_name] = PostprocessStepResult(
+                            status=step_data.get("status", "unknown"),
+                            message=step_data.get("message"),
+                            paths=step_data.get("paths"),
+                            completed_at=step_data.get("completed_at"),
+                            reason=step_data.get("reason"),
+                            output_file=step_data.get("output_file"),
+                            ai_eval_dir=step_data.get("ai_eval_dir"),
+                            exported_path=step_data.get("exported_path"),
+                            uploaded_files=step_data.get("uploaded_files"),
+                            downloaded_files=step_data.get("downloaded_files"),
+                            failed_files=step_data.get("failed_files"),
+                        )
 
     return PostprocessResult(
         success=status_data.get("success", False),
