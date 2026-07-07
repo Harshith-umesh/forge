@@ -730,7 +730,79 @@ def caliper_export_entrypoint(_ctx, artifact_directory: Path | None):
             try:
                 send_notification(status, notification_provider=notification_provider)
             except Exception as e:
-                logger.warning(f"Failed to send notifications: {e}")
-                # Don't fail the entire job if notifications fail
+                logger.exception(f"Failed to send notifications: {e}")
+
+        # Re-upload run.log with complete content (includes notification output)
+        _try_update_run_log(status)
 
     return 0
+
+
+def _try_update_run_log(status: dict[str, Any] | None) -> None:
+    """Best-effort re-upload of run.log to MLflow after all post-export work is done."""
+    if not status:
+        return
+
+    try:
+        caliper_export = status.get("caliper_artifacts_export", {})
+        backends = caliper_export.get("backends", {})
+        mlflow_meta = backends.get("mlflow")
+        if not isinstance(mlflow_meta, dict):
+            return
+
+        run_id = mlflow_meta.get("run_id")
+        if not run_id:
+            return
+
+        artifact_from = config.project.get_config(
+            "caliper.export.from", None, print=False, warn=False
+        )
+        if not artifact_from:
+            return
+
+        artifact_dir = os.environ.get("ARTIFACT_DIR", "")
+        if not artifact_dir:
+            return
+
+        log_file = Path(artifact_dir) / "run.log"
+        if not log_file.is_file():
+            return
+
+        artifact_root = Path(artifact_from)
+        artifact_path = str(Path(artifact_dir).relative_to(artifact_root))
+
+        tracking_uri = mlflow_meta.get("tracking_uri")
+
+        vault_name = config.project.get_config(
+            "caliper.export.backend.mlflow.secrets.vault.name", None, print=False, warn=False
+        )
+        vault_key = config.project.get_config(
+            "caliper.export.backend.mlflow.secrets.vault.mlflow_secret",
+            None,
+            print=False,
+            warn=False,
+        )
+
+        connection = None
+        if vault_name and vault_key:
+            from projects.caliper.engine.file_export.mlflow_secrets import (
+                load_mlflow_secrets_yaml,
+            )
+            from projects.core.library import vault as vault_lib
+
+            secrets_path = vault_lib.get_vault_content_path(vault_name, vault_key)
+            if secrets_path and secrets_path.exists():
+                connection = load_mlflow_secrets_yaml(secrets_path)
+
+        from projects.caliper.engine.file_export.mlflow_backend import update_run_log_artifact
+
+        update_run_log_artifact(
+            run_id=run_id,
+            log_file=log_file,
+            tracking_uri=tracking_uri,
+            artifact_path=artifact_path,
+            connection=connection,
+        )
+        logger.info("Updated run.log in MLflow run %s", run_id)
+    except Exception as e:
+        logger.warning("Failed to update run.log in MLflow: %s", e)
