@@ -506,7 +506,7 @@ def log_analyze_command(
     command += f" --plugin {plugin_module}"
 
     # Add helpful context
-    command += "\n# Analyzes hierarchical KPI format for regressions"
+    command += "\n# Analyzes KPI for regressions"
     command += "\n# The tool will automatically find the most recent kpis.json file in the baseline directory"
     command += "\n# To re-run this analysis step independently, use the command above"
     command += f"\n# Plugin: {plugin_module}"

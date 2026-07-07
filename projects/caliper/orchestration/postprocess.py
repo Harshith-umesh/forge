@@ -633,10 +633,10 @@ def _stub_analyze(
         plugin = load_plugin(plugin_module)
 
         # Run hierarchical KPI analysis using core engine
-        from projects.caliper.engine.kpi.analyze_hierarchical import analyze_hierarchical_kpis
+        from projects.caliper.engine.kpi.analyze import analyze_kpis
 
         logger.info(f"Running KPI analysis: {current_kpis_path} vs {baseline_file}")
-        result = analyze_hierarchical_kpis(
+        result = analyze_kpis(
             current_kpis_path=current_kpis_path,
             baseline_kpis_path=baseline_file,
             output_path=output_path,

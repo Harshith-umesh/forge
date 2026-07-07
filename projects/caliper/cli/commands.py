@@ -351,9 +351,9 @@ def kpi_analyze(
     output: Path,
     plugin_module: str,
 ) -> None:
-    """Analyze KPIs for regressions using hierarchical format."""
+    """Analyze KPIs for regression."""
     try:
-        from projects.caliper.engine.kpi.analyze_hierarchical import find_most_recent_baseline
+        from projects.caliper.engine.kpi.analyze import find_most_recent_baseline
         from projects.caliper.engine.load_plugin import load_plugin
 
         # Load plugin for KPI definitions and analysis rules
