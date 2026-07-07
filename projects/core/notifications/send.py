@@ -62,6 +62,9 @@ def send_notification(message, github=True, slack=False, dry_run=False, pr_numbe
     """
     if pr_number is None:
         pr_number = get_pr_number()
+    if not pr_number:
+        logger.warning("PR number not available, cannot send the GH notification")
+        github = False
 
     if not github_api:
         logger.info("Github API not available, don't send notification to github")
@@ -510,12 +513,7 @@ def send_notification_to_slack(
 
 
 def get_pr_number():
-    if os.environ.get("OPENSHIFT_CI") == "true":
-        return os.environ.get("PULL_NUMBER")
-
-    else:
-        logger.warning("Test not running from a well-known CI engine, cannot extract a PR number.")
-        return
+    return os.environ.get("PULL_NUMBER")
 
 
 # returns a tuple (base_link, link_suffix)
