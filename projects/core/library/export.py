@@ -97,12 +97,15 @@ def _update_fjob_export_status(status: dict):
             os.environ["KUBECONFIG"] = original_kubeconfig
 
 
-def send_notification(status: dict[str, Any], notification_provider=None) -> None:
+def send_notification(status: dict[str, Any], notification_provider=None) -> bool:
     """Send job completion notifications based on caliper export status.
 
     Args:
         status: Caliper export status object containing backend results and metadata
         notification_provider: Optional per-project SlackNotificationProvider instance
+
+    Returns:
+        bool: True if notifications were sent successfully, False otherwise
     """
     # Extract notification parameters from status object
     project = _extract_project_from_status(status)
@@ -113,9 +116,10 @@ def send_notification(status: dict[str, Any], notification_provider=None) -> Non
     # Apply minimal filtering logic
     if _should_skip_notification(project, operation, finish_reason):
         logger.info(f"Skipping notification for {project} {operation}")
-        return
+        return True  # Skipped is considered success
 
     # Send actual notifications
+    notification_success = True
     logger.info(f"Sending notification: {project} {operation} {finish_reason}{duration_str}")
 
     # Build enhanced notification with fournos job info and artifact links
@@ -159,9 +163,11 @@ def send_notification(status: dict[str, Any], notification_provider=None) -> Non
         if success:
             logger.info("Successfully sent GitHub notification")
         else:
-            logger.warning("GitHub notification sending failed")
+            logger.error("GitHub notification sending failed")
+            notification_success = False
     except Exception as e:
-        logger.warning(f"Failed to send GitHub notification: {e}")
+        logger.error(f"Failed to send GitHub notification: {e}")
+        notification_success = False
 
     # Per-project Slack notification via provider
     if notification_provider:
@@ -182,8 +188,12 @@ def send_notification(status: dict[str, Any], notification_provider=None) -> Non
                 logger.info("Successfully sent per-project Slack notification")
             else:
                 logger.warning("Per-project Slack notification failed")
+                notification_success = False
         except Exception as e:
             logger.warning(f"Failed to send per-project Slack notification: {e}")
+            notification_success = False
+
+    return notification_success
 
 
 def _get_project_and_args(project: str) -> tuple[str, str]:
@@ -781,9 +791,14 @@ def caliper_export_entrypoint(_ctx, artifact_directory: Path | None):
         # Send completion notifications regardless of success/failure
         if status:
             try:
-                send_notification(status, notification_provider=notification_provider)
+                notification_success = send_notification(
+                    status, notification_provider=notification_provider
+                )
+                if not notification_success:
+                    raise RuntimeError("Notification sending failed - export cannot continue")
             except Exception as e:
                 logger.exception(f"Failed to send notifications: {e}")
+                raise  # Re-raise to fail the export operation
 
         # Re-upload run.log with complete content (includes notification output)
         _try_update_run_log(status)
