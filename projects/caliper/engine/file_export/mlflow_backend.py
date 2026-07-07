@@ -616,3 +616,50 @@ def log_multi_run_artifacts(
         with mlflow_connection_env(connection):
             return _run(tracking_uri or connection.get("tracking_uri"))
     return _run(tracking_uri)
+
+
+def update_run_log_artifact(
+    *,
+    run_id: str,
+    log_file: Path,
+    tracking_uri: str | None = None,
+    artifact_path: str | None = None,
+    connection: dict[str, Any] | None = None,
+    insecure_tls: bool = False,
+) -> None:
+    """Re-upload a run.log file to an existing MLflow run, replacing the previous copy.
+
+    Intended to be called after all post-export work (notifications, etc.) completes,
+    so the uploaded log contains the full session output.
+    """
+    try:
+        import mlflow
+    except ImportError as e:
+        raise RuntimeError(
+            "mlflow is required for run-log update. Install with: pip install -e '.[caliper]'"
+        ) from e
+
+    def _upload(uri: str | None) -> None:
+        if uri:
+            assert_tracking_uri_has_no_userinfo(uri)
+            mlflow.set_tracking_uri(uri)
+
+        if insecure_tls:
+            try:
+                import urllib3
+
+                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            except Exception:
+                pass
+
+        for handler in logging.getLogger().handlers:
+            handler.flush()
+
+        client = mlflow.tracking.MlflowClient()
+        client.log_artifact(run_id, str(log_file), artifact_path=artifact_path)
+
+    if connection is not None:
+        with mlflow_connection_env(connection):
+            _upload(tracking_uri or connection.get("tracking_uri"))
+    else:
+        _upload(tracking_uri)

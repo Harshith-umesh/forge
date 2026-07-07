@@ -731,6 +731,52 @@ def caliper_export_entrypoint(_ctx, artifact_directory: Path | None):
                 send_notification(status, notification_provider=notification_provider)
             except Exception as e:
                 logger.warning(f"Failed to send notifications: {e}")
-                # Don't fail the entire job if notifications fail
+
+        # Re-upload run.log with complete content (includes notification output)
+        _try_update_run_log(status)
 
     return 0
+
+
+def _try_update_run_log(status: dict[str, Any] | None) -> None:
+    """Best-effort re-upload of run.log to MLflow after all post-export work is done."""
+    if not status:
+        return
+
+    backends = status.get("backends", {})
+    mlflow_meta = backends.get("mlflow")
+    if not isinstance(mlflow_meta, dict):
+        return
+
+    run_id = mlflow_meta.get("run_id")
+    if not run_id:
+        return
+
+    artifact_from = config.project.get_config("caliper.export.from", None, print=False, warn=False)
+    if not artifact_from:
+        return
+
+    log_file = Path(artifact_from) / "run.log"
+    if not log_file.is_file():
+        return
+
+    mlflow_cfg = config.project.get_config(
+        "caliper.export.backend.mlflow", None, print=False, warn=False
+    )
+    connection = mlflow_cfg.get("connection") if isinstance(mlflow_cfg, dict) else None
+    tracking_uri = mlflow_meta.get("tracking_uri")
+    insecure_tls = bool(mlflow_cfg.get("config", {}).get("insecure_tls")) if mlflow_cfg else False
+
+    try:
+        from projects.caliper.engine.file_export.mlflow_backend import update_run_log_artifact
+
+        update_run_log_artifact(
+            run_id=run_id,
+            log_file=log_file,
+            tracking_uri=tracking_uri,
+            connection=connection,
+            insecure_tls=insecure_tls,
+        )
+        logger.info("Updated run.log in MLflow run %s", run_id)
+    except Exception as e:
+        logger.warning("Failed to update run.log in MLflow: %s", e)
