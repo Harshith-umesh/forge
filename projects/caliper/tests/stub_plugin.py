@@ -102,7 +102,7 @@ class StubPlugin(PostProcessingPlugin):
             )
         return out
 
-    def build_ai_eval_payload(self, model: UnifiedRunModel) -> dict[str, object]:
+    def build_ai_data_payload(self, model: UnifiedRunModel) -> dict[str, object]:
         return {
             "schema_version": "1",
             "run_id": model.base_directory,
