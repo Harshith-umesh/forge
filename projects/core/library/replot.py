@@ -161,6 +161,10 @@ def caliper_replot_entrypoint(
     logger.info("Replot status:")
     logger.info(yaml.dump(status, indent=2))
 
+    # Show where artifacts have been saved
+    final_artifact_dir = artifact_directory or env.ARTIFACT_DIR
+    logger.info(f"📁 Artifacts saved to: {final_artifact_dir}")
+
     # Check if replot was successful
     replot_status = status.get("replot", {}).get("status", "unknown")
     if replot_status != "success":
