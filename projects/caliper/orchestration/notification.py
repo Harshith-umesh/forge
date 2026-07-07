@@ -265,12 +265,15 @@ def parse_postprocess_result(status_data: dict) -> PostprocessResult | None:
     if not status_data or not isinstance(status_data, dict):
         return None
 
-    # Parse steps
+    # Parse steps from new list-based format
     steps_dict = {}
-    steps_raw = status_data.get("steps", {})
-    if isinstance(steps_raw, dict):
-        for step_name, step_data in steps_raw.items():
-            if isinstance(step_data, dict):
+    steps_raw = status_data.get("steps", [])
+
+    if isinstance(steps_raw, list):
+        # List-based format with embedded step names
+        for step_data in steps_raw:
+            if isinstance(step_data, dict) and "name" in step_data:
+                step_name = step_data["name"]
                 steps_dict[step_name] = PostprocessStepResult(
                     status=step_data.get("status", "unknown"),
                     message=step_data.get("message"),
