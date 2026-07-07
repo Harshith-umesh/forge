@@ -222,7 +222,7 @@ def run_s3_import(
 
     if not postprocess_config.s3.import_.enabled:
         return {
-            "status": "skipped",
+            "status": "disabled",
             "reason": "s3_import disabled",
             "completed_at": time.time(),
         }

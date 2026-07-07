@@ -487,7 +487,7 @@ def log_analyze_command(
 ) -> None:
     """Log the CLI command to reproduce the analyze step."""
     # Use the correct command structure: caliper kpi analyze
-    command = f'caliper kpi analyze'
+    command = "caliper kpi analyze"
 
     # Add current KPI file path if provided
     if current_kpis_path:
@@ -503,8 +503,8 @@ def log_analyze_command(
         command += f' --output "{output_path}"'
 
     # Note: The kpi analyze command doesn't use --base-dir or --plugin, those are for orchestration
-    command += f'\n# Note: This command analyzes KPIs directly, bypassing orchestration'
-    command += f'\n# For orchestration with base-dir and plugin, use: caliper orchestrate'
+    command += "\n# Note: This command analyzes KPIs directly, bypassing orchestration"
+    command += "\n# For orchestration with base-dir and plugin, use: caliper orchestrate"
 
     step_args = {
         "current_kpis_path": str(current_kpis_path) if current_kpis_path else None,

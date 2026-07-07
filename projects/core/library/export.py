@@ -907,10 +907,8 @@ def caliper_export_list_vaults() -> list[str]:
                 )
 
         # Check if notifications are enabled and any export backend is enabled
-        notification_config = config.project.get_config("caliper.export.notifications", {})
-        any_export_enabled = (
-            s3_export_enabled or s3_import_enabled or mlflow_config.get("enabled", False)
-        )
+        config.project.get_config("caliper.export.notifications", {})
+        (s3_export_enabled or s3_import_enabled or mlflow_config.get("enabled", False))
 
         # Note: notification vault is handled separately as optional vault
         # See caliper_export_list_optional_vaults() function
@@ -946,9 +944,9 @@ def caliper_export_list_optional_vaults() -> list[str]:
         mlflow_config = config.project.get_config("caliper.export.backend.mlflow", {})
 
         any_export_enabled = (
-            s3_export_config.get("enabled", False) or
-            s3_import_config.get("enabled", False) or
-            mlflow_config.get("enabled", False)
+            s3_export_config.get("enabled", False)
+            or s3_import_config.get("enabled", False)
+            or mlflow_config.get("enabled", False)
         )
 
         if notification_config.get("enabled", False) and any_export_enabled:

@@ -16,8 +16,8 @@ from projects.core.library import ci as ci_lib
 from projects.core.library import config, env, vault
 from projects.core.library.export import (
     caliper_agentic_list_vaults,
-    caliper_export_list_vaults,
     caliper_export_list_optional_vaults,
+    caliper_export_list_vaults,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,19 +63,25 @@ def run_replot(*, artifact_directory: Path | None, keep_download_dir: bool | Non
 
         # Add optional export vaults (notifications)
         optional_export_vaults = caliper_export_list_optional_vaults()
-        logger.info(f"Found {len(optional_export_vaults)} optional export vaults: {optional_export_vaults}")
+        logger.info(
+            f"Found {len(optional_export_vaults)} optional export vaults: {optional_export_vaults}"
+        )
 
         # Remove duplicates while preserving order
         unique_vaults = list(dict.fromkeys(all_vaults))
         unique_optional_vaults = list(dict.fromkeys(optional_export_vaults))
 
         logger.info(f"Total required vaults for replot: {len(unique_vaults)} - {unique_vaults}")
-        logger.info(f"Total optional vaults for replot: {len(unique_optional_vaults)} - {unique_optional_vaults}")
+        logger.info(
+            f"Total optional vaults for replot: {len(unique_optional_vaults)} - {unique_optional_vaults}"
+        )
 
         # Initialize vaults with optional vaults handled separately
         if unique_vaults or unique_optional_vaults:
             vault.init(vaults=unique_vaults, optional_vaults=unique_optional_vaults)
-            logger.info(f"Successfully initialized {len(unique_vaults)} required + {len(unique_optional_vaults)} optional vaults for replot")
+            logger.info(
+                f"Successfully initialized {len(unique_vaults)} required + {len(unique_optional_vaults)} optional vaults for replot"
+            )
         else:
             logger.info("No vaults needed for replot operation")
 

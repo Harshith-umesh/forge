@@ -236,7 +236,7 @@ def run_s3_export(
 
     if not postprocess_config.s3.export.enabled:
         return {
-            "status": "skipped",
+            "status": "disabled",
             "reason": "s3_export disabled",
             "completed_at": time.time(),
         }

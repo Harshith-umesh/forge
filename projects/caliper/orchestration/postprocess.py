@@ -262,10 +262,10 @@ def _run_artifacts_to_kpis(
     """Generate KPI JSON using the plugin's compute_kpis method."""
 
     if not postprocess_config.kpi.enabled:
-        return {"status": "skipped", "reason": "kpi disabled", "completed_at": time.time()}
+        return {"status": "disabled", "reason": "kpi disabled", "completed_at": time.time()}
     if not postprocess_config.kpi.artifacts_to_kpis.enabled:
         return {
-            "status": "skipped",
+            "status": "disabled",
             "reason": "kpi.artifacts_to_kpis disabled",
             "completed_at": time.time(),
         }
@@ -313,7 +313,7 @@ def _run_s3_import(
     """Import historical data from S3."""
 
     if not postprocess_config.s3.import_.enabled:
-        return {"status": "skipped", "reason": "s3_import disabled", "completed_at": time.time()}
+        return {"status": "disabled", "reason": "s3_import disabled", "completed_at": time.time()}
 
     try:
         # Log command to reproduce this step
@@ -523,10 +523,10 @@ def _run_kpis_to_csv(
     """Export KPI data to CSV format using the plugin's compute_kpis method."""
 
     if not postprocess_config.kpi.enabled:
-        return {"status": "skipped", "reason": "kpi disabled", "completed_at": time.time()}
+        return {"status": "disabled", "reason": "kpi disabled", "completed_at": time.time()}
     if not postprocess_config.kpi.kpis_to_csv.enabled:
         return {
-            "status": "skipped",
+            "status": "disabled",
             "reason": "kpi.kpis_to_csv disabled",
             "completed_at": time.time(),
         }
@@ -573,7 +573,7 @@ def _stub_analyze(
     output_dir: Path,
 ) -> dict[str, Any]:
     if not postprocess_config.analyze.enabled:
-        return {"status": "skipped", "reason": "analyze disabled"}
+        return {"status": "disabled", "reason": "analyze disabled"}
 
     try:
         # Determine paths for analysis
@@ -609,8 +609,8 @@ def _stub_analyze(
 
         if not historical_kpis_dir.exists():
             return {
-                "status": "skipped",
-                "reason": f"Historical KPIs directory not found: {historical_kpis_dir}",
+                "status": "failed",
+                "error": f"Historical KPIs directory not found: {historical_kpis_dir}",
                 "completed_at": time.time(),
             }
 
@@ -619,8 +619,8 @@ def _stub_analyze(
 
         if not kpi_files:
             return {
-                "status": "skipped",
-                "reason": f"No kpis.json files found in historical directory: {historical_kpis_dir}",
+                "status": "failed",
+                "error": f"No kpis.json files found in historical directory: {historical_kpis_dir}",
                 "completed_at": time.time(),
             }
 
@@ -721,40 +721,13 @@ def _stub_analyze(
                 "completed_at": time.time(),
             }
 
-        # Check if analysis is possible with current formats
-        current_is_hierarchical = isinstance(current_kpis, dict)
-        baseline_is_hierarchical = isinstance(baseline_kpis, dict)
-
-        # Only support hierarchical format going forward, but analysis code needs updating
-        if not (current_is_hierarchical and baseline_is_hierarchical):
-            logger.warning(f"Skipping analysis: unsupported format detected (current: {'hierarchical' if current_is_hierarchical else 'list'}, baseline: {'hierarchical' if baseline_is_hierarchical else 'list'})")
-            return {
-                "status": "skipped",
-                "reason": "Analysis only supports hierarchical format, but list format detected",
-                "current_format": "hierarchical" if current_is_hierarchical else "list",
-                "baseline_format": "hierarchical" if baseline_is_hierarchical else "list",
-                "completed_at": time.time(),
-            }
-
         # Skip analysis for hierarchical format until analysis code is updated
-        logger.info("Skipping analysis: hierarchical format detected but analysis code needs updating for new format")
+        logger.info(
+            "Skipping analysis: hierarchical format detected but analysis code needs updating for new format"
+        )
         return {
             "status": "skipped",
-            "reason": "Analysis code not yet updated for hierarchical KPI format",
-            "current_format": "hierarchical",
-            "baseline_format": "hierarchical",
-            "completed_at": time.time(),
-        }
-
-        logger.info(f"Analysis completed with {len(findings)} findings, saved to {output_path}")
-
-        return {
-            "status": "success",
-            "findings_count": len(findings),
-            "output_file": str(output_path),
-            "baseline_path": str(baseline_path),  # Directory path as requested
-            "baseline_file_used": str(baseline_file),  # Actual file used for analysis
-            "current_kpis": str(current_kpis_path),
+            "reason": "not implemented",
             "completed_at": time.time(),
         }
 
@@ -1188,7 +1161,7 @@ class CaliperPostprocessOrchestrator:
             self._add_step(
                 "artifacts_to_kpis",
                 {
-                    "status": "skipped",
+                    "status": "disabled",
                     "reason": "kpi.artifacts_to_kpis disabled",
                     "completed_at": time.time(),
                 },
@@ -1200,7 +1173,7 @@ class CaliperPostprocessOrchestrator:
             self._add_step(
                 "kpis_to_csv",
                 {
-                    "status": "skipped",
+                    "status": "disabled",
                     "reason": "kpi.kpis_to_csv disabled",
                     "completed_at": time.time(),
                 },
@@ -1224,7 +1197,7 @@ class CaliperPostprocessOrchestrator:
             self._add_step(
                 "artifacts_to_ai_data",
                 {
-                    "status": "skipped",
+                    "status": "disabled",
                     "reason": "kpi.artifacts_to_ai_data disabled",
                     "completed_at": time.time(),
                 },
@@ -1254,7 +1227,7 @@ class CaliperPostprocessOrchestrator:
             self._add_step(
                 "s3_import",
                 {
-                    "status": "skipped",
+                    "status": "disabled",
                     "reason": "s3_import disabled",
                     "completed_at": time.time(),
                 },
@@ -1281,7 +1254,7 @@ class CaliperPostprocessOrchestrator:
             self._add_step(
                 "analyse_kpis",
                 {
-                    "status": "skipped",
+                    "status": "disabled",
                     "reason": "analyze disabled",
                     "completed_at": time.time(),
                 },
@@ -1308,7 +1281,7 @@ class CaliperPostprocessOrchestrator:
             self._add_step(
                 "s3_export",
                 {
-                    "status": "skipped",
+                    "status": "disabled",
                     "reason": "s3_export disabled",
                     "completed_at": time.time(),
                 },

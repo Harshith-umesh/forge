@@ -20,7 +20,11 @@ def run_analyse_kpis(
     """Analyze current KPIs against historical data (stub implementation)."""
 
     if not postprocess_config.analyse_kpis.enabled:
-        return {"status": "skipped", "reason": "analyse_kpis disabled", "completed_at": time.time()}
+        return {
+            "status": "disabled",
+            "reason": "analyse_kpis disabled",
+            "completed_at": time.time(),
+        }
 
     try:
         # Get path to current KPI file

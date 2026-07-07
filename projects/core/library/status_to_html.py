@@ -72,7 +72,7 @@ def convert_status_yaml_to_html(
     # Count step statuses for summary
     step_counts = {"success": 0, "failed": 0, "skipped": 0}
     for step_dict in steps_list:
-        for step_name, step_info in step_dict.items():
+        for _step_name, step_info in step_dict.items():
             step_status = step_info.get("status", "unknown")
             if step_status in ["ok", "success"]:
                 step_counts["success"] += 1
