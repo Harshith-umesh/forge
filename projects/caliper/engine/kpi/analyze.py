@@ -8,223 +8,104 @@ import time
 from pathlib import Path
 from typing import Any
 
-from projects.caliper.engine.model import RegressionFinding
-
 logger = logging.getLogger(__name__)
 
 
-def analyze_kpis(
+def analyze_kpis_against_baselines(
     current_kpis_path: Path,
-    baseline_kpis_path: Path,
+    baseline_kpis: dict[Path, dict[str, Any]],
     output_path: Path,
     plugin: Any = None,
 ) -> dict[str, Any]:
     """
-    Analyze KPI for regressions.
+    Analyze KPIs against ALL baseline files to build comprehensive baseline.
 
     Args:
         current_kpis_path: Path to current KPIs JSON file
-        baseline_kpis_path: Path to baseline KPIs JSON file
+        baseline_kpis: Dictionary mapping baseline file paths to their loaded KPI data
         output_path: Path where analysis results will be written
         plugin: Caliper plugin instance for KPI definitions and analysis rules
 
     Returns:
         Analysis result dictionary with status, findings, etc.
     """
-    try:
-        # Load KPI files
-        with open(current_kpis_path) as f:
-            current_data = json.load(f)
+    # STUB: For now, just log what we received and return a placeholder result
+    logger.info(
+        f"STUB: analyze_kpis_against_baselines called with {len(baseline_kpis)} baseline files"
+    )
+    logger.info(f"Current KPIs: {current_kpis_path}")
+    logger.info(f"Output: {output_path}")
+    logger.info(f"Baseline files: {list(baseline_kpis.keys())}")
 
-        with open(baseline_kpis_path) as f:
-            baseline_data = json.load(f)
-
-        # Extract schema version and validate
-        current_schema = current_data.get("schema_version", "unknown")
-        baseline_schema = baseline_data.get("schema_version", "unknown")
-
-        if current_schema != "2" or baseline_schema != "2":
-            return {
-                "status": "failed",
-                "error": f"Only schema_version 2 supported (current: {current_schema}, baseline: {baseline_schema})",
-                "completed_at": time.time(),
-            }
-
-        # Analyze metrics using plugin-aware logic
-        current_metrics = current_data.get("metrics", {})
-        baseline_metrics = baseline_data.get("metrics", {})
-
-        findings = []
-        regressions = 0
-        improvements = 0
-
-        # Get plugin-specific KPI definitions if available
-        if plugin and hasattr(plugin, "compute_kpis"):
-            try:
-                # Try to get KPI metadata from plugin
-                # This is a stub - plugins may expose KPI definitions differently
-                logger.debug(f"Plugin available for analysis: {plugin.__class__.__name__}")
-            except Exception as e:
-                logger.warning(f"Could not get KPI definitions from plugin: {e}")
-
-        # Compare common metrics
-        for metric_name in current_metrics:
-            if metric_name in baseline_metrics:
-                current_metric = current_metrics[metric_name]
-                baseline_metric = baseline_metrics[metric_name]
-
-                current_value = current_metric.get("value")
-                baseline_value = baseline_metric.get("value")
-
-                if current_value is not None and baseline_value is not None:
-                    try:
-                        curr_val = float(current_value)
-                        base_val = float(baseline_value)
-
-                        # Get direction preference from metric metadata or use default
-                        higher_is_better = current_metric.get("higher_is_better", False)
-                        if "labels" in current_metric:
-                            higher_is_better = current_metric["labels"].get(
-                                "higher_is_better", False
-                            )
-
-                        # Calculate change
-                        change_percent = (
-                            ((curr_val - base_val) / base_val) * 100
-                            if base_val != 0
-                            else float("inf")
-                        )
-
-                        # Default threshold: 5% change (can be made configurable via plugin)
-                        threshold_percent = 5.0
-
-                        # Determine if this is a regression based on direction
-                        is_regression = False
-                        is_improvement = False
-
-                        if abs(change_percent) > threshold_percent:
-                            if higher_is_better:
-                                # For metrics where higher is better
-                                if curr_val < base_val:  # Decreased
-                                    is_regression = True
-                                elif curr_val > base_val:  # Increased
-                                    is_improvement = True
-                            else:
-                                # For metrics where lower is better
-                                if curr_val > base_val:  # Increased
-                                    is_regression = True
-                                elif curr_val < base_val:  # Decreased
-                                    is_improvement = True
-
-                        if is_regression:
-                            regressions += 1
-                            findings.append(
-                                {
-                                    "metric": metric_name,
-                                    "type": "regression",
-                                    "current_value": curr_val,
-                                    "baseline_value": base_val,
-                                    "change_percent": change_percent,
-                                    "higher_is_better": higher_is_better,
-                                    "threshold": threshold_percent,
-                                }
-                            )
-                        elif is_improvement:
-                            improvements += 1
-                            findings.append(
-                                {
-                                    "metric": metric_name,
-                                    "type": "improvement",
-                                    "current_value": curr_val,
-                                    "baseline_value": base_val,
-                                    "change_percent": change_percent,
-                                    "higher_is_better": higher_is_better,
-                                    "threshold": threshold_percent,
-                                }
-                            )
-
-                    except (TypeError, ValueError):
-                        logger.warning(
-                            f"Could not compare metric {metric_name}: non-numeric values"
-                        )
-
-        # Create analysis results
-        analysis_result = {
-            "analysis_timestamp": time.time(),
-            "current_file": str(current_kpis_path),
-            "baseline_file": str(baseline_kpis_path),
-            "schema_version": "2",
-            "metrics_compared": len([m for m in current_metrics if m in baseline_metrics]),
-            "findings_count": len(findings),
-            "regressions_count": regressions,
-            "improvements_count": improvements,
-            "findings": findings,
-            "summary": f"Found {regressions} regressions and {improvements} improvements across {len([m for m in current_metrics if m in baseline_metrics])} metrics",
-        }
-
-        # Write results
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, "w") as f:
-            json.dump(analysis_result, f, indent=2)
-
-        logger.info(f"Analysis completed: {regressions} regressions, {improvements} improvements")
-
-        return {
-            "status": "success",
-            "findings_count": len(findings),
-            "regressions_count": regressions,
-            "improvements_count": improvements,
-            "output_file": str(output_path),
-            "metrics_compared": len([m for m in current_metrics if m in baseline_metrics]),
-            "completed_at": time.time(),
-        }
-
-    except FileNotFoundError as e:
-        return {
-            "status": "failed",
-            "error": f"File not found: {e}",
-            "completed_at": time.time(),
-        }
-    except json.JSONDecodeError as e:
-        return {
-            "status": "failed",
-            "error": f"Invalid JSON format: {e}",
-            "completed_at": time.time(),
-        }
-    except Exception as e:
-        logger.exception("Analysis failed")
-        return {
-            "status": "failed",
-            "error": f"Analysis failed: {e}",
-            "completed_at": time.time(),
-        }
+    return {
+        "status": "skipped",
+        "reason": "analyze_kpis_against_baselines is not implemented yet - STUB",
+        "completed_at": time.time(),
+    }
 
 
-def find_most_recent_baseline(historical_dir: Path) -> Path | None:
-    """Find the most recently modified kpis.json file in historical directory."""
+def find_baseline_kpis(historical_dir: Path) -> dict[Path, dict[str, Any]]:
+    """Load all kpis.json files from historical directory and return a mapping of path to loaded JSON object.
+
+    Args:
+        historical_dir: Directory to search for historical kpis.json files
+
+    Returns:
+        Dictionary mapping file paths to loaded KPI JSON objects
+    """
+    baseline_kpis = {}
     kpi_files = list(historical_dir.rglob("kpis.json"))
+
     if not kpi_files:
-        return None
-    return max(kpi_files, key=lambda p: p.stat().st_mtime)
+        logger.warning(f"No kpis.json files found in historical directory: {historical_dir}")
+        return baseline_kpis
+
+    logger.info(f"Found {len(kpi_files)} historical KPI files to load")
+
+    for kpi_file in kpi_files:
+        try:
+            with open(kpi_file) as f:
+                kpi_data = json.load(f)
+
+            # Validate that it's a hierarchical format (schema_version 2)
+            schema_version = kpi_data.get("schema_version", "unknown")
+            if schema_version != "2":
+                logger.warning(
+                    f"Skipping {kpi_file}: unsupported schema version {schema_version} (only version 2 supported)"
+                )
+                continue
+
+            baseline_kpis[kpi_file] = kpi_data
+            logger.debug(f"Loaded KPI file: {kpi_file}")
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON in {kpi_file}: {e}")
+            continue
+        except FileNotFoundError as e:
+            logger.error(f"KPI file not found: {kpi_file}: {e}")
+            continue
+        except Exception as e:
+            logger.error(f"Failed to load KPI file {kpi_file}: {e}")
+            continue
+
+    logger.info(f"Successfully loaded {len(baseline_kpis)} historical KPI files")
+    return baseline_kpis
 
 
 def run_analyze(
     *,
     current_path: Any,
-    baseline_path: Any,
+    baseline_kpis: dict[Path, dict[str, Any]],
     output_path: Any,
     plugin: Any = None,
-) -> list[RegressionFinding]:
-    """Run KPI analysis"""
-    result = analyze_kpis(
+) -> dict[str, Any]:
+    """Run KPI analysis against ALL baseline files"""
+    return analyze_kpis_against_baselines(
         current_kpis_path=Path(current_path),
-        baseline_kpis_path=Path(baseline_path),
+        baseline_kpis=baseline_kpis,
         output_path=Path(output_path),
         plugin=plugin,
     )
 
-    # Convert to expected format for CLI
-    if result["status"] == "success":
-        return []  # Return empty list for now, actual findings are in the output file
-    else:
-        raise RuntimeError(f"Analysis failed: {result.get('error', 'Unknown error')}")
+
+# EOF

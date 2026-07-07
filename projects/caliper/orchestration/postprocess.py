@@ -571,11 +571,12 @@ def _stub_analyze(
     plugin_module: str,
     base_dir: Path,
     output_dir: Path,
+    current_kpis_file: Path,
 ) -> dict[str, Any]:
     if not postprocess_config.analyze.enabled:
         return {"status": "disabled", "reason": "analyze disabled"}
 
-    current_kpis_path = output_dir / "kpis.json"
+    current_kpis_path = current_kpis_file
 
     # Determine paths for analysis
     analyze_config = postprocess_config.analyze
@@ -604,25 +605,11 @@ def _stub_analyze(
                 "completed_at": time.time(),
             }
 
-        # Find all kpis.json files in the historical directory
-        kpi_files = list(historical_kpis_dir.rglob("kpis.json"))
-
-        if not kpi_files:
-            return {
-                "status": "failed",
-                "error": f"No kpis.json files found in historical directory: {historical_kpis_dir}",
-                "completed_at": time.time(),
-            }
-
-        # Use the most recently modified KPI file as baseline
-        baseline_file = max(kpi_files, key=lambda p: p.stat().st_mtime)
-
         # Log command to reproduce this step
         log_analyze_command(
             base_dir=base_dir,
             plugin_module=plugin_module,
             current_kpis_path=current_kpis_path,
-            baseline_file=baseline_file,
             historical_kpis_dir=historical_kpis_dir,
             output_path=output_path,
         )
@@ -633,12 +620,19 @@ def _stub_analyze(
         plugin = load_plugin(plugin_module)
 
         # Run hierarchical KPI analysis using core engine
-        from projects.caliper.engine.kpi.analyze import analyze_kpis
+        from projects.caliper.engine.kpi.analyze import (
+            analyze_kpis_against_baselines,
+            find_baseline_kpis,
+        )
 
-        logger.info(f"Running KPI analysis: {current_kpis_path} vs {baseline_file}")
-        result = analyze_kpis(
+        # Load all baseline KPIs from historical directory
+        baseline_kpis = find_baseline_kpis(historical_kpis_dir)
+        logger.info(
+            f"Running KPI analysis: {current_kpis_path} vs {len(baseline_kpis)} baseline files"
+        )
+        result = analyze_kpis_against_baselines(
             current_kpis_path=current_kpis_path,
-            baseline_kpis_path=baseline_file,
+            baseline_kpis=baseline_kpis,
             output_path=output_path,
             plugin=plugin,
         )
@@ -1175,9 +1169,36 @@ class CaliperPostprocessOrchestrator:
             )
             return
 
+        # Get KPI file path from artifacts_to_kpis step
+        artifacts_to_kpis_step = self._get_step("artifacts_to_kpis")
+        if not artifacts_to_kpis_step or artifacts_to_kpis_step.get("status") != "success":
+            self._add_step(
+                "analyse_kpis",
+                {
+                    "status": "failed",
+                    "error": "artifacts_to_kpis step did not complete successfully",
+                    "completed_at": time.time(),
+                },
+            )
+            self.analyze_failed = True
+            return
+
+        current_kpis_file = artifacts_to_kpis_step.get("output_file")
+        if not current_kpis_file:
+            self._add_step(
+                "analyse_kpis",
+                {
+                    "status": "failed",
+                    "error": "No output file found in artifacts_to_kpis step",
+                    "completed_at": time.time(),
+                },
+            )
+            self.analyze_failed = True
+            return
+
         with step_logging("caliper_analyse_kpis", self.step_logs_dir):
             try:
-                result = _stub_analyze(self.config, plugin_module, self.tree_root, output_dir)
+                result = _stub_analyze(self.config, plugin_module, self.tree_root, output_dir, Path(current_kpis_file))
                 self._add_step("analyse_kpis", result)
                 logger.info(f"KPI analysis result: {result}")
 

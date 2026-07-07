@@ -353,7 +353,7 @@ def kpi_analyze(
 ) -> None:
     """Analyze KPIs for regression."""
     try:
-        from projects.caliper.engine.kpi.analyze import find_most_recent_baseline
+        from projects.caliper.engine.kpi.analyze import find_baseline_kpis
         from projects.caliper.engine.load_plugin import load_plugin
 
         # Load plugin for KPI definitions and analysis rules
@@ -364,22 +364,51 @@ def kpi_analyze(
 
         click.echo(f"🔌 Using plugin: {plugin_module}")
 
-        # Find the most recent baseline file in the directory
-        baseline_file = find_most_recent_baseline(baseline_dir)
-        if not baseline_file:
+        baseline_kpis = find_baseline_kpis(baseline_dir)
+        if not baseline_kpis:
             click.echo(
                 f"❌ No kpis.json files found in baseline directory: {baseline_dir}", err=True
             )
             sys.exit(1)
 
-        click.echo(f"📊 Using baseline: {baseline_file}")
+        click.echo(f"📊 Found {len(baseline_kpis)} baseline files to process")
 
-        # Run analysis with plugin context
-        run_analyze(
-            current_path=current, baseline_path=baseline_file, output_path=output, plugin=plugin
+        # Run analysis with ALL baseline files (not just the most recent)
+        result = run_analyze(
+            current_path=current, baseline_kpis=baseline_kpis, output_path=output, plugin=plugin
         )
-        click.echo(f"✅ Analysis complete. Results written to: {output}")
+
+        # Check result status at CLI level
+        if result["status"] == "success":
+            click.echo(f"✅ Analysis complete. Results written to: {output}")
+        elif result["status"] == "skipped":
+            click.echo(f"⚠️  Analysis skipped: {result.get('reason', 'Unknown reason')}")
+            click.echo(f"📝 Output written to: {output}")
+        else:
+            click.echo(f"❌ Analysis failed: {result.get('error', 'Unknown error')}", err=True)
+            sys.exit(1)
+
+        # Show the analysis results on screen
+        if output.exists():
+            try:
+                import json
+
+                with open(output) as f:
+                    result_data = json.load(f)
+
+                # Convert to YAML for better readability
+                import yaml
+
+                yaml_output = yaml.dump(result_data, default_flow_style=False, indent=2)
+                click.echo("\n📊 Analysis Results:")
+                click.echo("=" * 50)
+                click.echo(yaml_output)
+            except Exception as e:
+                click.echo(f"⚠️  Could not display results: {e}")
+        else:
+            click.echo("⚠️  Output file not found")
     except Exception as e:  # noqa: BLE001
+        raise e
         click.echo(f"❌ kpi analyze failed: {e}", err=True)
         sys.exit(3)
 

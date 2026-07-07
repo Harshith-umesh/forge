@@ -482,7 +482,6 @@ def log_analyze_command(
     base_dir: Path,
     plugin_module: str,
     current_kpis_path: Path | None = None,
-    baseline_file: Path | None = None,
     historical_kpis_dir: Path | None = None,
     output_path: Path | None = None,
 ) -> None:
@@ -511,13 +510,10 @@ def log_analyze_command(
     command += "\n# To re-run this analysis step independently, use the command above"
     command += f"\n# Plugin: {plugin_module}"
     command += f"\n# Base dir: {base_dir}"
-    if baseline_file:
-        command += f"\n# Most recent baseline file found: {baseline_file}"
 
     step_args = {
         "current_kpis_path": str(current_kpis_path) if current_kpis_path else None,
         "historical_kpis_dir": str(historical_kpis_dir) if historical_kpis_dir else None,
-        "baseline_file_selected": str(baseline_file) if baseline_file else None,
         "output_path": str(output_path) if output_path else None,
         "plugin_module": plugin_module,
         "base_dir": str(base_dir),
