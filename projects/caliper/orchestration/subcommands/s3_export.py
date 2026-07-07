@@ -90,6 +90,31 @@ def list_kpi_json_files(output_dir: Path) -> list[Path]:
     return kpi_json_files
 
 
+def list_analysis_files(output_dir: Path) -> list[Path]:
+    """List all analysis output files in the output directory.
+
+    Args:
+        output_dir: Path to search for analysis files
+
+    Returns:
+        List of analysis file paths to upload
+    """
+    files = []
+    # Look for analysis output files (kpi_analyze.json is the most common)
+    analysis_patterns = ["kpi_analyze.json", "kpi_analysis.json", "*analyze*.json"]
+
+    for pattern in analysis_patterns:
+        for file_path in output_dir.glob(pattern):
+            if file_path.is_file():
+                files.append(file_path)
+
+    logger.info(f"Found {len(files)} analysis files in output directory: {output_dir}")
+    for file_path in files:
+        logger.info(f"  - {file_path.name} ({file_path.stat().st_size} bytes)")
+
+    return files
+
+
 def upload_file_to_s3(s3_client, file_path: Path, bucket: str, s3_key: str) -> bool:
     """Upload a single file to S3.
 
@@ -307,9 +332,20 @@ def run_s3_export(
             kpi_json_files = list_kpi_json_files(output_dir)
             upload_files.extend(kpi_json_files)
 
-        if s3_config.include_ai_data and ai_data_dir:
-            ai_data_files = list_ai_data_files(ai_data_dir)
-            upload_files.extend(ai_data_files)
+        if s3_config.include_ai_data:
+            if ai_data_dir:
+                ai_data_files = list_ai_data_files(ai_data_dir)
+                logger.info(f"Found {len(ai_data_files)} AI data files in directory: {ai_data_dir}")
+                upload_files.extend(ai_data_files)
+            else:
+                logger.warning(
+                    "AI data export is enabled but ai_data_dir is None - no AI data files will be exported"
+                )
+
+        # Always include analysis files if they exist (e.g., kpi_analyze.json)
+        # These are included regardless of other flags since they're valuable for historical tracking
+        analysis_files = list_analysis_files(output_dir)
+        upload_files.extend(analysis_files)
 
         logger.info(f"Preparing to upload {len(upload_files)} files to S3")
         total_size = sum(f.stat().st_size for f in upload_files)
@@ -337,6 +373,9 @@ def run_s3_export(
             elif s3_config.include_csv and file_path.suffix == ".csv":
                 s3_key = f"{export_s3_prefix}{file_path.name}"
             elif s3_config.include_kpis_json and file_path.name == "kpis.json":
+                s3_key = f"{export_s3_prefix}{file_path.name}"
+            elif file_path.name.endswith("analyze.json") or "analyze" in file_path.name:
+                # Include analysis files (e.g., kpi_analyze.json)
                 s3_key = f"{export_s3_prefix}{file_path.name}"
 
             if s3_key:

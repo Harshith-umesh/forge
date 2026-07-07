@@ -101,7 +101,11 @@ def s3_export_cmd(
             click.echo("📋 Include flags:")
             click.echo(f"   • CSV files: {'✅' if include_csv else '❌'}")
             click.echo(f"   • KPI JSON files: {'✅' if include_kpis_json else '❌'}")
-            click.echo(f"   • AI data files: {'✅' if include_ai_data else '❌'}")
+            ai_data_status = "✅" if include_ai_data else "❌"
+            if include_ai_data and not ai_data_dir:
+                ai_data_status += " (⚠️  no ai_data_dir specified)"
+            click.echo(f"   • AI data files: {ai_data_status}")
+            click.echo("   • Analysis files: ✅ (always included if available)")
 
         # Create a minimal config object for the S3 export function
         from projects.caliper.orchestration.postprocess_config import (
