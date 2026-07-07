@@ -13,6 +13,7 @@ from projects.caliper.engine.file_export.mlflow_secrets import (
     assert_tracking_uri_has_no_userinfo,
     mlflow_connection_env,
 )
+from projects.core.library import env
 
 logger = logging.getLogger(__name__)
 
@@ -320,7 +321,7 @@ def _upload_mlflow_files_parallel(
             else:
                 rel_name = pr.relative_to(ar).as_posix()
             with lock:
-                logger.info(f"log artifact {p} -> {rel_name}")
+                logger.debug(f"log artifact {p} -> {rel_name}")
         client.log_artifact(run_id, str(p), artifact_path=subdir)
 
     if workers <= 1:
@@ -385,6 +386,30 @@ def log_artifacts(
                 f"MLflow upload starting ({n} file(s), workers={workers}, "
                 f"experiment={experiment or 'default'})"
             )
+
+            # Save file list to artifact directory to avoid log spam
+            try:
+                if env.ARTIFACT_DIR:
+                    upload_list_file = Path(env.ARTIFACT_DIR) / "mlflow_upload_files.txt"
+                    with open(upload_list_file, "w") as f:
+                        f.write("MLflow Upload File List\n")
+                        f.write("======================\n")
+                        f.write(f"Experiment: {experiment or 'default'}\n")
+                        f.write(f"Total files: {n}\n")
+                        f.write(f"Workers: {workers}\n")
+                        f.write(f"Artifact root: {artifact_root}\n\n")
+
+                        for file_path in file_paths:
+                            # Calculate relative path for display
+                            try:
+                                rel_path = file_path.relative_to(artifact_root)
+                            except ValueError:
+                                rel_path = file_path
+                            f.write(f"{file_path} -> {rel_path}\n")
+
+                    logger.info(f"MLflow upload file list saved to: {upload_list_file}")
+            except Exception as e:
+                logger.warning(f"Failed to save MLflow upload file list: {e}")
 
         effective_meta = merge_run_metadata_with_git_source(artifact_root, run_metadata)
 
