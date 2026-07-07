@@ -52,7 +52,7 @@ class CaliperOrchestrationVisualizeSection(BaseModel):
         return v
 
 
-class CaliperOrchestrationKpiGenerateSection(BaseModel):
+class CaliperOrchestrationArtifactsToKpisSection(BaseModel):
     """Emit KPI JSON via plugin ``compute_kpis``."""
 
     model_config = ConfigDict(extra="forbid")
@@ -64,15 +64,7 @@ class CaliperOrchestrationKpiGenerateSection(BaseModel):
     )
 
 
-class CaliperOrchestrationKpiExportSection(BaseModel):
-    """Push KPI rows to OpenSearch (requires env/client setup)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    enabled: bool = False
-
-
-class CaliperOrchestrationKpiCsvExportSection(BaseModel):
+class CaliperOrchestrationKpisToCsvSection(BaseModel):
     """Export KPI data to CSV format."""
 
     model_config = ConfigDict(extra="forbid")
@@ -88,14 +80,14 @@ class CaliperOrchestrationKpiCsvExportSection(BaseModel):
     )
 
 
-class CaliperOrchestrationKpiAiEvalExportSection(BaseModel):
+class CaliperOrchestrationArtifactsToAiDataSection(BaseModel):
     """Export AI evaluation payload with structured test entries and artifact files."""
 
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
     output_dir: str = Field(
-        default="ai_eval",
+        default="ai_data",
         description="Directory name for AI evaluation export; relative paths resolve under the post-processing artifact dir.",
     )
 
@@ -106,17 +98,14 @@ class CaliperOrchestrationKpiSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
-    generate: CaliperOrchestrationKpiGenerateSection = Field(
-        default_factory=CaliperOrchestrationKpiGenerateSection
+    artifacts_to_kpis: CaliperOrchestrationArtifactsToKpisSection = Field(
+        default_factory=CaliperOrchestrationArtifactsToKpisSection
     )
-    export: CaliperOrchestrationKpiExportSection = Field(
-        default_factory=CaliperOrchestrationKpiExportSection
+    kpis_to_csv: CaliperOrchestrationKpisToCsvSection = Field(
+        default_factory=CaliperOrchestrationKpisToCsvSection
     )
-    csv_export: CaliperOrchestrationKpiCsvExportSection = Field(
-        default_factory=CaliperOrchestrationKpiCsvExportSection
-    )
-    ai_eval_export: CaliperOrchestrationKpiAiEvalExportSection = Field(
-        default_factory=CaliperOrchestrationKpiAiEvalExportSection
+    artifacts_to_ai_data: CaliperOrchestrationArtifactsToAiDataSection = Field(
+        default_factory=CaliperOrchestrationArtifactsToAiDataSection
     )
 
 
@@ -144,27 +133,55 @@ class CaliperOrchestrationAnalyzeSection(BaseModel):
         return self
 
 
+class CaliperOrchestrationS3ImportSection(BaseModel):
+    """Import historical data from AWS S3 for analysis."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    output_dir: str = Field(
+        default="historical_data",
+        description="Directory name for imported data; relative paths resolve under the post-processing artifact dir.",
+    )
+    include_kpis_json: bool = Field(
+        default=True,
+        description="Whether to download kpis.json files.",
+    )
+    include_kpis_csv: bool = Field(
+        default=False,
+        description="Whether to download kpis.csv files.",
+    )
+    include_ai_data: bool = Field(
+        default=False,
+        description="Whether to download ai_data directories.",
+    )
+    max_downloads: int = Field(
+        default=50,
+        description="Maximum number of historical entries to download.",
+    )
+
+
+class CaliperOrchestrationAnalyseKpisSection(BaseModel):
+    """Analyze current KPIs against historical data."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    output: str | None = Field(
+        default="kpi_analysis.json",
+        description="Output filename for KPI analysis results; relative paths resolve under the post-processing artifact dir.",
+    )
+
+
 class CaliperOrchestrationS3ExportSection(BaseModel):
     """Export postprocess artifacts to AWS S3."""
 
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
-    bucket: str | None = Field(
-        default=None,
-        description="S3 bucket name for export (required when enabled).",
-    )
     prefix: str | None = Field(
         default=None,
         description="S3 key prefix/folder path (optional).",
-    )
-    instance: str | None = Field(
-        default=None,
-        description="Instance identifier for S3 export organization (optional).",
-    )
-    directory: str | None = Field(
-        default=None,
-        description="Directory identifier for S3 export organization (optional).",
     )
     upload_id: str | None = Field(
         default=None,
@@ -178,9 +195,32 @@ class CaliperOrchestrationS3ExportSection(BaseModel):
         default=True,
         description="Whether to include CSV exports in S3 upload.",
     )
-    include_ai_eval: bool = Field(
+    include_kpis_json: bool = Field(
         default=True,
-        description="Whether to include AI evaluation exports in S3 upload.",
+        description="Whether to include KPI JSON files in S3 upload.",
+    )
+    include_ai_data: bool = Field(
+        default=True,
+        description="Whether to include AI data exports in S3 upload.",
+    )
+
+
+class CaliperOrchestrationS3Section(BaseModel):
+    """AWS S3 operations for import and export of postprocess artifacts."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    bucket: str | None = Field(
+        default=None,
+        description="S3 bucket name (required when import or export is enabled).",
+    )
+    instance: str | None = Field(
+        default=None,
+        description="Instance identifier for S3 organization (required when import or export is enabled).",
+    )
+    directory: str | None = Field(
+        default=None,
+        description="Directory identifier for S3 organization (required when import or export is enabled).",
     )
     vault: str = Field(
         default="psap-forge-aws-s3-export",
@@ -190,21 +230,28 @@ class CaliperOrchestrationS3ExportSection(BaseModel):
         default="aws.credentials",
         description="File name within vault containing AWS credentials.",
     )
+    import_: CaliperOrchestrationS3ImportSection = Field(
+        default_factory=CaliperOrchestrationS3ImportSection, alias="import"
+    )
+    export: CaliperOrchestrationS3ExportSection = Field(
+        default_factory=CaliperOrchestrationS3ExportSection
+    )
 
     @model_validator(mode="after")
     def _required_fields_when_enabled(self) -> Self:
-        if self.enabled:
+        s3_enabled = self.import_.enabled or self.export.enabled
+        if s3_enabled:
             if not (self.bucket and str(self.bucket).strip()):
                 raise ValueError(
-                    "caliper.postprocess.s3_export.enabled requires non-empty bucket name."
+                    "caliper.postprocess.s3.bucket is required when import or export is enabled."
                 )
             if not (self.instance and str(self.instance).strip()):
                 raise ValueError(
-                    "caliper.postprocess.s3_export.enabled requires non-empty instance."
+                    "caliper.postprocess.s3.instance is required when import or export is enabled."
                 )
             if not (self.directory and str(self.directory).strip()):
                 raise ValueError(
-                    "caliper.postprocess.s3_export.enabled requires non-empty directory."
+                    "caliper.postprocess.s3.directory is required when import or export is enabled."
                 )
         return self
 
@@ -241,8 +288,9 @@ class CaliperOrchestrationPostprocessConfig(BaseModel):
     analyze: CaliperOrchestrationAnalyzeSection = Field(
         default_factory=CaliperOrchestrationAnalyzeSection
     )
-    s3_export: CaliperOrchestrationS3ExportSection = Field(
-        default_factory=CaliperOrchestrationS3ExportSection
+    s3: CaliperOrchestrationS3Section = Field(default_factory=CaliperOrchestrationS3Section)
+    analyse_kpis: CaliperOrchestrationAnalyseKpisSection = Field(
+        default_factory=CaliperOrchestrationAnalyseKpisSection
     )
 
     @model_validator(mode="after")

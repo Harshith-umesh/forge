@@ -36,9 +36,10 @@ def compute_final_postprocess_status(
     test_outcome: TestPhaseOutcome,
     parse_failed: bool,
     visualize_failed: bool,
-    kpi_generate_failed: bool,
-    kpi_export_failed: bool,
-    ai_eval_failed: bool,
+    artifacts_to_kpis_failed: bool,
+    ai_data_failed: bool,
+    s3_import_failed: bool,
+    analyse_kpis_failed: bool,
     s3_export_failed: bool,
     analyze_failed: bool,
     has_regression: bool,
@@ -47,7 +48,7 @@ def compute_final_postprocess_status(
     """
     Single authoritative label for CI / dashboards.
 
-    Priority (first match wins): test failure → parse/viz failure → KPI/analyze/ai_eval/s3_export pipeline failure →
+    Priority (first match wins): test failure → parse/viz failure → KPI/analyze/ai_data/s3_import/s3_export pipeline failure →
     regression → improvement → success.
     """
     if test_outcome.phase == "FAILED":
@@ -55,9 +56,10 @@ def compute_final_postprocess_status(
     if parse_failed or visualize_failed:
         return FINAL_PARSE_VISUALIZE_FAILED
     if (
-        kpi_generate_failed
-        or kpi_export_failed
-        or ai_eval_failed
+        artifacts_to_kpis_failed
+        or ai_data_failed
+        or s3_import_failed
+        or analyse_kpis_failed
         or s3_export_failed
         or analyze_failed
     ):

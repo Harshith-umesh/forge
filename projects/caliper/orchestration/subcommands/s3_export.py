@@ -30,27 +30,27 @@ from projects.core.library import vault as vault_lib
 logger = logging.getLogger(__name__)
 
 
-def list_ai_eval_files(ai_eval_dir: Path) -> list[Path]:
+def list_ai_data_files(ai_data_dir: Path) -> list[Path]:
     """List all files in the AI evaluation export directory.
 
     Args:
-        ai_eval_dir: Path to AI evaluation export directory
+        ai_data_dir: Path to AI evaluation export directory
 
     Returns:
         List of file paths to upload
     """
-    if not ai_eval_dir.exists():
-        logger.warning(f"AI eval directory does not exist: {ai_eval_dir}")
+    if not ai_data_dir.exists():
+        logger.warning(f"AI eval directory does not exist: {ai_data_dir}")
         return []
 
     files = []
-    for file_path in ai_eval_dir.rglob("*"):
+    for file_path in ai_data_dir.rglob("*"):
         if file_path.is_file():
             files.append(file_path)
 
-    logger.info(f"Found {len(files)} files in AI eval directory: {ai_eval_dir}")
+    logger.info(f"Found {len(files)} files in AI eval directory: {ai_data_dir}")
     for file_path in files:
-        relative_path = file_path.relative_to(ai_eval_dir)
+        relative_path = file_path.relative_to(ai_data_dir)
         logger.info(f"  - {relative_path} ({file_path.stat().st_size} bytes)")
 
     return files
@@ -72,6 +72,24 @@ def list_csv_files(output_dir: Path) -> list[Path]:
         logger.info(f"  - {csv_file.name} ({csv_file.stat().st_size} bytes)")
 
     return csv_files
+
+
+def list_kpi_json_files(output_dir: Path) -> list[Path]:
+    """List KPI JSON files in the postprocess output directory.
+
+    Args:
+        output_dir: Path to postprocess output directory
+
+    Returns:
+        List of KPI JSON file paths to upload
+    """
+    kpi_json_files = list(output_dir.glob("kpis.json"))
+
+    logger.info(f"Found {len(kpi_json_files)} KPI JSON files in output directory: {output_dir}")
+    for kpi_file in kpi_json_files:
+        logger.info(f"  - {kpi_file.name} ({kpi_file.stat().st_size} bytes)")
+
+    return kpi_json_files
 
 
 def upload_file_to_s3(s3_client, file_path: Path, bucket: str, s3_key: str) -> bool:
@@ -179,21 +197,21 @@ def get_aws_credentials(vault_name: str, credentials_file: str) -> Path | None:
 def run_s3_export(
     postprocess_config,
     output_dir: Path,
-    ai_eval_dir: Path | None = None,
+    ai_data_dir: Path | None = None,
 ) -> dict[str, Any]:
     """S3 export functionality for postprocess artifacts.
 
     Args:
         postprocess_config: Postprocess configuration object
         output_dir: Path to postprocess output directory
-        ai_eval_dir: Path to AI evaluation export directory (optional)
+        ai_data_dir: Path to AI evaluation export directory (optional)
 
     Returns:
         Export status dictionary
     """
     start_time = time.time()
 
-    if not postprocess_config.s3_export.enabled:
+    if not postprocess_config.s3.export.enabled:
         return {
             "status": "skipped",
             "reason": "s3_export disabled",
@@ -201,7 +219,7 @@ def run_s3_export(
         }
 
     # Check dry_run flag early
-    dry_run = postprocess_config.s3_export.dry_run
+    dry_run = postprocess_config.s3.export.dry_run
 
     if not dry_run and not BOTO3_AVAILABLE:
         return {
@@ -211,11 +229,12 @@ def run_s3_export(
         }
 
     try:
-        s3_config = postprocess_config.s3_export
-        bucket = s3_config.bucket
+        s3_parent_config = postprocess_config.s3
+        s3_config = postprocess_config.s3.export
+        bucket = s3_parent_config.bucket
         prefix = s3_config.prefix
-        instance = s3_config.instance
-        directory = s3_config.directory
+        instance = s3_parent_config.instance
+        directory = s3_parent_config.directory
         upload_id = s3_config.upload_id
 
         # Determine artifact directory for relative paths
@@ -262,19 +281,23 @@ def run_s3_export(
         credentials_path = None
         if not dry_run:
             # Get AWS credentials for actual upload
-            credentials_path = get_aws_credentials(s3_config.vault, s3_config.aws_credentials_file)
+            credentials_path = get_aws_credentials(
+                s3_parent_config.vault, s3_parent_config.aws_credentials_file
+            )
             if not credentials_path:
                 return {
                     "status": "failed",
-                    "error": f"Could not load AWS credentials from vault {s3_config.vault}",
+                    "error": f"Could not load AWS credentials from vault {s3_parent_config.vault}",
                     "completed_at": time.time(),
                 }
         else:
             # For dry runs, just check if credentials would be available
-            credentials_path = get_aws_credentials(s3_config.vault, s3_config.aws_credentials_file)
+            credentials_path = get_aws_credentials(
+                s3_parent_config.vault, s3_parent_config.aws_credentials_file
+            )
             if not credentials_path:
                 logger.warning(
-                    f"AWS credentials not available from vault {s3_config.vault} - dry run will proceed but actual upload would fail"
+                    f"AWS credentials not available from vault {s3_parent_config.vault} - dry run will proceed but actual upload would fail"
                 )
 
         # List local files to upload
@@ -284,9 +307,13 @@ def run_s3_export(
             csv_files = list_csv_files(output_dir)
             upload_files.extend(csv_files)
 
-        if s3_config.include_ai_eval and ai_eval_dir:
-            ai_eval_files = list_ai_eval_files(ai_eval_dir)
-            upload_files.extend(ai_eval_files)
+        if s3_config.include_kpis_json:
+            kpi_json_files = list_kpi_json_files(output_dir)
+            upload_files.extend(kpi_json_files)
+
+        if s3_config.include_ai_data and ai_data_dir:
+            ai_data_files = list_ai_data_files(ai_data_dir)
+            upload_files.extend(ai_data_files)
 
         logger.info(f"Preparing to upload {len(upload_files)} files to S3")
         total_size = sum(f.stat().st_size for f in upload_files)
@@ -308,10 +335,12 @@ def run_s3_export(
             # Determine S3 key based on file type
             s3_key = None
 
-            if s3_config.include_ai_eval and ai_eval_dir and ai_eval_dir in file_path.parents:
-                relative_path = file_path.relative_to(ai_eval_dir)
-                s3_key = f"{export_s3_prefix}ai_eval/{relative_path}"
+            if s3_config.include_ai_data and ai_data_dir and ai_data_dir in file_path.parents:
+                relative_path = file_path.relative_to(ai_data_dir)
+                s3_key = f"{export_s3_prefix}ai_data/{relative_path}"
             elif s3_config.include_csv and file_path.suffix == ".csv":
+                s3_key = f"{export_s3_prefix}{file_path.name}"
+            elif s3_config.include_kpis_json and file_path.name == "kpis.json":
                 s3_key = f"{export_s3_prefix}{file_path.name}"
 
             if s3_key:
@@ -347,14 +376,16 @@ def run_s3_export(
                         "exported_path": f"s3://{bucket}/{export_s3_prefix}",
                     },
                     "csv_files": [],
-                    "ai_eval_files": [],
+                    "kpis_json_files": [],
+                    "ai_data_files": [],
                     "upload_plan": upload_plan,
                     "summary": {
                         "total_files": len(upload_files),
                         "total_size_bytes": total_size,
                         "csv_files_count": len([f for f in upload_files if f.suffix == ".csv"]),
-                        "ai_eval_files_count": len(
-                            [f for f in upload_files if ai_eval_dir and ai_eval_dir in f.parents]
+                        "kpis_json_files_count": len([f for f in upload_files if f.name == "kpis.json"]),
+                        "ai_data_files_count": len(
+                            [f for f in upload_files if ai_data_dir and ai_data_dir in f.parents]
                         ),
                     },
                 }
@@ -377,20 +408,37 @@ def run_s3_export(
                         }
                     )
 
-            # Collect AI eval file details
-            if s3_config.include_ai_eval and ai_eval_dir:
-                ai_eval_files = list_ai_eval_files(ai_eval_dir)
-                for ai_eval_file in ai_eval_files:
-                    relative_path = ai_eval_file.relative_to(ai_eval_dir)
+            # Collect KPI JSON file details
+            if s3_config.include_kpis_json:
+                kpi_json_files = list_kpi_json_files(output_dir)
+                for kpi_file in kpi_json_files:
                     try:
-                        relative_full_path = str(ai_eval_file.relative_to(artifact_dir))
+                        relative_kpi_path = str(kpi_file.relative_to(artifact_dir))
                     except ValueError:
-                        relative_full_path = str(ai_eval_file)
+                        relative_kpi_path = str(kpi_file)
 
-                    dry_run_data["s3_export_dry_run"]["ai_eval_files"].append(
+                    dry_run_data["s3_export_dry_run"]["kpis_json_files"].append(
+                        {
+                            "name": kpi_file.name,
+                            "path": relative_kpi_path,
+                            "size_bytes": kpi_file.stat().st_size,
+                        }
+                    )
+
+            # Collect AI eval file details
+            if s3_config.include_ai_data and ai_data_dir:
+                ai_data_files = list_ai_data_files(ai_data_dir)
+                for ai_data_file in ai_data_files:
+                    relative_path = ai_data_file.relative_to(ai_data_dir)
+                    try:
+                        relative_full_path = str(ai_data_file.relative_to(artifact_dir))
+                    except ValueError:
+                        relative_full_path = str(ai_data_file)
+
+                    dry_run_data["s3_export_dry_run"]["ai_data_files"].append(
                         {
                             "full_path": relative_full_path,
-                            "size_bytes": ai_eval_file.stat().st_size,
+                            "size_bytes": ai_data_file.stat().st_size,
                         }
                     )
 
@@ -465,8 +513,9 @@ def run_s3_export(
                     f"Partial success: {uploaded_count} uploaded, {len(failed_uploads)} failed"
                 )
 
+        target_url = f"s3://{bucket}/{export_s3_prefix}"
         logger.info(
-            f"S3 upload completed: {uploaded_count}/{len(upload_files)} files uploaded successfully"
+            f"S3 upload completed: {uploaded_count}/{len(upload_files)} files uploaded successfully to {target_url}"
         )
 
         # Determine final status

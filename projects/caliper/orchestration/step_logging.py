@@ -330,7 +330,7 @@ def log_visualize_command(
     )
 
 
-def log_kpi_generate_command(
+def log_artifacts_to_kpis_command(
     base_dir: Path,
     plugin_module: str,
     output_file: Path,
@@ -366,7 +366,7 @@ def log_kpi_export_command(
     )
 
 
-def log_ai_eval_command(
+def log_ai_data_command(
     base_dir: Path,
     plugin_module: str,
     output_file: Path,
@@ -381,9 +381,55 @@ def log_ai_eval_command(
     }
 
     _log_command_banner(
-        "caliper_ai_eval_export",
+        "caliper_ai_data_export",
         command,
         "Export AI evaluation payload with structured test directories and artifacts",
+        step_args,
+    )
+
+
+def log_s3_import_command(
+    bucket: str,
+    prefix: str,
+    output_dir: Path,
+) -> None:
+    """Log the CLI command to reproduce the S3 import step."""
+    command = (
+        f'caliper s3-import --bucket "{bucket}" --prefix "{prefix}" --output-dir "{output_dir}"'
+    )
+
+    step_args = {
+        "bucket": bucket,
+        "prefix": prefix,
+        "output_dir": str(output_dir),
+    }
+
+    _log_command_banner(
+        "caliper_s3_import",
+        command,
+        "Import historical data from S3 for analysis",
+        step_args,
+    )
+
+
+def log_analyse_kpis_command(
+    current_kpi_file: Path,
+    historical_dir: Path,
+    output_file: Path,
+) -> None:
+    """Log the CLI command to reproduce the KPI analysis step."""
+    command = f'caliper analyse-kpis --current "{current_kpi_file}" --historical-dir "{historical_dir}" --output "{output_file}"'
+
+    step_args = {
+        "current_kpi_file": str(current_kpi_file),
+        "historical_dir": str(historical_dir),
+        "output_file": str(output_file),
+    }
+
+    _log_command_banner(
+        "caliper_analyse_kpis",
+        command,
+        "Analyze current KPIs against historical data",
         step_args,
     )
 
@@ -405,7 +451,7 @@ def log_analyze_command(
     )
 
 
-def log_kpi_csv_export_command(
+def log_kpis_to_csv_command(
     input_path: Path,
     output_path: Path,
 ) -> None:

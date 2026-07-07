@@ -29,18 +29,20 @@ from projects.caliper.orchestration.postprocess_outcome import (
     TestPhaseOutcome,
     compute_final_postprocess_status,
 )
-from projects.caliper.orchestration.s3_export import run_s3_export
 from projects.caliper.orchestration.step_logging import (
     cleanup_step_logging,
-    log_ai_eval_command,
+    log_ai_data_command,
     log_analyze_command,
-    log_kpi_csv_export_command,
-    log_kpi_export_command,
-    log_kpi_generate_command,
+    log_artifacts_to_kpis_command,
+    log_kpis_to_csv_command,
     log_parse_command,
+    log_s3_import_command,
     log_visualize_command,
     step_logging,
 )
+from projects.caliper.orchestration.subcommands.kpi_analysis import run_analyse_kpis
+from projects.caliper.orchestration.subcommands.s3_export import run_s3_export
+from projects.caliper.orchestration.subcommands.s3_import import run_s3_import
 from projects.core.library import env
 
 logger = logging.getLogger(__name__)
@@ -249,7 +251,7 @@ def _transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
     return {"schema_version": "2", "tests": tests_list}
 
 
-def _run_kpi_generate(
+def _run_artifacts_to_kpis(
     postprocess_config: CaliperOrchestrationPostprocessConfig,
     plugin,
     model,
@@ -261,19 +263,19 @@ def _run_kpi_generate(
 
     if not postprocess_config.kpi.enabled:
         return {"status": "skipped", "reason": "kpi disabled", "completed_at": time.time()}
-    if not postprocess_config.kpi.generate.enabled:
+    if not postprocess_config.kpi.artifacts_to_kpis.enabled:
         return {
             "status": "skipped",
-            "reason": "kpi.generate disabled",
+            "reason": "kpi.artifacts_to_kpis disabled",
             "completed_at": time.time(),
         }
 
     try:
         # Write KPI JSON
-        output_file = output_dir / postprocess_config.kpi.generate.output
+        output_file = output_dir / postprocess_config.kpi.artifacts_to_kpis.output
 
         # Log command to reproduce this step
-        log_kpi_generate_command(
+        log_artifacts_to_kpis_command(
             base_dir=base_dir,
             plugin_module=plugin_module,
             output_file=output_file,
@@ -304,38 +306,42 @@ def _run_kpi_generate(
         return {"status": "failed", "error": str(e), "completed_at": time.time()}
 
 
-def _run_kpi_export(
-    postprocess_config: CaliperOrchestrationPostprocessConfig,
+def _run_s3_import(
+    postprocess_config,
     output_dir: Path,
 ) -> dict[str, Any]:
-    """Export KPIs to external system (placeholder for OpenSearch integration)."""
+    """Import historical data from S3."""
 
-    if not postprocess_config.kpi.enabled:
-        return {"status": "skipped", "reason": "kpi disabled", "completed_at": time.time()}
-    if not postprocess_config.kpi.export.enabled:
-        return {
-            "status": "skipped",
-            "reason": "kpi.export disabled",
-            "completed_at": time.time(),
-        }
+    if not postprocess_config.s3.import_.enabled:
+        return {"status": "skipped", "reason": "s3_import disabled", "completed_at": time.time()}
 
-    # Log command to reproduce this step
-    input_path = output_dir / postprocess_config.kpi.generate.output
-    log_kpi_export_command(
-        input_path=input_path,
-        target_system="opensearch",
-    )
+    try:
+        # Log command to reproduce this step
+        s3_parent_config = postprocess_config.s3
+        s3_config = postprocess_config.s3.import_
+        import_prefix = (
+            f"{s3_parent_config.instance}/{s3_parent_config.directory}"
+            if s3_parent_config.instance and s3_parent_config.directory
+            else ""
+        )
+        import_dir = output_dir / s3_config.output_dir
 
-    # TODO: Implement actual KPI export to OpenSearch when credentials/config available
-    logger.info("KPI export is configured but not yet implemented")
-    return {
-        "status": "skipped",
-        "reason": "KPI export not yet implemented",
-        "completed_at": time.time(),
-    }
+        log_s3_import_command(
+            bucket=s3_parent_config.bucket,
+            prefix=import_prefix,
+            output_dir=import_dir,
+        )
+
+        result = run_s3_import(postprocess_config, output_dir)
+        logger.info(f"S3 import result: {result}")
+        return result
+
+    except Exception as e:
+        logger.exception("S3 import failed")
+        return {"status": "failed", "error": str(e), "completed_at": time.time()}
 
 
-def _run_ai_eval_export(
+def _run_artifacts_to_ai_data(
     postprocess_config,
     plugin,
     model,
@@ -345,7 +351,7 @@ def _run_ai_eval_export(
 ) -> dict[str, Any]:
     """Export AI evaluation payload with structured directories and copied artifacts."""
     try:
-        if not hasattr(plugin, "build_ai_eval_payload"):
+        if not hasattr(plugin, "build_ai_data_payload"):
             return {
                 "status": "skipped",
                 "reason": "plugin does not support AI evaluation",
@@ -353,22 +359,22 @@ def _run_ai_eval_export(
             }
 
         # Create AI evaluation directory structure using configured output directory
-        ai_eval_dir = output_dir / postprocess_config.kpi.ai_eval_export.output_dir
-        ai_eval_dir.mkdir(parents=True, exist_ok=True)
+        ai_data_dir = output_dir / postprocess_config.kpi.artifacts_to_ai_data.output_dir
+        ai_data_dir.mkdir(parents=True, exist_ok=True)
 
         # Log command to reproduce this step
-        output_file = ai_eval_dir / "ai_eval_payload.json"
-        log_ai_eval_command(
+        output_file = ai_data_dir / "ai_data_payload.json"
+        log_ai_data_command(
             base_dir=base_dir,
             plugin_module=plugin_module,
             output_file=output_file,
         )
 
         # Build payload from plugin
-        payload = plugin.build_ai_eval_payload(model)
+        payload = plugin.build_ai_data_payload(model)
 
         # Export structured test entries with artifact copying
-        exported_entries = _export_test_entries_with_artifacts(model, ai_eval_dir, base_dir, plugin)
+        exported_entries = _export_test_entries_with_artifacts(model, ai_data_dir, base_dir, plugin)
 
         # Add exported entries info to payload
         payload["exported_test_entries"] = exported_entries
@@ -387,7 +393,7 @@ def _run_ai_eval_export(
         return {
             "status": "success",
             "output_file": str(output_file),
-            "ai_eval_dir": str(ai_eval_dir),
+            "ai_data_dir": str(ai_data_dir),
             "exported_entries": len(exported_entries),
             "completed_at": time.time(),
         }
@@ -423,14 +429,14 @@ def _load_test_labels(test_dir: Path) -> dict[str, Any]:
 
 
 def _export_test_entries_with_artifacts(
-    model, ai_eval_dir: Path, base_dir: Path, plugin
+    model, ai_data_dir: Path, base_dir: Path, plugin
 ) -> list[dict]:
     """
     Export test entries by creating directories and copying specific artifacts.
 
     Args:
         model: Unified model containing test results
-        ai_eval_dir: Directory where test entries should be exported
+        ai_data_dir: Directory where test entries should be exported
         base_dir: Base directory of the test artifacts (test directory)
         plugin: Plugin instance to get artifact file list
 
@@ -443,7 +449,7 @@ def _export_test_entries_with_artifacts(
 
     for idx, record in enumerate(model.unified_result_records):
         # Create directory for this test entry
-        test_entry_dir = ai_eval_dir / f"test_entry_{idx:03d}"
+        test_entry_dir = ai_data_dir / f"test_entry_{idx:03d}"
         test_entry_dir.mkdir(parents=True, exist_ok=True)
 
         # Load test labels from __test_labels__.yaml if available
@@ -461,7 +467,7 @@ def _export_test_entries_with_artifacts(
         }
 
         # Get artifact files specific to this test directory only (plugin is scoped to test directory)
-        relevant_files = plugin.get_ai_eval_artifact_files_for_test(test_dir)
+        relevant_files = plugin.get_ai_data_artifact_files_for_test(test_dir)
 
         logger.debug(
             f"Test entry {idx}: found {len(relevant_files)} artifact files in test directory {test_dir}"
@@ -507,7 +513,7 @@ def _export_test_entries_with_artifacts(
     return exported_entries
 
 
-def _run_kpi_csv_export(
+def _run_kpis_to_csv(
     postprocess_config: CaliperOrchestrationPostprocessConfig,
     plugin,
     model,
@@ -518,10 +524,10 @@ def _run_kpi_csv_export(
 
     if not postprocess_config.kpi.enabled:
         return {"status": "skipped", "reason": "kpi disabled", "completed_at": time.time()}
-    if not postprocess_config.kpi.csv_export.enabled:
+    if not postprocess_config.kpi.kpis_to_csv.enabled:
         return {
             "status": "skipped",
-            "reason": "kpi.csv_export disabled",
+            "reason": "kpi.kpis_to_csv disabled",
             "completed_at": time.time(),
         }
 
@@ -530,11 +536,11 @@ def _run_kpi_csv_export(
         kpi_records = plugin.compute_kpis(model)
 
         # Create output file path
-        output_file = output_dir / postprocess_config.kpi.csv_export.output
+        output_file = output_dir / postprocess_config.kpi.kpis_to_csv.output
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
         # Log command to reproduce this step
-        log_kpi_csv_export_command(
+        log_kpis_to_csv_command(
             input_path=kpi_json_path,
             output_path=output_file,
         )
@@ -545,7 +551,7 @@ def _run_kpi_csv_export(
         result_path = quick_export_kpis_to_csv(
             records=kpi_records,
             output_path=output_file,
-            include_header_comments=postprocess_config.kpi.csv_export.include_header_comments,
+            include_header_comments=postprocess_config.kpi.kpis_to_csv.include_header_comments,
         )
 
         logger.info(f"Exported {len(kpi_records)} KPI records to CSV: {result_path}")
@@ -601,9 +607,10 @@ class CaliperPostprocessOrchestrator:
         self.steps: dict[str, Any] = {}
         self.parse_failed = False
         self.visualize_failed = False
-        self.kpi_generate_failed = False
-        self.kpi_export_failed = False
-        self.ai_eval_failed = False
+        self.artifacts_to_kpis_failed = False
+        self.ai_data_failed = False
+        self.s3_import_failed = False
+        self.analyse_kpis_failed = False
         self.s3_export_failed = False
         self.analyze_failed = False
 
@@ -646,9 +653,10 @@ class CaliperPostprocessOrchestrator:
                     test_outcome=self.test_outcome,
                     parse_failed=False,
                     visualize_failed=False,
-                    kpi_generate_failed=False,
-                    kpi_export_failed=False,
-                    ai_eval_failed=False,
+                    artifacts_to_kpis_failed=False,
+                    ai_data_failed=False,
+                    s3_import_failed=False,
+                    analyse_kpis_failed=False,
                     s3_export_failed=False,
                     analyze_failed=False,
                     has_regression=False,
@@ -668,9 +676,10 @@ class CaliperPostprocessOrchestrator:
                     test_outcome=self.test_outcome,
                     parse_failed=False,
                     visualize_failed=False,
-                    kpi_generate_failed=False,
-                    kpi_export_failed=False,
-                    ai_eval_failed=False,
+                    artifacts_to_kpis_failed=False,
+                    ai_data_failed=False,
+                    s3_import_failed=False,
+                    analyse_kpis_failed=False,
                     s3_export_failed=False,
                     analyze_failed=False,
                     has_regression=False,
@@ -685,9 +694,9 @@ class CaliperPostprocessOrchestrator:
         logger.info(f"After parse step: parse_failed={self.parse_failed}")
         self._run_visualize_step()
         logger.info(f"After visualize step: visualize_failed={self.visualize_failed}")
-        self._run_kpi_and_ai_eval_steps()
+        self._run_kpi_and_ai_data_steps()
         logger.info(
-            f"After KPI/AI steps: kpi_generate_failed={self.kpi_generate_failed}, kpi_export_failed={self.kpi_export_failed}"
+            f"After KPI/AI steps: artifacts_to_kpis_failed={self.artifacts_to_kpis_failed}, ai_data_failed={self.ai_data_failed}"
         )
         self._run_analyze_step()
         logger.info(f"After analyze step: analyze_failed={self.analyze_failed}")
@@ -855,7 +864,7 @@ class CaliperPostprocessOrchestrator:
                     "completed_at": time.time(),
                 }
 
-    def _run_kpi_and_ai_eval_steps(self) -> None:
+    def _run_kpi_and_ai_data_steps(self) -> None:
         """Execute KPI generation, CSV export, KPI export, and AI evaluation steps."""
         if not self.config.kpi.enabled:
             return
@@ -880,16 +889,19 @@ class CaliperPostprocessOrchestrator:
             )
 
             # KPI JSON generation
-            self._run_kpi_generate_step(plugin, model, output_dir, mod_str)
+            self._run_artifacts_to_kpis_step(plugin, model, output_dir, mod_str)
 
             # KPI CSV export
-            self._run_kpi_csv_export_step(plugin, model, output_dir)
-
-            # KPI export to external systems
-            self._run_kpi_export_step(output_dir)
+            self._run_kpis_to_csv_step(plugin, model, output_dir)
 
             # AI evaluation export
-            self._run_ai_eval_export_step(plugin, model, output_dir, mod_str)
+            self._run_artifacts_to_ai_data_step(plugin, model, output_dir, mod_str)
+
+            # S3 import (historical data)
+            self._run_s3_import_step(output_dir)
+
+            # Analyze KPIs (current vs historical)
+            self._run_analyse_kpis_step(output_dir)
 
             # S3 export
             self._run_s3_export_step(output_dir)
@@ -899,24 +911,29 @@ class CaliperPostprocessOrchestrator:
             logger.error(f"Failed to run KPI/AI eval operations: {e}")
             self.steps.update(
                 {
-                    "kpi_generate": {
+                    "artifacts_to_kpis": {
                         "status": "failed",
                         "error": str(e),
                         "completed_at": completion_time,
                     },
-                    "kpi_csv_export": {
+                    "kpis_to_csv": {
                         "status": "failed",
                         "error": str(e),
                         "completed_at": completion_time,
                     },
-                    "kpi_export": {
+                    "artifacts_to_ai_data": {
+                        "status": "failed",
+                        "error": str(e),
+                        "completed_at": completion_time,
+                    },
+                    "s3_import": {
                         "status": "skipped",
                         "reason": "failed to load plugin",
                         "completed_at": completion_time,
                     },
-                    "ai_eval_export": {
-                        "status": "failed",
-                        "error": str(e),
+                    "analyse_kpis": {
+                        "status": "skipped",
+                        "reason": "failed to load plugin",
                         "completed_at": completion_time,
                     },
                     "s3_export": {
@@ -926,125 +943,162 @@ class CaliperPostprocessOrchestrator:
                     },
                 }
             )
-            self.kpi_generate_failed = True
-            self.kpi_export_failed = True
-            self.ai_eval_failed = True
+            self.artifacts_to_kpis_failed = True
+            self.ai_data_failed = True
+            self.s3_import_failed = True
+            self.analyse_kpis_failed = True
             self.s3_export_failed = True
 
-    def _run_kpi_generate_step(
+    def _run_artifacts_to_kpis_step(
         self, plugin: Any, model: Any, output_dir: Path, mod_str: str
     ) -> None:
         """Execute the KPI generation step."""
-        if self.config.kpi.generate.enabled:
-            with step_logging("caliper_kpi_generate", self.step_logs_dir):
-                result = _run_kpi_generate(
+        if self.config.kpi.artifacts_to_kpis.enabled:
+            with step_logging("caliper_artifacts_to_kpis", self.step_logs_dir):
+                result = _run_artifacts_to_kpis(
                     self.config, plugin, model, output_dir, mod_str, self.tree_root
                 )
-                self.steps["kpi_generate"] = result
+                self.steps["artifacts_to_kpis"] = result
                 if result.get("status") == "failed":
-                    self.kpi_generate_failed = True
+                    self.artifacts_to_kpis_failed = True
         else:
-            self.steps["kpi_generate"] = {
+            self.steps["artifacts_to_kpis"] = {
                 "status": "skipped",
-                "reason": "kpi.generate disabled",
+                "reason": "kpi.artifacts_to_kpis disabled",
                 "completed_at": time.time(),
             }
 
-    def _run_kpi_csv_export_step(self, plugin: Any, model: Any, output_dir: Path) -> None:
+    def _run_kpis_to_csv_step(self, plugin: Any, model: Any, output_dir: Path) -> None:
         """Execute the KPI CSV export step."""
-        if self.config.kpi.csv_export.enabled:
-            with step_logging("caliper_kpi_csv_export", self.step_logs_dir):
-                # Path to the JSON file for reference in command logging
-                kpi_json_path = output_dir / self.config.kpi.generate.output
-                result = _run_kpi_csv_export(self.config, plugin, model, output_dir, kpi_json_path)
-                self.steps["kpi_csv_export"] = result
-                if result.get("status") == "failed":
-                    # CSV export failure doesn't affect overall status - it's supplementary
-                    logger.warning("KPI CSV export failed but continuing execution")
-        else:
-            self.steps["kpi_csv_export"] = {
+        if not self.config.kpi.kpis_to_csv.enabled:
+            self.steps["kpis_to_csv"] = {
                 "status": "skipped",
-                "reason": "kpi.csv_export disabled",
+                "reason": "kpi.kpis_to_csv disabled",
                 "completed_at": time.time(),
             }
+            return
 
-    def _run_kpi_export_step(self, output_dir: Path) -> None:
-        """Execute the KPI export step."""
-        if self.config.kpi.export.enabled:
-            with step_logging("caliper_kpi_export", self.step_logs_dir):
-                result = _run_kpi_export(self.config, output_dir)
-                self.steps["kpi_export"] = result
-                if result.get("status") == "failed":
-                    self.kpi_export_failed = True
-        else:
-            self.steps["kpi_export"] = {
-                "status": "skipped",
-                "reason": "kpi.export disabled",
-                "completed_at": time.time(),
-            }
+        with step_logging("caliper_kpis_to_csv", self.step_logs_dir):
+            # Path to the JSON file for reference in command logging
+            kpi_json_path = output_dir / self.config.kpi.artifacts_to_kpis.output
+            result = _run_kpis_to_csv(self.config, plugin, model, output_dir, kpi_json_path)
+            self.steps["kpis_to_csv"] = result
+            if result.get("status") == "failed":
+                # CSV export failure doesn't affect overall status - it's supplementary
+                logger.warning("KPI CSV export failed but continuing execution")
 
-    def _run_ai_eval_export_step(
+    def _run_artifacts_to_ai_data_step(
         self, plugin: Any, model: Any, output_dir: Path, mod_str: str
     ) -> None:
         """Execute the AI evaluation export step."""
-        if self.config.kpi.ai_eval_export.enabled:
-            with step_logging("caliper_ai_eval_export", self.step_logs_dir):
-                try:
-                    result = _run_ai_eval_export(
-                        self.config, plugin, model, output_dir, mod_str, self.tree_root
-                    )
-                    self.steps["ai_eval_export"] = result
-                    logger.info(f"AI eval export result: {result}")
-
-                    # Check if the result indicates failure (since _run_ai_eval_export catches exceptions)
-                    if result.get("status") == "failed":
-                        self.ai_eval_failed = True
-
-                except Exception as e:
-                    logger.exception("AI eval export failed")
-                    self.steps["ai_eval_export"] = {"status": "failed", "error": str(e)}
-                    self.ai_eval_failed = True
-        else:
-            self.steps["ai_eval_export"] = {
+        if not self.config.kpi.artifacts_to_ai_data.enabled:
+            self.steps["artifacts_to_ai_data"] = {
                 "status": "skipped",
-                "reason": "kpi.ai_eval_export disabled",
+                "reason": "kpi.artifacts_to_ai_data disabled",
                 "completed_at": time.time(),
             }
+            return
+
+        with step_logging("caliper_artifacts_to_ai_data", self.step_logs_dir):
+            try:
+                result = _run_artifacts_to_ai_data(
+                    self.config, plugin, model, output_dir, mod_str, self.tree_root
+                )
+                self.steps["artifacts_to_ai_data"] = result
+                logger.info(f"AI eval export result: {result}")
+
+                # Check if the result indicates failure (since _run_artifacts_to_ai_data catches exceptions)
+                if result.get("status") == "failed":
+                    self.ai_data_failed = True
+
+            except Exception as e:
+                logger.exception("AI eval export failed")
+                self.steps["artifacts_to_ai_data"] = {"status": "failed", "error": str(e)}
+                self.ai_data_failed = True
+
+    def _run_s3_import_step(self, output_dir: Path) -> None:
+        """Execute the S3 import step."""
+        if not self.config.s3.import_.enabled:
+            self.steps["s3_import"] = {
+                "status": "skipped",
+                "reason": "s3_import disabled",
+                "completed_at": time.time(),
+            }
+            return
+
+        with step_logging("caliper_s3_import", self.step_logs_dir):
+            try:
+                result = _run_s3_import(self.config, output_dir)
+                self.steps["s3_import"] = result
+                logger.info(f"S3 import result: {result}")
+
+                if result.get("status") == "failed":
+                    self.s3_import_failed = True
+
+            except Exception as e:
+                logger.exception("S3 import failed")
+                self.steps["s3_import"] = {"status": "failed", "error": str(e)}
+                self.s3_import_failed = True
+
+    def _run_analyse_kpis_step(self, output_dir: Path) -> None:
+        """Execute the KPI analysis step."""
+        if not self.config.analyse_kpis.enabled:
+            self.steps["analyse_kpis"] = {
+                "status": "skipped",
+                "reason": "analyse_kpis disabled",
+                "completed_at": time.time(),
+            }
+            return
+
+        with step_logging("caliper_analyse_kpis", self.step_logs_dir):
+            try:
+                result = run_analyse_kpis(self.config, output_dir)
+                self.steps["analyse_kpis"] = result
+                logger.info(f"KPI analysis result: {result}")
+
+                if result.get("status") == "failed":
+                    self.analyse_kpis_failed = True
+
+            except Exception as e:
+                logger.exception("KPI analysis failed")
+                self.steps["analyse_kpis"] = {"status": "failed", "error": str(e)}
+                self.analyse_kpis_failed = True
 
     def _run_s3_export_step(self, output_dir: Path) -> None:
         """Execute the S3 export step."""
-        if self.config.s3_export.enabled:
-            with step_logging("caliper_s3_export", self.step_logs_dir):
-                try:
-                    # Determine AI eval directory if it was generated
-                    ai_eval_dir = None
-                    if (
-                        self.config.kpi.ai_eval_export.enabled
-                        and self.steps.get("ai_eval_export", {}).get("status") == "success"
-                    ):
-                        ai_eval_dir = output_dir / self.config.kpi.ai_eval_export.output_dir
-
-                    result = run_s3_export(self.config, output_dir, ai_eval_dir)
-                    self.steps["s3_export"] = result
-
-                    if result.get("status") == "success":
-                        logger.info(f"S3 export completed: {result}")
-                    else:
-                        logger.warning(f"S3 export failed: {result}")
-
-                except Exception as e:
-                    logger.exception("S3 export step failed")
-                    self.steps["s3_export"] = {
-                        "status": "failed",
-                        "error": str(e),
-                        "completed_at": time.time(),
-                    }
-        else:
+        if not self.config.s3.export.enabled:
             self.steps["s3_export"] = {
                 "status": "skipped",
                 "reason": "s3_export disabled",
                 "completed_at": time.time(),
             }
+            return
+
+        with step_logging("caliper_s3_export", self.step_logs_dir):
+            try:
+                # Determine AI eval directory if it was generated
+                ai_data_dir = None
+                if (
+                    self.config.kpi.artifacts_to_ai_data.enabled
+                    and self.steps.get("artifacts_to_ai_data", {}).get("status") == "success"
+                ):
+                    ai_data_dir = output_dir / self.config.kpi.artifacts_to_ai_data.output_dir
+
+                result = run_s3_export(self.config, output_dir, ai_data_dir)
+                self.steps["s3_export"] = result
+
+                if result.get("status") == "success":
+                    logger.info(f"S3 export completed: {result}")
+                else:
+                    logger.warning(f"S3 export failed: {result}")
+
+            except Exception as e:
+                logger.exception("S3 export step failed")
+                self.steps["s3_export"] = {
+                    "status": "failed",
+                    "error": str(e),
+                    "completed_at": time.time(),
+                }
 
     def _run_analyze_step(self) -> None:
         """Execute the analyze step if enabled."""
@@ -1065,9 +1119,10 @@ class CaliperPostprocessOrchestrator:
         logger.info(f"  test_outcome.phase: {self.test_outcome.phase}")
         logger.info(f"  parse_failed: {self.parse_failed}")
         logger.info(f"  visualize_failed: {self.visualize_failed}")
-        logger.info(f"  kpi_generate_failed: {self.kpi_generate_failed}")
-        logger.info(f"  kpi_export_failed: {self.kpi_export_failed}")
-        logger.info(f"  ai_eval_failed: {self.ai_eval_failed}")
+        logger.info(f"  artifacts_to_kpis_failed: {self.artifacts_to_kpis_failed}")
+        logger.info(f"  ai_data_failed: {self.ai_data_failed}")
+        logger.info(f"  s3_import_failed: {self.s3_import_failed}")
+        logger.info(f"  analyse_kpis_failed: {self.analyse_kpis_failed}")
         logger.info(f"  s3_export_failed: {self.s3_export_failed}")
         logger.info(f"  analyze_failed: {self.analyze_failed}")
 
@@ -1075,9 +1130,10 @@ class CaliperPostprocessOrchestrator:
             test_outcome=self.test_outcome,
             parse_failed=self.parse_failed,
             visualize_failed=self.visualize_failed,
-            kpi_generate_failed=self.kpi_generate_failed,
-            kpi_export_failed=self.kpi_export_failed,
-            ai_eval_failed=self.ai_eval_failed,
+            artifacts_to_kpis_failed=self.artifacts_to_kpis_failed,
+            ai_data_failed=self.ai_data_failed,
+            s3_import_failed=self.s3_import_failed,
+            analyse_kpis_failed=self.analyse_kpis_failed,
             s3_export_failed=self.s3_export_failed,
             analyze_failed=self.analyze_failed,
             has_regression=False,
