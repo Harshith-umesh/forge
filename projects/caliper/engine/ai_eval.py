@@ -27,7 +27,7 @@ def run_ai_eval_export(
     )
 
     # Build base payload from plugin
-    build = plugin.build_ai_eval_payload
+    build = plugin.build_ai_data_payload
     payload = build(model)
 
     # Create AI evaluation directory structure

@@ -175,11 +175,11 @@ class GuideLLMPlugin(PostProcessingPlugin):
         """Compute KPI values from the unified model."""
         return self.kpi_handler.compute_kpis(model)
 
-    def build_ai_eval_payload(self, model: UnifiedRunModel) -> dict[str, Any]:
+    def build_ai_data_payload(self, model: UnifiedRunModel) -> dict[str, Any]:
         """Build AI evaluation payload from the unified model."""
         return self.ai_evaluator.build_payload(model, self)
 
-    def get_ai_eval_artifact_files_for_test(self, test_dir: Path) -> list[str]:
+    def get_ai_data_artifact_files_for_test(self, test_dir: Path) -> list[str]:
         """Return list of artifact files to copy for AI evaluation export from a specific test directory.
 
         Args:
