@@ -768,11 +768,23 @@ def _try_update_run_log(status: dict[str, Any] | None) -> None:
     artifact_root = Path(artifact_from)
     artifact_path = str(Path(artifact_dir).relative_to(artifact_root))
 
-    mlflow_cfg = config.project.get_config(
-        "caliper.export.backend.mlflow", None, print=False, warn=False
-    )
-    connection = mlflow_cfg.get("connection") if isinstance(mlflow_cfg, dict) else None
     tracking_uri = mlflow_meta.get("tracking_uri")
+
+    vault_name = config.project.get_config(
+        "caliper.export.backend.mlflow.secrets.vault.name", None, print=False, warn=False
+    )
+    vault_key = config.project.get_config(
+        "caliper.export.backend.mlflow.secrets.vault.mlflow_secret", None, print=False, warn=False
+    )
+
+    connection = None
+    if vault_name and vault_key:
+        from projects.caliper.engine.file_export.mlflow_secrets import load_mlflow_secrets_yaml
+        from projects.core.library import vault as vault_lib
+
+        secrets_path = vault_lib.get_vault_content_path(vault_name, vault_key)
+        if secrets_path and secrets_path.exists():
+            connection = load_mlflow_secrets_yaml(secrets_path)
 
     try:
         from projects.caliper.engine.file_export.mlflow_backend import update_run_log_artifact
