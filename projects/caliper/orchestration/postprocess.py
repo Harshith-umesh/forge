@@ -36,6 +36,7 @@ from projects.caliper.orchestration.step_logging import (
     log_artifacts_to_kpis_command,
     log_kpis_to_csv_command,
     log_parse_command,
+    log_s3_export_command,
     log_s3_import_command,
     log_visualize_command,
     step_logging,
@@ -1084,13 +1085,42 @@ class CaliperPostprocessOrchestrator:
                 ):
                     ai_data_dir = output_dir / self.config.kpi.artifacts_to_ai_data.output_dir
 
+                # Log the CLI command to reproduce this step
+                s3_parent_config = self.config.s3
+                export_config = s3_parent_config.export
+                export_path = f"{s3_parent_config.instance}/{s3_parent_config.directory}"
+                if export_config.prefix:
+                    export_path += f"/{export_config.prefix}"
+
+                log_s3_export_command(
+                    bucket=s3_parent_config.bucket,
+                    export_path=export_path,
+                    from_dir=output_dir,
+                    include_csv=export_config.include_csv,
+                    include_kpis_json=export_config.include_kpis_json,
+                    include_ai_data=export_config.include_ai_data,
+                )
+
                 result = run_s3_export(self.config, output_dir, ai_data_dir)
                 self.steps["s3_export"] = result
 
                 if result.get("status") == "success":
-                    logger.info(f"S3 export completed: {result}")
+                    # Format status for better readability
+                    duration = result.get("duration", 0)
+                    uploaded_files = result.get("uploaded_files", 0)
+                    failed_files = result.get("failed_files", 0)
+                    total_files = result.get("total_files", 0)
+                    s3_path = result.get("exported_path", "")
+
+                    logger.info(
+                        f"S3 export completed successfully in {duration}s: "
+                        f"{uploaded_files}/{total_files} files uploaded"
+                        f"{f' ({failed_files} failed)' if failed_files > 0 else ''} "
+                        f"to {s3_path}"
+                    )
                 else:
-                    logger.warning(f"S3 export failed: {result}")
+                    error = result.get("error", "unknown error")
+                    logger.warning(f"S3 export failed: {error}")
 
             except Exception as e:
                 logger.exception("S3 export step failed")

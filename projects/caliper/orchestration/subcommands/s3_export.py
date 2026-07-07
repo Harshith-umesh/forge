@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import logging
-import random
-import string
 import time
 from datetime import datetime
 from pathlib import Path
@@ -232,7 +230,6 @@ def run_s3_export(
         s3_parent_config = postprocess_config.s3
         s3_config = postprocess_config.s3.export
         bucket = s3_parent_config.bucket
-        prefix = s3_config.prefix
         instance = s3_parent_config.instance
         directory = s3_parent_config.directory
         upload_id = s3_config.upload_id
@@ -250,16 +247,15 @@ def run_s3_export(
 
         # Use custom upload_id or generate collision-resistant timestamp
         if upload_id:
-            export_id = upload_id
-            logger.info(f"Using custom upload ID: {export_id}")
+            upload_id = upload_id
+            logger.info(f"Using configured upload ID: {upload_id}")
         else:
-            # Generate collision-resistant export_id with microsecond precision and random suffix
+            # Generate collision-resistant upload_id with microsecond precision and random suffix
             now = datetime.now()
             timestamp = now.strftime("%y-%m-%d_%H%M%S")
             microseconds = now.strftime("%f")[:3]  # First 3 digits of microseconds (milliseconds)
-            random_suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=3))
-            export_id = f"{timestamp}_{microseconds}_{random_suffix}"
-            logger.info(f"Using generated collision-resistant timestamp ID: {export_id}")
+            upload_id = f"{timestamp}_{microseconds}"
+            logger.info(f"Using generated collision-resistant timestamp ID: {upload_id}")
 
         # Construct the full S3 path: {bucket}/{instance}/{directory}/{upload_id}/
         s3_path_components = []
@@ -267,13 +263,13 @@ def run_s3_export(
             s3_path_components.append(instance)
         if directory:
             s3_path_components.append(directory)
-        s3_path_components.append(export_id)
+        s3_path_components.append(upload_id)
 
         export_s3_prefix = "/".join(s3_path_components) + "/"
 
         logger.info(f"Starting S3 export to bucket: {bucket}")
         logger.info(f"Full S3 export path: s3://{bucket}/{export_s3_prefix}")
-        logger.info(f"Path structure: {instance}/{directory}/{export_id}/")
+        logger.info(f"Path structure: {instance}/{directory}/{upload_id}/")
         if dry_run:
             logger.info("DRY RUN MODE: Files will not actually be uploaded")
 
@@ -372,7 +368,7 @@ def run_s3_export(
                         "bucket": bucket,
                         "instance": instance,
                         "directory": directory,
-                        "export_id": export_id,
+                        "upload_id": upload_id,
                         "exported_path": f"s3://{bucket}/{export_s3_prefix}",
                     },
                     "csv_files": [],
@@ -383,7 +379,9 @@ def run_s3_export(
                         "total_files": len(upload_files),
                         "total_size_bytes": total_size,
                         "csv_files_count": len([f for f in upload_files if f.suffix == ".csv"]),
-                        "kpis_json_files_count": len([f for f in upload_files if f.name == "kpis.json"]),
+                        "kpis_json_files_count": len(
+                            [f for f in upload_files if f.name == "kpis.json"]
+                        ),
                         "ai_data_files_count": len(
                             [f for f in upload_files if ai_data_dir and ai_data_dir in f.parents]
                         ),
@@ -455,7 +453,7 @@ def run_s3_export(
                     "error": f"Failed to save dry run results: {e}",
                     "dry_run": True,
                     "completed_at": time.time(),
-                    "duration": time.time() - start_time,
+                    "duration": round(time.time() - start_time),
                 }
 
             response = {
@@ -463,7 +461,7 @@ def run_s3_export(
                 "dry_run": True,
                 "dry_run_file": str(dry_run_file),
                 "completed_at": time.time(),
-                "duration": time.time() - start_time,
+                "duration": round(time.time() - start_time),
             }
             return response
 
@@ -526,13 +524,7 @@ def run_s3_export(
 
         return {
             "status": status,
-            "bucket": bucket,
-            "prefix": prefix,
-            "instance": instance,
-            "directory": directory,
             "upload_id": upload_id,
-            "export_id": export_id,
-            "export_s3_prefix": export_s3_prefix,
             "exported_path": f"s3://{bucket}/{export_s3_prefix}",
             "uploaded_files": uploaded_count,
             "failed_files": len(failed_uploads),

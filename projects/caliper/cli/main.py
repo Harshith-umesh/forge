@@ -18,7 +18,6 @@ from projects.caliper.engine.file_export.mlflow_config import load_mlflow_config
 from projects.caliper.engine.kpi.analyze import run_analyze
 from projects.caliper.engine.kpi.generate import run_kpi_generate
 from projects.caliper.engine.kpi.import_export import (
-    export_kpis_to_index,
     import_kpis_snapshot,
     load_kpis_json,
 )
@@ -26,6 +25,7 @@ from projects.caliper.engine.load_plugin import load_plugin
 from projects.caliper.engine.parse import run_parse
 from projects.caliper.engine.plugin_config import resolve_plugin_module_string
 from projects.caliper.engine.visualize import run_visualize
+from projects.caliper.orchestration.subcommands.s3_export_cli import s3_export_cmd
 
 _ARTIFACTS_DIR_HELP = (
     "Root directory of the test artifact tree (directories containing "
@@ -808,22 +808,6 @@ def kpi_import(ctx: click.Context, snapshot: Path) -> None:
     click.echo(f"Wrote snapshot {snapshot}")
 
 
-@kpi_group.command("export")
-@click.option("--input", "input_path", type=click.Path(path_type=Path), required=True)
-@click.option("--dry-run", is_flag=True)
-@click.pass_context
-def kpi_export(ctx: click.Context, input_path: Path, dry_run: bool) -> None:
-    try:
-        rows = load_kpis_json(input_path)
-        if dry_run:
-            click.echo(f"Would export {len(rows)} records")
-            return
-        export_kpis_to_index(rows)
-    except Exception as e:  # noqa: BLE001
-        click.echo(f"kpi export failed: {e}", err=True)
-        sys.exit(3)
-    click.echo("Export complete")
-
 
 @kpi_group.command("analyze")
 @click.option("--current", type=click.Path(path_type=Path), required=True)
@@ -1233,6 +1217,169 @@ def import_command(
         else:
             click.echo(f"artifacts import failed: {str(e)}", err=True)
         sys.exit(2)
+
+
+@main.command("s3-import")
+@click.option("--bucket", required=True, help="S3 bucket name")
+@click.option("--prefix", default="", help="S3 object prefix/path")
+@click.option(
+    "--output-dir", type=click.Path(path_type=Path), required=True, help="Local output directory"
+)
+@click.option("--include-kpis-json", is_flag=True, default=False, help="Download kpis.json files")
+@click.option("--include-kpis-csv", is_flag=True, default=False, help="Download kpis.csv files")
+@click.option("--include-ai-data", is_flag=True, default=False, help="Download ai_data directories")
+@click.option("--max-downloads", type=int, default=50, help="Maximum number of files to download")
+@click.option(
+    "--vault", default="psap-forge-aws-s3-export", help="Vault containing AWS credentials"
+)
+@click.option(
+    "--aws-credentials-file", default="aws.credentials", help="Credentials file name within vault"
+)
+@click.option("-v", "--verbose", is_flag=True, help="Show detailed progress information")
+@click.pass_context
+def s3_import_cmd(
+    ctx: click.Context,
+    bucket: str,
+    prefix: str,
+    output_dir: Path,
+    include_kpis_json: bool,
+    include_kpis_csv: bool,
+    include_ai_data: bool,
+    max_downloads: int,
+    vault: str,
+    aws_credentials_file: str,
+    verbose: bool,
+) -> None:
+    """Download historical KPI and analysis data from S3."""
+    try:
+        # Import S3 functions
+        from projects.caliper.orchestration.subcommands.s3_import import run_s3_import
+        from projects.core.library import vault as vault_lib
+
+        # Validate that at least one include flag is enabled
+        if not (include_kpis_json or include_kpis_csv or include_ai_data):
+            click.echo("❌ Error: At least one include flag must be enabled", err=True)
+            click.echo(
+                "   Use: --include-kpis-json, --include-kpis-csv, or --include-ai-data", err=True
+            )
+            sys.exit(1)
+
+        # Show command being executed
+        enabled_flags = []
+        if include_kpis_json:
+            enabled_flags.append("--include-kpis-json")
+        if include_kpis_csv:
+            enabled_flags.append("--include-kpis-csv")
+        if include_ai_data:
+            enabled_flags.append("--include-ai-data")
+
+        click.echo(f"📥 Running S3 import with flags: {' '.join(enabled_flags)}")
+        click.echo(f"   Source: s3://{bucket}/{prefix}")
+        click.echo(f"   Target: {output_dir}")
+
+        if verbose:
+            click.echo("🔧 Detailed configuration:")
+            click.echo(f"   Vault: {vault}")
+            click.echo(f"   Credentials File: {aws_credentials_file}")
+            click.echo(f"   Max Downloads: {max_downloads}")
+            click.echo(
+                f"   Filters: KPI JSON={'✅' if include_kpis_json else '❌'}, KPI CSV={'✅' if include_kpis_csv else '❌'}, AI Data={'✅' if include_ai_data else '❌'}"
+            )
+
+        # Initialize vault system
+        if verbose:
+            click.echo(f"🔐 Initializing vault system with: {vault}")
+        vault_lib.init(vaults=[vault] if vault else [])
+
+        # Create a minimal config object for the S3 import function
+        from projects.caliper.orchestration.postprocess_config import (
+            CaliperOrchestrationPostprocessConfig,
+            CaliperOrchestrationS3ImportSection,
+            CaliperOrchestrationS3Section,
+        )
+
+        # Parse bucket/prefix to extract instance and directory
+        prefix_parts = prefix.strip("/").split("/")
+        instance = prefix_parts[0] if len(prefix_parts) > 0 and prefix_parts[0] else None
+        directory = prefix_parts[1] if len(prefix_parts) > 1 else None
+
+        s3_import_config = CaliperOrchestrationS3ImportSection(
+            enabled=True,
+            output_dir=output_dir.name,
+            include_kpis_json=include_kpis_json,
+            include_kpis_csv=include_kpis_csv,
+            include_ai_data=include_ai_data,
+            max_downloads=max_downloads,
+        )
+
+        s3_config = CaliperOrchestrationS3Section(
+            bucket=bucket,
+            instance=instance,
+            directory=directory,
+            vault=vault,
+            aws_credentials_file=aws_credentials_file,
+            **{"import": s3_import_config},
+        )
+
+        config = CaliperOrchestrationPostprocessConfig(s3=s3_config)
+
+        # Run S3 import
+        if verbose:
+            click.echo("🚀 Starting S3 import...")
+        result = run_s3_import(config, output_dir.parent)
+
+        if result["status"] == "success":
+            click.echo("✅ S3 import completed successfully")
+
+            # Show detailed results
+            if "downloaded_count" in result:
+                click.echo(f"📥 Downloaded {result['downloaded_count']} files")
+            if "failed_downloads" in result and result["failed_downloads"]:
+                click.echo(f"⚠️  {len(result['failed_downloads'])} files failed to download")
+                for failed_file in result["failed_downloads"]:
+                    click.echo(f"   ❌ {failed_file}")
+
+            # Show timing and directory info
+            if "duration" in result:
+                click.echo(f"⏱️  Completed in {result['duration']:.2f} seconds")
+            if "import_dir" in result:
+                click.echo(f"📂 Files saved to: {result['import_dir']}")
+
+            # List downloaded files if any
+            import_dir = Path(result.get("import_dir", output_dir))
+            if import_dir.exists():
+                downloaded_files = list(import_dir.rglob("*"))
+                downloaded_files = [f for f in downloaded_files if f.is_file()]
+                if downloaded_files:
+                    click.echo("📋 Downloaded files:")
+                    for file_path in downloaded_files:
+                        rel_path = file_path.relative_to(import_dir)
+                        file_size = file_path.stat().st_size
+                        if file_size > 1024 * 1024:
+                            size_str = f"({file_size / (1024 * 1024):.1f} MB)"
+                        elif file_size > 1024:
+                            size_str = f"({file_size / 1024:.1f} KB)"
+                        else:
+                            size_str = f"({file_size} bytes)"
+                        click.echo(f"   📄 {rel_path} {size_str}")
+
+        elif result["status"] == "empty":
+            click.echo(f"⚠️  No objects found matching filters in s3://{bucket}/{prefix}")
+            click.echo("🔍 Searched with filters:")
+            click.echo(f"   • KPI JSON files: {'✅' if include_kpis_json else '❌'}")
+            click.echo(f"   • KPI CSV files: {'✅' if include_kpis_csv else '❌'}")
+            click.echo(f"   • AI data files: {'✅' if include_ai_data else '❌'}")
+        else:
+            click.echo(f"❌ S3 import failed: {result.get('error', 'unknown error')}", err=True)
+            sys.exit(1)
+
+    except Exception as e:
+        click.echo(f"❌ S3 import failed: {e}", err=True)
+        sys.exit(2)
+
+
+# Register s3-export command
+main.add_command(s3_export_cmd)
 
 
 def run_cli() -> None:

@@ -81,9 +81,9 @@ def download_file_from_s3(s3_client, bucket: str, s3_key: str, local_path: Path)
         # Create parent directories if needed
         local_path.parent.mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"Downloading s3://{bucket}/{s3_key} to {local_path}")
+        logger.debug(f"Downloading s3://{bucket}/{s3_key} to {local_path}")
         s3_client.download_file(bucket, s3_key, str(local_path))
-        logger.info(
+        logger.debug(
             f"Successfully downloaded {local_path.name} ({local_path.stat().st_size} bytes)"
         )
         return True
@@ -286,13 +286,15 @@ def run_s3_import(
         if objects:
             logger.info("Sample object keys:")
             for i, obj in enumerate(objects[:5]):  # Show first 5 objects
-                logger.info(f"  {i+1}: {obj['key']}")
+                logger.info(f"  {i + 1}: {obj['key']}")
             if len(objects) > 5:
                 logger.info(f"  ... and {len(objects) - 5} more objects")
 
         # Filter objects based on configuration
-        logger.info(f"Filtering with: include_kpis_json={s3_config.include_kpis_json}, "
-                   f"include_kpis_csv={s3_config.include_kpis_csv}, include_ai_data={s3_config.include_ai_data}")
+        logger.info(
+            f"Filtering with: include_kpis_json={s3_config.include_kpis_json}, "
+            f"include_kpis_csv={s3_config.include_kpis_csv}, include_ai_data={s3_config.include_ai_data}"
+        )
         download_objects = filter_objects_for_download(objects, s3_config)
         logger.info(f"After filtering: {len(download_objects)} objects match the import filters")
 
@@ -329,12 +331,11 @@ def run_s3_import(
             )
             logger.info(f"  - s3://{bucket}/{s3_key} → {local_path} ({obj['size']} bytes)")
 
-
         # Download files from S3
         downloaded_count = 0
         failed_downloads = []
 
-        logger.info("Starting actual S3 download...")
+        logger.debug("Starting actual S3 download...")
 
         for download_item in download_plan:
             s3_key = download_item["s3_key"]
@@ -383,7 +384,7 @@ def run_s3_import(
             "total_files": len(download_objects),
             "total_size": sum(obj["size"] for obj in download_objects),
             "completed_at": time.time(),
-            "duration": time.time() - start_time,
+            "duration": round(time.time() - start_time),
         }
 
     except Exception as e:

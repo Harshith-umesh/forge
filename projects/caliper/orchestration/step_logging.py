@@ -412,6 +412,50 @@ def log_s3_import_command(
     )
 
 
+def log_s3_export_command(
+    bucket: str,
+    export_path: str,
+    from_dir: Path,
+    include_csv: bool,
+    include_kpis_json: bool,
+    include_ai_data: bool,
+) -> None:
+    """Log the CLI command to reproduce the S3 export step."""
+    command_parts = [f'caliper s3-export --from-dir "{from_dir}" --bucket "{bucket}"']
+
+    if export_path:
+        # Parse the export path to get prefix, instance, directory
+        parts = export_path.split("/")
+        if len(parts) >= 3:
+            instance = parts[0]
+            directory = parts[1]
+            prefix = "/".join(parts[2:]) if len(parts) > 2 else ""
+            command_parts.append(f'--instance "{instance}"')
+            command_parts.append(f'--directory "{directory}"')
+            if prefix:
+                command_parts.append(f'--prefix "{prefix}"')
+
+    # Note: Include flags use default values (--include-csv, --include-kpis-json, --include-ai-data all default to True)
+
+    command = " ".join(command_parts)
+
+    step_args = {
+        "bucket": bucket,
+        "export_path": export_path,
+        "from_dir": str(from_dir),
+        "include_csv": include_csv,
+        "include_kpis_json": include_kpis_json,
+        "include_ai_data": include_ai_data,
+    }
+
+    _log_command_banner(
+        "caliper_s3_export",
+        command,
+        "Export postprocess artifacts to S3",
+        step_args,
+    )
+
+
 def log_analyse_kpis_command(
     current_kpi_file: Path,
     historical_dir: Path,
