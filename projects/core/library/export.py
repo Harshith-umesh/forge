@@ -730,7 +730,7 @@ def caliper_export_entrypoint(_ctx, artifact_directory: Path | None):
             try:
                 send_notification(status, notification_provider=notification_provider)
             except Exception as e:
-                logger.warning(f"Failed to send notifications: {e}")
+                logger.exception(f"Failed to send notifications: {e}")
 
         # Re-upload run.log with complete content (includes notification output)
         _try_update_run_log(status)
