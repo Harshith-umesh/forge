@@ -291,12 +291,6 @@ def _apply_log_model(
     raise ValueError(f"Unsupported log_model.flavor {flavor!r}; supported values: sklearn")
 
 
-def _flush_all_loggers() -> None:
-    """Flush all logging handlers so run.log files are as complete as possible before upload."""
-    for handler in logging.getLogger().handlers:
-        handler.flush()
-
-
 def _parallel_workers(requested: int, n_files: int) -> int:
     if n_files <= 0:
         return 1
@@ -409,29 +403,14 @@ def log_artifacts(
 
             _log_metrics_and_params_from_tree(artifact_root)
 
-            deferred = [p for p in file_paths if p.name == "run.log"]
-            main_files = [p for p in file_paths if p.name != "run.log"]
-
             _upload_mlflow_files_parallel(
                 client=client,
                 run_id=rid,
-                file_paths=main_files,
+                file_paths=file_paths,
                 artifact_root=artifact_root,
                 upload_workers=upload_workers,
                 verbose=verbose,
             )
-
-            if deferred:
-                _flush_all_loggers()
-                _upload_mlflow_files_parallel(
-                    client=client,
-                    run_id=rid,
-                    file_paths=deferred,
-                    artifact_root=artifact_root,
-                    upload_workers=upload_workers,
-                    verbose=verbose,
-                )
-
             tu = mlflow.get_tracking_uri() or ""
             meta = _capture_mlflow_run_metadata(tu, workspace=workspace)
         if verbose:
@@ -555,13 +534,10 @@ def log_multi_run_artifacts(
             parent_rid = parent.info.run_id
             _apply_run_metadata(effective_meta)
 
-            deferred = [p for p in file_paths if p.name == "run.log"]
-            main_files = [p for p in file_paths if p.name != "run.log"]
-
             _upload_mlflow_files_parallel(
                 client=client,
                 run_id=parent_rid,
-                file_paths=main_files,
+                file_paths=file_paths,
                 artifact_root=artifact_root,
                 upload_workers=upload_workers,
                 verbose=verbose,
@@ -627,17 +603,6 @@ def log_multi_run_artifacts(
                     if child_url:
                         child_entry["run_url"] = child_url
                     child_runs_meta.append(child_entry)
-
-            if deferred:
-                _flush_all_loggers()
-                _upload_mlflow_files_parallel(
-                    client=client,
-                    run_id=parent_rid,
-                    file_paths=deferred,
-                    artifact_root=artifact_root,
-                    upload_workers=upload_workers,
-                    verbose=verbose,
-                )
 
             parent_meta = _capture_mlflow_run_metadata(tu, workspace=workspace)
             if child_runs_meta:
