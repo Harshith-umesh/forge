@@ -21,8 +21,32 @@ DEFAULT_REPO_OWNER = "openshift-psap"
 DEFAULT_REPO_NAME = "forge"
 
 
-def get_secrets():
-    # currently hardcoded, because there's no configuration file at this level
+def get_secrets(notification_vault=None):
+    """Get secrets directory, preferring vault system over environment variables.
+
+    Args:
+        notification_vault: Name of the notification vault to use for secrets
+
+    Returns:
+        tuple: (secret_dir_path, source_description) or (None, None) if not found
+    """
+    # Try vault system first if vault name is provided
+    if notification_vault:
+        try:
+            from projects.core.library import vault as vault_lib
+
+            # Get the vault manager and check if the vault exists
+            vault_manager = vault_lib.get_vault_manager()
+            vault_def = vault_manager._vault_cache.get(notification_vault)
+            if vault_def and vault_def.secret_dir and vault_def.secret_dir.exists():
+                logger.info(f"Using notification secrets from vault: {notification_vault}")
+                return vault_def.secret_dir, f"vault:{notification_vault}"
+            else:
+                logger.warning(f"Vault {notification_vault} not found or directory doesn't exist")
+        except Exception as e:
+            logger.warning(f"Failed to get secrets from vault {notification_vault}: {e}")
+
+    # Fall back to environment variables for backward compatibility
     SECRET_ENV_KEYS = (
         "PSAP_FORGE_NOTIFICATIONS_SECRET_PATH",
         "PSAP_FORGE_JUMP_CI_SECRET_PATH",
@@ -44,10 +68,13 @@ def get_secrets():
         logger.fatal(f"{secret_env_key} points to a non-existing directory ...")
         return None, None
 
+    logger.info(f"Using notification secrets from environment variable: {secret_env_key}")
     return secret_dir, secret_env_key
 
 
-def send_notification(message, github=True, slack=False, dry_run=False, pr_number=None):
+def send_notification(
+    message, github=True, slack=False, dry_run=False, pr_number=None, notification_vault=None
+):
     """Send a generic notification message to GitHub and/or Slack.
 
     Args:
@@ -56,6 +83,7 @@ def send_notification(message, github=True, slack=False, dry_run=False, pr_numbe
         slack: Whether to send to Slack (default False)
         dry_run: Whether to only log the message without sending (default False)
         pr_number: Optional PR number, auto-detected if None
+        notification_vault: Optional vault name to get notification secrets from
 
     Returns:
         bool: False if any notification failed, True if all succeeded
@@ -74,9 +102,17 @@ def send_notification(message, github=True, slack=False, dry_run=False, pr_numbe
         logger.info("Running from a Periodic job, don't send notification to github")
         github = False
 
-    secret_dir, secret_env_key = get_secrets()
+    secret_dir, secret_env_key = get_secrets(notification_vault)
     if secret_dir is None:
-        return True
+        if github:
+            logger.error(
+                "Cannot send GitHub notification: no secrets available (vault or environment variables)"
+            )
+        if slack:
+            logger.error(
+                "Cannot send Slack notification: no secrets available (vault or environment variables)"
+            )
+        return False
 
     failed = False
     if github and not send_notification_to_github(
@@ -309,8 +345,8 @@ def get_common_message(finish_reason: str, status: str, get_link, get_italics, g
     artifact_dir = pathlib.Path(os.environ.get("ARTIFACT_DIR", ""))
     caliper_status_path = None
 
-    # Search for caliper_postprocess_status.yaml in artifact directory and subdirectories
-    for status_file in artifact_dir.glob("**/caliper_postprocess_status.yaml"):
+    # Search for postprocess_status.yaml in artifact directory and subdirectories
+    for status_file in artifact_dir.glob("**/postprocess_status.yaml"):
         caliper_status_path = status_file
         break
 
@@ -340,9 +376,9 @@ def get_common_message(finish_reason: str, status: str, get_link, get_italics, g
 • Caliper postprocess completed but no reports generated.
 """
         except Exception as e:
-            logger.warning("Failed to parse caliper_postprocess_status.yaml: %s", e)
+            logger.warning("Failed to parse postprocess_status.yaml: %s", e)
             message += """
-• Failed to parse caliper_postprocess_status.yaml ...
+• Failed to parse postprocess_status.yaml ...
 """
 
     # Include fournos_launcher generated notification content
@@ -633,7 +669,7 @@ def send_cpt_notification(regression_summary_path, title, slack, dry_run):
         logger.fatal(f"Failed to load regression summary: {e}")
         return True
 
-    secret_dir, secret_env_key = get_secrets()
+    secret_dir, secret_env_key = get_secrets(None)
     if secret_dir is None:
         return True
 
