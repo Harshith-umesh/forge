@@ -1126,6 +1126,48 @@ class CaliperPostprocessOrchestrator:
 
         with step_logging("caliper_s3_export", self.step_logs_dir):
             try:
+                # Collect file paths from previous steps
+                kpis_file = None
+                csv_file = None
+                ai_data_dir = None
+                analysis_file = None
+
+                # Get KPI JSON file from artifacts_to_kpis step
+                artifacts_to_kpis_step = self._get_step("artifacts_to_kpis")
+                if (
+                    artifacts_to_kpis_step
+                    and artifacts_to_kpis_step.get("status") == "success"
+                    and artifacts_to_kpis_step.get("output_file")
+                ):
+                    kpis_file = output_dir / artifacts_to_kpis_step["output_file"]
+
+                # Get CSV file from kpis_to_csv step
+                kpis_to_csv_step = self._get_step("kpis_to_csv")
+                if (
+                    kpis_to_csv_step
+                    and kpis_to_csv_step.get("status") == "success"
+                    and kpis_to_csv_step.get("output_file")
+                ):
+                    csv_file = output_dir / kpis_to_csv_step["output_file"]
+
+                # Get AI data directory from artifacts_to_ai_data step
+                ai_data_step = self._get_step("artifacts_to_ai_data")
+                if (
+                    ai_data_step
+                    and ai_data_step.get("status") == "success"
+                    and ai_data_step.get("ai_eval_dir")
+                ):
+                    ai_data_dir = output_dir / ai_data_step["ai_eval_dir"]
+
+                # Get analysis file from analyse_kpis step
+                analyze_step = self._get_step("analyse_kpis")
+                if (
+                    analyze_step
+                    and analyze_step.get("status") in ("success", "warning")
+                    and analyze_step.get("output_file")
+                ):
+                    analysis_file = output_dir / analyze_step["output_file"]
+
                 # Log the CLI command to reproduce this step
                 s3_parent_config = self.config.s3
                 export_config = s3_parent_config.export
@@ -1136,13 +1178,21 @@ class CaliperPostprocessOrchestrator:
                 log_s3_export_command(
                     bucket=s3_parent_config.bucket,
                     export_path=export_path,
-                    from_dir=output_dir,
-                    include_csv=export_config.include_csv,
-                    include_kpis_json=export_config.include_kpis_json,
-                    include_ai_data=export_config.include_ai_data,
+                    output_dir=output_dir,
+                    kpis_file=kpis_file,
+                    csv_file=csv_file,
+                    ai_data_dir=ai_data_dir,
+                    analysis_file=analysis_file,
                 )
 
-                result = s3_export_entrypoint(self.config, output_dir, None)
+                result = s3_export_entrypoint(
+                    self.config,
+                    output_dir,
+                    kpis_file=kpis_file,
+                    csv_file=csv_file,
+                    ai_data_dir=ai_data_dir,
+                    analysis_file=analysis_file,
+                )
                 self._add_step("s3_export", result)
 
                 if result.get("status") == "success":
@@ -1162,17 +1212,29 @@ class CaliperPostprocessOrchestrator:
                 else:
                     error = result.get("error", "unknown error")
                     logger.warning(f"S3 export failed: {error}")
+                    self.s3_export_failed = True
 
             except Exception as e:
-                logger.exception("S3 export step failed")
+                error_msg = f"S3 export step failed with exception: {type(e).__name__}: {str(e)}"
+
+                # Log programming errors more prominently
+                if isinstance(e, (AttributeError, NameError, TypeError)):
+                    logger.error(f"CRITICAL PROGRAMMING ERROR in S3 export: {error_msg}")
+                    logger.exception("Full traceback for programming error:")
+                else:
+                    logger.error(error_msg)
+                    logger.exception("Full traceback:")
+
                 self._add_step(
                     "s3_export",
                     {
                         "status": "failed",
-                        "error": str(e),
+                        "error": error_msg,
+                        "exception_type": type(e).__name__,
                         "completed_at": time.time(),
                     },
                 )
+                self.s3_export_failed = True
 
     def _compute_final_status(self) -> str:
         """Compute the final postprocessing status."""

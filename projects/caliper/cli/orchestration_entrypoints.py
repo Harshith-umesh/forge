@@ -101,12 +101,31 @@ def s3_import_entrypoint(
 def s3_export_entrypoint(
     postprocess_config,
     output_dir: Path,
+    kpis_file: Path | None = None,
+    csv_file: Path | None = None,
     ai_data_dir: Path | None = None,
+    analysis_file: Path | None = None,
 ) -> dict[str, Any]:
-    """Entrypoint for orchestration to call S3 export functionality."""
-    from projects.caliper.cli.s3_export import run_s3_export
+    """Entrypoint for orchestration to call S3 export functionality with explicit paths."""
+    from projects.caliper.cli.s3_export import run_s3_export_with_explicit_paths
 
-    return run_s3_export(postprocess_config, output_dir, ai_data_dir)
+    s3_parent_config = postprocess_config.s3
+    s3_config = postprocess_config.s3.export
+
+    return run_s3_export_with_explicit_paths(
+        kpis_file=kpis_file,
+        csv_file=csv_file,
+        ai_data_dir=ai_data_dir,
+        analysis_file=analysis_file,
+        bucket=s3_parent_config.bucket,
+        prefix=s3_config.prefix,
+        instance=s3_parent_config.instance,
+        directory=s3_parent_config.directory,
+        upload_id=s3_config.upload_id,
+        vault=s3_parent_config.vault,
+        aws_credentials_file=s3_parent_config.aws_credentials_file,
+        dry_run=s3_config.dry_run,
+    )
 
 
 def get_kpi_functions_entrypoint(plugin_module) -> dict:

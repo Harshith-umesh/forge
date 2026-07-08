@@ -10,27 +10,30 @@ import click
 
 @click.command("s3-export")
 @click.option(
-    "--from-dir",
-    "from_dir",
+    "--kpis-file",
     type=click.Path(path_type=Path, exists=True),
-    required=True,
-    help="Directory containing files to upload",
+    help="Path to the kpis.json file to upload",
+)
+@click.option(
+    "--csv-file",
+    type=click.Path(path_type=Path, exists=True),
+    help="Path to the CSV file to upload",
+)
+@click.option(
+    "--ai-data-dir",
+    type=click.Path(path_type=Path, exists=True),
+    help="Path to the AI data directory to upload",
+)
+@click.option(
+    "--analysis-file",
+    type=click.Path(path_type=Path, exists=True),
+    help="Path to the analysis file to upload (optional)",
 )
 @click.option("--bucket", required=True, help="S3 bucket name")
 @click.option("--prefix", default="", help="S3 object prefix/path")
 @click.option("--instance", help="Instance identifier for S3 organization")
 @click.option("--directory", help="Directory identifier for S3 organization")
 @click.option("--upload-id", help="Custom upload identifier (uses timestamp if not provided)")
-@click.option("--include-csv", is_flag=True, default=True, help="Include CSV files in upload")
-@click.option(
-    "--include-kpis-json", is_flag=True, default=True, help="Include KPI JSON files in upload"
-)
-@click.option("--include-ai-data", is_flag=True, default=True, help="Include AI data in upload")
-@click.option(
-    "--ai-data-dir",
-    type=click.Path(path_type=Path),
-    help="AI data directory (if different from from-dir)",
-)
 @click.option(
     "--vault", default="psap-forge-aws-s3-export", help="Vault containing AWS credentials"
 )
@@ -44,16 +47,15 @@ import click
 @click.pass_context
 def s3_export_cmd(
     ctx: click.Context,
-    from_dir: Path,
+    kpis_file: Path | None,
+    csv_file: Path | None,
+    ai_data_dir: Path | None,
+    analysis_file: Path | None,
     bucket: str,
     prefix: str,
     instance: str | None,
     directory: str | None,
     upload_id: str | None,
-    include_csv: bool,
-    include_kpis_json: bool,
-    include_ai_data: bool,
-    ai_data_dir: Path | None,
     vault: str,
     aws_credentials_file: str,
     dry_run: bool,
@@ -61,21 +63,23 @@ def s3_export_cmd(
 ) -> None:
     """Upload postprocess artifacts to S3."""
     try:
+        # Validate that at least one file/directory is provided
+        if not any([kpis_file, csv_file, ai_data_dir, analysis_file]):
+            click.echo("❌ Error: At least one file or directory must be specified", err=True)
+            click.echo(
+                "   Use --kpis-file, --csv-file, --ai-data-dir, or --analysis-file", err=True
+            )
+            sys.exit(1)
+
         # Import S3 functions
-        from projects.caliper.cli.s3_export import run_s3_export
+        from projects.caliper.cli.s3_export import run_s3_export_with_explicit_paths
         from projects.core.library import vault as vault_lib
 
         # Initialize vault system
         vault_lib.init(vaults=[vault] if vault else [])
 
-        # Show command being executed with enabled flags
+        # Show command being executed
         enabled_flags = []
-        if include_csv:
-            enabled_flags.append("--include-csv")
-        if include_kpis_json:
-            enabled_flags.append("--include-kpis-json")
-        if include_ai_data:
-            enabled_flags.append("--include-ai-data")
         if dry_run:
             enabled_flags.append("--dry-run")
         if verbose:
@@ -86,7 +90,15 @@ def s3_export_cmd(
         )
 
         if verbose:
-            click.echo(f"📁 Source directory: {from_dir}")
+            click.echo("📁 Files to upload:")
+            if kpis_file:
+                click.echo(f"   • KPIs JSON: {kpis_file}")
+            if csv_file:
+                click.echo(f"   • CSV file: {csv_file}")
+            if analysis_file:
+                click.echo(f"   • Analysis file: {analysis_file}")
+            if ai_data_dir:
+                click.echo(f"   • AI data directory: {ai_data_dir}")
             click.echo(f"🪣 Target S3 bucket: {bucket}")
             if prefix:
                 click.echo(f"📂 S3 prefix: {prefix}")
@@ -96,47 +108,22 @@ def s3_export_cmd(
                 click.echo(f"📂 Directory: {directory}")
             if upload_id:
                 click.echo(f"🆔 Upload ID: {upload_id}")
-            if ai_data_dir and ai_data_dir != from_dir:
-                click.echo(f"🤖 AI data directory: {ai_data_dir}")
-            click.echo("📋 Include flags:")
-            click.echo(f"   • CSV files: {'✅' if include_csv else '❌'}")
-            click.echo(f"   • KPI JSON files: {'✅' if include_kpis_json else '❌'}")
-            ai_data_status = "✅" if include_ai_data else "❌"
-            if include_ai_data and not ai_data_dir:
-                ai_data_status += " (⚠️  no ai_data_dir specified)"
-            click.echo(f"   • AI data files: {ai_data_status}")
-            click.echo("   • Analysis files: ✅ (always included if available)")
 
-        # Create a minimal config object for the S3 export function
-        from projects.caliper.orchestration.postprocess_config import (
-            CaliperOrchestrationPostprocessConfig,
-            CaliperOrchestrationS3ExportSection,
-            CaliperOrchestrationS3Section,
-        )
-
-        s3_export_config = CaliperOrchestrationS3ExportSection(
-            enabled=True,
-            prefix=prefix,
-            upload_id=upload_id,
-            dry_run=dry_run,
-            include_csv=include_csv,
-            include_kpis_json=include_kpis_json,
-            include_ai_data=include_ai_data,
-        )
-
-        s3_config = CaliperOrchestrationS3Section(
+        # Run S3 export with explicit file paths
+        result = run_s3_export_with_explicit_paths(
+            kpis_file=kpis_file,
+            csv_file=csv_file,
+            ai_data_dir=ai_data_dir,
+            analysis_file=analysis_file,
             bucket=bucket,
+            prefix=prefix,
             instance=instance,
             directory=directory,
+            upload_id=upload_id,
             vault=vault,
             aws_credentials_file=aws_credentials_file,
-            export=s3_export_config,
+            dry_run=dry_run,
         )
-
-        config = CaliperOrchestrationPostprocessConfig(s3=s3_config)
-
-        # Run S3 export
-        result = run_s3_export(config, from_dir, ai_data_dir)
 
         if result["status"] == "success":
             if dry_run:
@@ -145,11 +132,11 @@ def s3_export_cmd(
                     click.echo(f"📋 Upload plan saved to: {result['dry_run_file']}")
             else:
                 click.echo("✅ S3 export completed successfully")
-                if "uploaded_count" in result:
-                    click.echo(f"📤 Uploaded {result['uploaded_count']} files")
+                if "uploaded_files" in result:
+                    click.echo(f"📤 Uploaded {result['uploaded_files']} files")
 
-            if verbose and "s3_path" in result:
-                click.echo(f"🌍 S3 location: {result['s3_path']}")
+            if verbose and "exported_path" in result:
+                click.echo(f"🌍 S3 location: {result['exported_path']}")
         else:
             click.echo(f"❌ S3 export failed: {result.get('error', 'unknown error')}", err=True)
             sys.exit(1)

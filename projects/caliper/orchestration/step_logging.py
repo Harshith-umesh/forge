@@ -415,13 +415,24 @@ def log_s3_import_command(
 def log_s3_export_command(
     bucket: str,
     export_path: str,
-    from_dir: Path,
-    include_csv: bool,
-    include_kpis_json: bool,
-    include_ai_data: bool,
+    output_dir: Path,
+    kpis_file: Path | None = None,
+    csv_file: Path | None = None,
+    ai_data_dir: Path | None = None,
+    analysis_file: Path | None = None,
 ) -> None:
     """Log the CLI command to reproduce the S3 export step."""
-    command_parts = [f'caliper s3-export --from-dir "{from_dir}" --bucket "{bucket}"']
+    command_parts = [f'caliper s3-export --bucket "{bucket}"']
+
+    # Add file paths
+    if kpis_file:
+        command_parts.append(f'--kpis-file "{kpis_file}"')
+    if csv_file:
+        command_parts.append(f'--csv-file "{csv_file}"')
+    if ai_data_dir:
+        command_parts.append(f'--ai-data-dir "{ai_data_dir}"')
+    if analysis_file:
+        command_parts.append(f'--analysis-file "{analysis_file}"')
 
     if export_path:
         # Parse the export path to get prefix, instance, directory
@@ -435,17 +446,16 @@ def log_s3_export_command(
             if prefix:
                 command_parts.append(f'--prefix "{prefix}"')
 
-    # Note: Include flags use default values (--include-csv, --include-kpis-json, --include-ai-data all default to True)
-
     command = " ".join(command_parts)
 
     step_args = {
         "bucket": bucket,
         "export_path": export_path,
-        "from_dir": str(from_dir),
-        "include_csv": include_csv,
-        "include_kpis_json": include_kpis_json,
-        "include_ai_data": include_ai_data,
+        "output_dir": str(output_dir),
+        "kpis_file": str(kpis_file) if kpis_file else None,
+        "csv_file": str(csv_file) if csv_file else None,
+        "ai_data_dir": str(ai_data_dir) if ai_data_dir else None,
+        "analysis_file": str(analysis_file) if analysis_file else None,
     }
 
     _log_command_banner(
