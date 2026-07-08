@@ -48,6 +48,7 @@ def convert_status_yaml_to_html(
     final_status = status_data.get("final_status", "unknown")
     test_phase = status_data.get("test_phase", {})
     steps_raw = status_data.get("steps", [])
+    base_directory = status_data.get("base_directory")
 
     # Convert steps to iterable format for processing
     steps_list = []
@@ -270,7 +271,9 @@ def convert_status_yaml_to_html(
         "artifacts_to_kpis",
         "kpis_to_csv",
         "artifacts_to_ai_data",
-        "analyze",
+        "s3_import",
+        "analyse_kpis",
+        "s3_export",
     ]
 
     # Create step lookup for easy access
@@ -339,12 +342,11 @@ def convert_status_yaml_to_html(
             )
 
         elif step_name == "visualize" and step_status in ["ok", "success"]:
-            output_dir = step_info.get("output_dir", "")
-            paths = step_info.get("paths", [])
+            output_files = step_info.get("output_files", [])
             plugin_module = step_info.get("plugin_module", "")
             details.extend(
                 [
-                    ("Files Generated", str(len(paths))),
+                    ("Files Generated", str(len(output_files))),
                     ("Plugin", plugin_module) if plugin_module else None,
                 ]
             )
@@ -355,9 +357,34 @@ def convert_status_yaml_to_html(
             details.extend([("KPI Records", str(kpi_count))])
 
         elif step_name == "artifacts_to_ai_data" and step_status in ["ok", "success"]:
-            schema_version = step_info.get("payload_schema_version", "unknown")
-            output_file = step_info.get("output_file", "")
-            details.extend([("Schema Version", str(schema_version))])
+            exported_entries = step_info.get("exported_entries", 0)
+            details.extend([("Exported Entries", str(exported_entries))])
+
+        elif step_name == "s3_import" and step_status in ["ok", "success"]:
+            downloaded_files = step_info.get("downloaded_files", 0)
+            failed_files = step_info.get("failed_files", 0)
+            details.extend(
+                [
+                    ("Downloaded Files", str(downloaded_files)),
+                    ("Failed Files", str(failed_files)) if failed_files > 0 else None,
+                ]
+            )
+
+        elif step_name == "analyse_kpis" and step_status in ["ok", "success"]:
+            baseline_files_count = step_info.get("baseline_files_count", 0)
+            details.extend([("Baseline Files", str(baseline_files_count))])
+
+        elif step_name == "s3_export" and step_status in ["ok", "success"]:
+            uploaded_files = step_info.get("uploaded_files", 0)
+            failed_files = step_info.get("failed_files", 0)
+            exported_path = step_info.get("exported_path", "")
+            details.extend(
+                [
+                    ("Uploaded Files", str(uploaded_files)),
+                    ("Failed Files", str(failed_files)) if failed_files > 0 else None,
+                    ("Export Path", exported_path) if exported_path else None,
+                ]
+            )
 
         # Add failure/skip reasons
         reason = step_info.get("reason", "")
@@ -388,40 +415,50 @@ def convert_status_yaml_to_html(
         # Add file links
         file_links = []
 
+        def _get_full_path(relative_path: str) -> str:
+            """Convert relative path to full path using base_directory."""
+            if base_directory and relative_path:
+                return str(Path(base_directory) / relative_path)
+            return relative_path
+
         if step_name == "visualize" and step_status in ["ok", "success"]:
-            output_dir = step_info.get("output_dir", "")
-            paths = step_info.get("paths", [])
-            index_path = step_info.get("index_path", "")
+            output_files = step_info.get("output_files", [])
 
-            if index_path:
-                if output_dir:
-                    full_index_path = str(Path(output_dir) / index_path)
-                else:
-                    full_index_path = index_path
-                file_links.append((f"📊 {Path(index_path).name}", full_index_path))
-
-            for path in paths[:8]:  # Show first 8 files
-                if output_dir:
-                    full_path = str(Path(output_dir) / path)
-                else:
-                    full_path = path
+            for path in output_files[:8]:  # Show first 8 files
+                full_path = _get_full_path(path)
                 file_name = Path(path).name
                 file_links.append((file_name, full_path))
 
-            if len(paths) > 8:
-                file_links.append((f"... and {len(paths) - 8} more files", ""))
+            if len(output_files) > 8:
+                file_links.append((f"... and {len(output_files) - 8} more files", ""))
 
         elif step_name == "artifacts_to_kpis" and step_status in ["ok", "success"]:
             output_file = step_info.get("output_file", "")
             if output_file:
+                full_path = _get_full_path(output_file)
                 file_name = Path(output_file).name
-                file_links.append((f"📈 {file_name}", output_file))
+                file_links.append((f"📈 {file_name}", full_path))
+
+        elif step_name == "kpis_to_csv" and step_status in ["ok", "success"]:
+            output_file = step_info.get("output_file", "")
+            if output_file:
+                full_path = _get_full_path(output_file)
+                file_name = Path(output_file).name
+                file_links.append((f"📊 {file_name}", full_path))
 
         elif step_name == "artifacts_to_ai_data" and step_status in ["ok", "success"]:
             output_file = step_info.get("output_file", "")
             if output_file:
+                full_path = _get_full_path(output_file)
                 file_name = Path(output_file).name
-                file_links.append((f"🤖 {file_name}", output_file))
+                file_links.append((f"🤖 {file_name}", full_path))
+
+        elif step_name == "analyse_kpis" and step_status in ["ok", "success"]:
+            output_file = step_info.get("output_file", "")
+            if output_file:
+                full_path = _get_full_path(output_file)
+                file_name = Path(output_file).name
+                file_links.append((f"📊 {file_name}", full_path))
 
         if file_links:
             html_content += (

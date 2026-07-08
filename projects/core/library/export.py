@@ -454,11 +454,24 @@ def _process_caliper_postprocess_status(
             # Create file link generator function
             get_file_link = None
             if mlflow_run_url:
+                # Use base_directory from status data for MLflow URL construction
+                base_directory = result.base_directory
+                if base_directory:
+                    # Calculate path relative to BASE_ARTIFACT_DIR.parent
+                    # e.g., "/workspace/artifacts/000__replot/postprocess_output" -> "000__replot/postprocess_output"
+                    from projects.core.library import env
 
-                def get_file_link(file_path: str) -> str:
-                    return _create_mlflow_file_url_for_step(
-                        mlflow_run_url, step_dir.name, file_path
-                    )
+                    base_path = Path(base_directory)
+
+                    # Calculate step subdirectory relative to BASE_ARTIFACT_DIR.parent
+                    # e.g., "/workspace/artifacts/000__replot/postprocess_output" relative to "/workspace/artifacts" = "000__replot/postprocess_output"
+                    step_subdir = str(base_path.relative_to(env.BASE_ARTIFACT_DIR.parent))
+                else:
+                    # Fallback to step_dir.name for backward compatibility
+                    step_subdir = step_dir.name
+
+                def get_file_link(file_path: str, step_subdir=step_subdir) -> str:
+                    return _create_mlflow_file_url_for_step(mlflow_run_url, step_subdir, file_path)
 
             # Generate notification text from the structured result
             notification_text = format_postprocess_status_notification(result, get_file_link)
@@ -466,7 +479,8 @@ def _process_caliper_postprocess_status(
                 step_log_links.append(notification_text)
 
         except Exception as e:
-            logger.warning(f"Failed to process caliper postprocess status file {status_file}: {e}")
+            logger.error(f"Failed to process caliper postprocess status file {status_file}: {e}")
+            raise
 
 
 def _process_notification_files(step_dir: Path, step_log_links: list[str]) -> None:
