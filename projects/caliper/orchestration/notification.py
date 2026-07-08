@@ -17,10 +17,11 @@ class PostprocessStepResult:
 
     status: str
     message: str | None = None
-    paths: list[str] | None = None
+    output_files: list[str] | None = None  # renamed from "paths"
     completed_at: float | None = None
     reason: str | None = None
     output_file: str | None = None
+    output_dir: str | None = None  # relative directory path
     ai_eval_dir: str | None = None
     exported_path: str | None = None
     uploaded_files: int | None = None
@@ -34,6 +35,7 @@ class PostprocessResult:
 
     success: bool
     final_status: str | None = None
+    base_directory: str | None = None
     steps: dict[str, PostprocessStepResult] | None = None
     test_phase: dict[str, Any] | None = None
     job_shutdown: dict[str, Any] | None = None
@@ -89,6 +91,14 @@ def format_postprocess_status_notification(
             # Add reason for skipped steps
             if step_result.status in ("skipped", "disabled") and step_result.reason:
                 lines.append(f"  > {step_result.reason}")
+
+            # Add error message for failed steps
+            if (
+                step_result.status in ("failed", "failure")
+                and hasattr(step_result, "error")
+                and step_result.error
+            ):
+                lines.append(f"  > ❌ {step_result.error}")
 
             # Add specific file links for certain steps
             if step_result.status == "success" and get_file_link:
@@ -192,8 +202,11 @@ def format_postprocess_status_notification(
                         )
 
             # Add general file links if available (for visualize step, etc.)
-            if step_result.paths and get_file_link:
-                lines.extend(_format_step_file_links(step_name, step_result.paths, get_file_link))
+            file_paths = getattr(step_result, "output_files", None) or getattr(
+                step_result, "paths", None
+            )
+            if file_paths and get_file_link:
+                lines.extend(_format_step_file_links(step_name, file_paths, get_file_link))
 
     return "\n".join(lines) if lines else ""
 
@@ -215,26 +228,8 @@ def _create_file_link(output_file: str, emoji: str, get_file_link: callable) -> 
         output_path = Path(output_file)
         filename = output_path.name
 
-        # Extract relative path from step directory
-        # Example: /workspace/artifacts/03__test/002__postprocessing/kpis/kpis.json
-        # Should extract: kpis/kpis.json (relative to 002__postprocessing)
-        path_parts = output_path.parts
-
-        # Find the postprocessing directory (last directory containing "__")
-        step_dir_index = None
-        for i, part in enumerate(path_parts):
-            if "__" in part:
-                step_dir_index = i
-
-        if step_dir_index is not None and step_dir_index < len(path_parts) - 1:
-            # Get path relative to step directory
-            relative_parts = path_parts[step_dir_index + 1 :]
-            relative_path = "/".join(relative_parts)
-        else:
-            # Fallback to just filename
-            relative_path = filename
-
-        file_url = get_file_link(relative_path)
+        # In the standardized format, output_file is already relative to base_directory
+        file_url = get_file_link(output_file)
         return f"  - {emoji} [{filename}]({file_url})"
     except Exception:
         filename = output_file.split("/")[-1]
@@ -361,13 +356,18 @@ def parse_postprocess_result(status_data: dict) -> PostprocessResult | None:
                 # Each item in the list is {step_name: step_data}
                 for step_name, step_data in step_dict.items():
                     if isinstance(step_data, dict):
+                        # Handle both old and new field names for backward compatibility
+                        output_files = step_data.get("output_files") or step_data.get("paths")
+                        output_dir = step_data.get("output_dir") or step_data.get("import_dir")
+
                         steps_dict[step_name] = PostprocessStepResult(
                             status=step_data.get("status", "unknown"),
                             message=step_data.get("message"),
-                            paths=step_data.get("paths"),
+                            output_files=output_files,
                             completed_at=step_data.get("completed_at"),
                             reason=step_data.get("reason"),
                             output_file=step_data.get("output_file"),
+                            output_dir=output_dir,
                             ai_eval_dir=step_data.get("ai_eval_dir"),
                             exported_path=step_data.get("exported_path"),
                             uploaded_files=step_data.get("uploaded_files"),
@@ -378,6 +378,7 @@ def parse_postprocess_result(status_data: dict) -> PostprocessResult | None:
     return PostprocessResult(
         success=status_data.get("success", False),
         final_status=status_data.get("final_status"),
+        base_directory=status_data.get("base_directory"),
         steps=steps_dict if steps_dict else None,
         test_phase=status_data.get("test_phase"),
         job_shutdown=status_data.get("job_shutdown"),

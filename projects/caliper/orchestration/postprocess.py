@@ -48,6 +48,28 @@ from projects.core.library import env
 
 logger = logging.getLogger(__name__)
 
+
+def _make_path_relative_to_base(file_path: str | Path, base_dir: Path) -> str:
+    """Convert absolute path to relative path from base directory.
+
+    Args:
+        file_path: Absolute or relative file path
+        base_dir: Base directory to make path relative to
+
+    Returns:
+        Relative path as string
+    """
+    try:
+        path_obj = Path(file_path)
+        if path_obj.is_absolute():
+            return str(path_obj.relative_to(base_dir))
+        else:
+            return str(path_obj)
+    except (ValueError, TypeError):
+        # If can't make relative, return the filename
+        return Path(file_path).name
+
+
 _STUB_REASON_ANALYZE = "orchestration stub: regression analyze is not wired here (use Caliper CLI or extend orchestration)."
 
 
@@ -282,7 +304,7 @@ def _run_artifacts_to_kpis(
         return {
             "status": "success",
             "kpi_count": len(kpis),
-            "output_file": str(output_file),
+            "output_file": _make_path_relative_to_base(output_file, output_dir),
             "completed_at": time.time(),
         }
     except Exception as e:
@@ -344,8 +366,8 @@ def _run_artifacts_to_ai_data(
 
         return {
             "status": "success",
-            "output_file": str(output_file),
-            "ai_data_dir": str(ai_data_dir),
+            "output_file": _make_path_relative_to_base(output_file, output_dir),
+            "ai_data_dir": _make_path_relative_to_base(ai_data_dir, output_dir),
             "exported_entries": len(exported_entries),
             "completed_at": time.time(),
         }
@@ -510,7 +532,7 @@ def _run_kpis_to_csv(
         return {
             "status": "success",
             "kpi_count": len(kpi_records),
-            "output_file": result_path,
+            "output_file": _make_path_relative_to_base(result_path, output_dir),
             "completed_at": time.time(),
         }
     except Exception as e:
@@ -679,6 +701,7 @@ class CaliperPostprocessOrchestrator:
         return {
             "final_status": final_status,
             "success": final_status == FINAL_SUCCESS,
+            "base_directory": str(self.visualize_output_dir) if self.visualize_output_dir else None,
             "test_phase": test_block,
             "steps": self.steps,
         }
@@ -794,8 +817,7 @@ class CaliperPostprocessOrchestrator:
                     {
                         "status": "success",
                         "plugin_module": mod_str,
-                        "output_dir": str(output_dir),
-                        "paths": relative_paths,
+                        "output_files": relative_paths,
                         "completed_at": time.time(),
                     },
                 )
@@ -1004,6 +1026,14 @@ class CaliperPostprocessOrchestrator:
         with step_logging("caliper_s3_import", self.step_logs_dir):
             try:
                 result = s3_import_entrypoint(self.config, output_dir)
+
+                # Standardize field names and convert paths to relative
+                if "import_dir" in result:
+                    # Rename import_dir to output_dir and make relative
+                    result["output_dir"] = _make_path_relative_to_base(
+                        result.pop("import_dir"), output_dir
+                    )
+
                 self._add_step("s3_import", result)
                 logger.info(f"S3 import result: {result}")
 
@@ -1057,9 +1087,19 @@ class CaliperPostprocessOrchestrator:
 
         with step_logging("caliper_analyse_kpis", self.step_logs_dir):
             try:
+                # Convert relative path to absolute for analyze function
+                current_kpis_path = output_dir / current_kpis_file
+
                 result = analyze_kpis_entrypoint(
-                    self.config, plugin_module, self.tree_root, output_dir, Path(current_kpis_file)
+                    self.config, plugin_module, self.tree_root, output_dir, current_kpis_path
                 )
+
+                # Make output_file path relative
+                if "output_file" in result:
+                    result["output_file"] = _make_path_relative_to_base(
+                        result["output_file"], output_dir
+                    )
+
                 self._add_step("analyse_kpis", result)
                 logger.info(f"KPI analysis result: {result}")
 
