@@ -84,8 +84,8 @@ def format_postprocess_status_notification(
             step_emoji = _get_step_emoji(step_result.status)
             lines.append(f"- {step_emoji} **{step_name}**: `{step_result.status}`")
 
-            # Add step message if available
-            if step_result.message:
+            # Add step message if available (but not for warning/failed steps to avoid duplication)
+            if step_result.message and step_result.status not in ("warning", "failed", "failure"):
                 lines.append(f"  > {step_result.message}")
 
             # Add reason for skipped steps
@@ -99,6 +99,14 @@ def format_postprocess_status_notification(
                 and step_result.error
             ):
                 lines.append(f"  > ❌ {step_result.error}")
+
+            # Add warning message for warning steps
+            if (
+                step_result.status == "warning"
+                and hasattr(step_result, "message")
+                and step_result.message
+            ):
+                lines.append(f"  > ⚠️ {step_result.message}")
 
             # Add specific file links for certain steps
             if step_result.status == "success" and get_file_link:
@@ -244,6 +252,8 @@ def _get_step_emoji(status: str) -> str:
         return "❌"
     elif status in ("skipped", "disabled"):
         return "⏭️"
+    elif status == "warning":
+        return "⚠️"
     else:
         return "⚠️"
 

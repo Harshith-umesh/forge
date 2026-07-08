@@ -52,6 +52,21 @@ def run_kpi_analysis(
 
         if not historical_kpi_files:
             logger.warning("No historical KPI files found for analysis")
+            # Return special exit code 2 to indicate warning (no historical data)
+            analysis_result = {
+                "status": "warning",
+                "message": "no historical KPI found for regression testing",
+                "current_kpi_file": str(current_kpi_file),
+                "historical_kpi_files": historical_kpi_files,
+                "baseline_files_count": 0,
+                "plugin_module": plugin_module,
+                "completed_at": time.time(),
+            }
+            # Write warning result to output file
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(output_file, "w") as f:
+                json.dump(analysis_result, f, indent=2)
+            return 2  # Special exit code for warning
 
         logger.info(f"Found {len(historical_kpi_files)} historical KPI files for analysis")
 
@@ -177,6 +192,29 @@ def analyze_kpis(
                 return {
                     "status": "failed",
                     "error": "Analysis completed but no output file was generated",
+                    "completed_at": time.time(),
+                }
+        elif exit_code == 2:
+            # Warning: no historical data found
+            if output_path.exists():
+                with open(output_path) as f:
+                    result_data = json.load(f)
+
+                # Return warning status with message
+                return {
+                    "status": "warning",
+                    "message": result_data.get(
+                        "message", "no historical KPI found for regression testing"
+                    ),
+                    "output_file": str(output_path),
+                    "baseline_files_count": result_data.get("baseline_files_count", 0),
+                    "completed_at": time.time(),
+                }
+            else:
+                return {
+                    "status": "warning",
+                    "message": "no historical KPI found for regression testing",
+                    "baseline_files_count": 0,
                     "completed_at": time.time(),
                 }
         else:

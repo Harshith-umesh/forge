@@ -1126,15 +1126,6 @@ class CaliperPostprocessOrchestrator:
 
         with step_logging("caliper_s3_export", self.step_logs_dir):
             try:
-                # Determine AI eval directory if it was generated
-                ai_data_dir = None
-                artifacts_to_ai_data_step = self._get_step("artifacts_to_ai_data")
-                if (
-                    self.config.kpi.artifacts_to_ai_data.enabled
-                    and artifacts_to_ai_data_step.get("status") == "success"
-                ):
-                    ai_data_dir = output_dir / self.config.kpi.artifacts_to_ai_data.output_dir
-
                 # Log the CLI command to reproduce this step
                 s3_parent_config = self.config.s3
                 export_config = s3_parent_config.export
@@ -1142,19 +1133,16 @@ class CaliperPostprocessOrchestrator:
                 if export_config.prefix:
                     export_path += f"/{export_config.prefix}"
 
-                # Only include AI data if it was actually generated successfully
-                include_ai_data_actual = export_config.include_ai_data and ai_data_dir is not None
-
                 log_s3_export_command(
                     bucket=s3_parent_config.bucket,
                     export_path=export_path,
                     from_dir=output_dir,
                     include_csv=export_config.include_csv,
                     include_kpis_json=export_config.include_kpis_json,
-                    include_ai_data=include_ai_data_actual,
+                    include_ai_data=export_config.include_ai_data,
                 )
 
-                result = s3_export_entrypoint(self.config, output_dir, ai_data_dir)
+                result = s3_export_entrypoint(self.config, output_dir, None)
                 self._add_step("s3_export", result)
 
                 if result.get("status") == "success":

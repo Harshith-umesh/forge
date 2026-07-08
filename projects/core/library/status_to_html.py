@@ -71,7 +71,7 @@ def convert_status_yaml_to_html(
         status_badge_class = "status-warning"
 
     # Count step statuses for summary
-    step_counts = {"success": 0, "failed": 0, "skipped": 0}
+    step_counts = {"success": 0, "failed": 0, "skipped": 0, "warning": 0}
     for step_dict in steps_list:
         for _step_name, step_info in step_dict.items():
             step_status = step_info.get("status", "unknown")
@@ -81,6 +81,8 @@ def convert_status_yaml_to_html(
                 step_counts["failed"] += 1
             elif step_status == "skipped":
                 step_counts["skipped"] += 1
+            elif step_status == "warning":
+                step_counts["warning"] += 1
 
     # Generate HTML
     html_content = f"""<!DOCTYPE html>
@@ -152,6 +154,7 @@ def convert_status_yaml_to_html(
         }}
         .stat.success {{ border-color: #28a745; color: #28a745; }}
         .stat.failed {{ border-color: #dc3545; color: #dc3545; }}
+        .stat.warning {{ border-color: #ffc107; color: #856404; }}
         .stat.skipped {{ border-color: #6c757d; color: #6c757d; }}
         .step-card {{
             border: 1px solid #e0e0e0;
@@ -170,6 +173,7 @@ def convert_status_yaml_to_html(
         .step-header.success {{ background-color: #f8fff9; border-left: 4px solid #28a745; }}
         .step-header.failed {{ background-color: #fff8f8; border-left: 4px solid #dc3545; }}
         .step-header.skipped {{ background-color: #f8f9fa; border-left: 4px solid #6c757d; }}
+        .step-header.warning {{ background-color: #fffdf7; border-left: 4px solid #ffc107; }}
         .step-title {{
             font-size: 1.1em;
             font-weight: 600;
@@ -185,6 +189,7 @@ def convert_status_yaml_to_html(
         .step-ok {{ background-color: #d4edda; color: #155724; }}
         .step-failed {{ background-color: #f8d7da; color: #721c24; }}
         .step-skipped {{ background-color: #e2e3e5; color: #495057; }}
+        .step-warning {{ background-color: #fff3cd; color: #856404; }}
         .step-content {{
             padding: 20px;
         }}
@@ -252,6 +257,7 @@ def convert_status_yaml_to_html(
                 <div class="summary-stats">
                     <div class="stat success">✅ {step_counts["success"]} Success</div>
                     <div class="stat failed">❌ {step_counts["failed"]} Failed</div>
+                    <div class="stat warning">⚠️ {step_counts["warning"]} Warning</div>
                     <div class="stat skipped">⏭️ {step_counts["skipped"]} Skipped</div>
                 </div>
             </div>
@@ -313,6 +319,10 @@ def convert_status_yaml_to_html(
             header_class = "skipped"
             status_class = "step-skipped"
             status_text = "SKIPPED"
+        elif step_status == "warning":
+            header_class = "warning"
+            status_class = "step-warning"
+            status_text = "WARNING"
         else:
             header_class = "skipped"
             status_class = "step-skipped"

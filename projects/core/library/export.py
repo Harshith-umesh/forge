@@ -29,6 +29,7 @@ class StepStatus(StrEnum):
     FAILURE = "failure"
     ONGOING = "ongoing"
     UNKNOWN = "unknown"
+    WARNING = "warning"
 
 
 logger = logging.getLogger(__name__)
@@ -607,6 +608,31 @@ def _read_step_exit_status(
         return "❓", StepStatus.UNKNOWN  # Unknown status on error
 
 
+def _check_postprocess_warnings(step_dir: Path) -> StepStatus:
+    """Check for warning status in postprocess status file."""
+    try:
+        status_file = step_dir / "caliper_postprocess_status.yaml"
+        if not status_file.exists():
+            return StepStatus.SUCCESS  # No postprocess status, assume no warnings
+
+        with open(status_file, encoding="utf-8") as f:
+            status_data = yaml.safe_load(f)
+
+        if not status_data or "steps" not in status_data:
+            return StepStatus.SUCCESS
+
+        # Check if any step has warning status
+        steps = status_data["steps"]
+        for step in steps:
+            for _step_name, step_data in step.items():
+                if isinstance(step_data, dict) and step_data.get("status") == "warning":
+                    return StepStatus.WARNING
+
+        return StepStatus.SUCCESS
+    except Exception:
+        return StepStatus.SUCCESS  # On error, assume no warnings
+
+
 def _get_overall_status_from_steps() -> str:
     """Check all step exit statuses and return overall status emoji."""
     try:
@@ -629,11 +655,19 @@ def _get_overall_status_from_steps() -> str:
             emoji, status = _read_step_exit_status(step_dir, current_step_name)
             step_statuses.append(status)
 
-        # Priority: failure > ongoing > unknown > success
+            # Check for postprocess warnings in this step
+            if status == StepStatus.SUCCESS:  # Only check if step succeeded
+                postprocess_status = _check_postprocess_warnings(step_dir)
+                if postprocess_status == StepStatus.WARNING:
+                    step_statuses.append(StepStatus.WARNING)
+
+        # Priority: failure > ongoing > warning > unknown > success
         if StepStatus.FAILURE in step_statuses:
             return "🔴"  # Any failure = red
         elif StepStatus.ONGOING in step_statuses:
             return "🟢"  # Ongoing --> success
+        elif StepStatus.WARNING in step_statuses:
+            return "🟠"  # Warning = orange
         elif StepStatus.UNKNOWN in step_statuses:
             return "🟠"  # Unknown = orange
         else:

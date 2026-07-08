@@ -115,6 +115,127 @@ def list_analysis_files(output_dir: Path) -> list[Path]:
     return files
 
 
+def get_files_from_postprocess_status(
+    output_dir: Path, include_csv: bool, include_kpis_json: bool, include_ai_data: bool
+) -> tuple[list[Path], list[Path], list[Path], Path | None]:
+    """Get file paths from postprocess status instead of directory searching.
+
+    Args:
+        output_dir: Postprocess output directory
+        include_csv: Whether to include CSV files
+        include_kpis_json: Whether to include KPI JSON files
+        include_ai_data: Whether to include AI data files
+
+    Returns:
+        Tuple of (csv_files, kpi_json_files, analysis_files, ai_data_dir)
+    """
+    csv_files = []
+    kpi_json_files = []
+    analysis_files = []
+    ai_data_dir = None
+
+    # Look for postprocess status file
+    status_file = output_dir / "caliper_postprocess_status.yaml"
+    if not status_file.exists():
+        logger.warning(f"Postprocess status file not found: {status_file}")
+        logger.info("Falling back to directory search for files")
+        # Fallback to original behavior
+        if include_csv:
+            csv_files = list_csv_files(output_dir)
+        if include_kpis_json:
+            kpi_json_files = list_kpi_json_files(output_dir)
+        analysis_files = list_analysis_files(output_dir)
+        return csv_files, kpi_json_files, analysis_files, ai_data_dir
+
+    try:
+        with open(status_file, encoding="utf-8") as f:
+            status_data = yaml.safe_load(f)
+
+        if not status_data or "steps" not in status_data:
+            logger.warning("Invalid postprocess status file format")
+            return csv_files, kpi_json_files, analysis_files
+
+        # Extract file paths from steps
+        steps = status_data["steps"]
+        for step in steps:
+            for step_name, step_data in step.items():
+                if not isinstance(step_data, dict) or step_data.get("status") != "success":
+                    continue
+
+                # KPI JSON file
+                if step_name == "artifacts_to_kpis" and include_kpis_json:
+                    output_file = step_data.get("output_file")
+                    if output_file:
+                        kpi_file_path = output_dir / output_file
+                        if kpi_file_path.exists():
+                            kpi_json_files.append(kpi_file_path)
+                            logger.info(
+                                f"Found KPI JSON file: {output_file} ({kpi_file_path.stat().st_size} bytes)"
+                            )
+                        else:
+                            logger.warning(
+                                f"KPI JSON file specified but not found: {kpi_file_path}"
+                            )
+
+                # CSV file
+                elif step_name == "kpis_to_csv" and include_csv:
+                    output_file = step_data.get("output_file")
+                    if output_file:
+                        csv_file_path = output_dir / output_file
+                        if csv_file_path.exists():
+                            csv_files.append(csv_file_path)
+                            logger.info(
+                                f"Found CSV file: {output_file} ({csv_file_path.stat().st_size} bytes)"
+                            )
+                        else:
+                            logger.warning(f"CSV file specified but not found: {csv_file_path}")
+
+                # Analysis file
+                elif step_name == "analyse_kpis":
+                    output_file = step_data.get("output_file")
+                    if output_file:
+                        analysis_file_path = output_dir / output_file
+                        if analysis_file_path.exists():
+                            analysis_files.append(analysis_file_path)
+                            logger.info(
+                                f"Found analysis file: {output_file} ({analysis_file_path.stat().st_size} bytes)"
+                            )
+                        else:
+                            logger.warning(
+                                f"Analysis file specified but not found: {analysis_file_path}"
+                            )
+
+                # AI data directory
+                elif step_name == "artifacts_to_ai_data" and include_ai_data:
+                    ai_eval_dir = step_data.get("ai_eval_dir")
+                    if ai_eval_dir:
+                        ai_data_path = output_dir / ai_eval_dir
+                        if ai_data_path.exists() and ai_data_path.is_dir():
+                            ai_data_dir = ai_data_path
+                            logger.info(f"Found AI data directory: {ai_eval_dir}")
+                        else:
+                            logger.warning(
+                                f"AI data directory specified but not found: {ai_data_path}"
+                            )
+
+        # Log summary
+        logger.info(
+            f"From postprocess status - CSV: {len(csv_files)}, KPI JSON: {len(kpi_json_files)}, Analysis: {len(analysis_files)} files, AI data: {'Yes' if ai_data_dir else 'No'}"
+        )
+
+    except Exception as e:
+        logger.warning(f"Failed to read postprocess status file: {e}")
+        logger.info("Falling back to directory search for files")
+        # Fallback to original behavior
+        if include_csv:
+            csv_files = list_csv_files(output_dir)
+        if include_kpis_json:
+            kpi_json_files = list_kpi_json_files(output_dir)
+        analysis_files = list_analysis_files(output_dir)
+
+    return csv_files, kpi_json_files, analysis_files, ai_data_dir
+
+
 def upload_file_to_s3(s3_client, file_path: Path, bucket: str, s3_key: str) -> bool:
     """Upload a single file to S3.
 
@@ -324,28 +445,33 @@ def run_s3_export(
         # List local files to upload
         upload_files = []
 
-        if s3_config.include_csv:
-            csv_files = list_csv_files(output_dir)
-            upload_files.extend(csv_files)
+        # Get file paths from postprocess status instead of directory searching
+        csv_files, kpi_json_files, analysis_files, status_ai_data_dir = (
+            get_files_from_postprocess_status(
+                output_dir,
+                s3_config.include_csv,
+                s3_config.include_kpis_json,
+                s3_config.include_ai_data,
+            )
+        )
 
-        if s3_config.include_kpis_json:
-            kpi_json_files = list_kpi_json_files(output_dir)
-            upload_files.extend(kpi_json_files)
+        upload_files.extend(csv_files)
+        upload_files.extend(kpi_json_files)
+        upload_files.extend(analysis_files)
 
         if s3_config.include_ai_data:
-            if ai_data_dir:
-                ai_data_files = list_ai_data_files(ai_data_dir)
-                logger.info(f"Found {len(ai_data_files)} AI data files in directory: {ai_data_dir}")
+            # Use AI data directory from status if available, otherwise fallback to parameter
+            actual_ai_data_dir = status_ai_data_dir or ai_data_dir
+            if actual_ai_data_dir:
+                ai_data_files = list_ai_data_files(actual_ai_data_dir)
+                logger.info(
+                    f"Found {len(ai_data_files)} AI data files in directory: {actual_ai_data_dir}"
+                )
                 upload_files.extend(ai_data_files)
             else:
                 logger.warning(
-                    "AI data export is enabled but ai_data_dir is None - no AI data files will be exported"
+                    "AI data export is enabled but no AI data directory found in status or parameters"
                 )
-
-        # Always include analysis files if they exist (e.g., kpi_analyze.json)
-        # These are included regardless of other flags since they're valuable for historical tracking
-        analysis_files = list_analysis_files(output_dir)
-        upload_files.extend(analysis_files)
 
         logger.info(f"Preparing to upload {len(upload_files)} files to S3")
         total_size = sum(f.stat().st_size for f in upload_files)
@@ -428,22 +554,20 @@ def run_s3_export(
                 }
             }
 
-            # Collect CSV file details
-            if s3_config.include_csv:
-                csv_files = list_csv_files(output_dir)
-                for csv_file in csv_files:
-                    try:
-                        relative_csv_path = str(csv_file.relative_to(artifact_dir))
-                    except ValueError:
-                        relative_csv_path = str(csv_file)
+            # Collect CSV file details (use already collected files)
+            for csv_file in csv_files:
+                try:
+                    relative_csv_path = str(csv_file.relative_to(artifact_dir))
+                except ValueError:
+                    relative_csv_path = str(csv_file)
 
-                    dry_run_data["s3_export_dry_run"]["csv_files"].append(
-                        {
-                            "name": csv_file.name,
-                            "path": relative_csv_path,
-                            "size_bytes": csv_file.stat().st_size,
-                        }
-                    )
+                dry_run_data["s3_export_dry_run"]["csv_files"].append(
+                    {
+                        "name": csv_file.name,
+                        "path": relative_csv_path,
+                        "size_bytes": csv_file.stat().st_size,
+                    }
+                )
 
             # Collect KPI JSON file details
             if s3_config.include_kpis_json:
