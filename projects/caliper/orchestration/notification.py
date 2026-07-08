@@ -40,13 +40,12 @@ class PostprocessResult:
 
 
 def format_postprocess_status_notification(
-    result: PostprocessResult, base_dir: str, get_file_link: callable | None = None
+    result: PostprocessResult, get_file_link: callable | None = None
 ) -> str:
     """Format postprocess result into notification text with file links.
 
     Args:
         result: Structured PostprocessResult object
-        base_dir: Base directory for relative path construction
         get_file_link: Optional callback function that takes a file path and returns a URL.
                       Signature: get_file_link(file_path: str) -> str
 
@@ -98,18 +97,14 @@ def format_postprocess_status_notification(
                     and hasattr(step_result, "output_file")
                     and step_result.output_file
                 ):
-                    lines.append(
-                        _create_file_link(step_result.output_file, "📄", get_file_link, base_dir)
-                    )
+                    lines.append(_create_file_link(step_result.output_file, "📄", get_file_link))
 
                 elif (
                     step_name == "kpis_to_csv"
                     and hasattr(step_result, "output_file")
                     and step_result.output_file
                 ):
-                    lines.append(
-                        _create_file_link(step_result.output_file, "📊", get_file_link, base_dir)
-                    )
+                    lines.append(_create_file_link(step_result.output_file, "📊", get_file_link))
 
                 elif step_name == "artifacts_to_ai_data":
                     if hasattr(step_result, "ai_eval_dir") and step_result.ai_eval_dir:
@@ -184,9 +179,7 @@ def format_postprocess_status_notification(
                     # Show analysis output file
                     if hasattr(step_result, "output_file") and step_result.output_file:
                         lines.append(
-                            _create_file_link(
-                                step_result.output_file, "📊", get_file_link, base_dir
-                            )
+                            _create_file_link(step_result.output_file, "📊", get_file_link)
                         )
 
                     # Show baseline files count if available
@@ -200,21 +193,18 @@ def format_postprocess_status_notification(
 
             # Add general file links if available (for visualize step, etc.)
             if step_result.paths and get_file_link:
-                lines.extend(
-                    _format_step_file_links(step_name, step_result.paths, get_file_link, base_dir)
-                )
+                lines.extend(_format_step_file_links(step_name, step_result.paths, get_file_link))
 
     return "\n".join(lines) if lines else ""
 
 
-def _create_file_link(output_file: str, emoji: str, get_file_link: callable, base_dir: str) -> str:
+def _create_file_link(output_file: str, emoji: str, get_file_link: callable) -> str:
     """Create a file link line for notifications.
 
     Args:
         output_file: Path to the output file
         emoji: Emoji to use for the file type
         get_file_link: Function to generate file URLs
-        base_dir: Base directory name for constructing relative paths
 
     Returns:
         Formatted line with file link or plain filename
@@ -224,8 +214,26 @@ def _create_file_link(output_file: str, emoji: str, get_file_link: callable, bas
 
         output_path = Path(output_file)
         filename = output_path.name
-        # Construct relative path with base_dir
-        relative_path = f"{base_dir}/{filename}"
+
+        # Extract relative path from step directory
+        # Example: /workspace/artifacts/03__test/002__postprocessing/kpis/kpis.json
+        # Should extract: kpis/kpis.json (relative to 002__postprocessing)
+        path_parts = output_path.parts
+
+        # Find the postprocessing directory (last directory containing "__")
+        step_dir_index = None
+        for i, part in enumerate(path_parts):
+            if "__" in part:
+                step_dir_index = i
+
+        if step_dir_index is not None and step_dir_index < len(path_parts) - 1:
+            # Get path relative to step directory
+            relative_parts = path_parts[step_dir_index + 1 :]
+            relative_path = "/".join(relative_parts)
+        else:
+            # Fallback to just filename
+            relative_path = filename
+
         file_url = get_file_link(relative_path)
         return f"  - {emoji} [{filename}]({file_url})"
     except Exception:
@@ -246,7 +254,7 @@ def _get_step_emoji(status: str) -> str:
 
 
 def _format_step_file_links(
-    step_name: str, file_paths: list[str], get_file_link: callable, base_dir: str
+    step_name: str, file_paths: list[str], get_file_link: callable
 ) -> list[str]:
     """Format file paths as clickable links using the provided callback.
 
@@ -254,7 +262,6 @@ def _format_step_file_links(
         step_name: Name of the step
         file_paths: List of relative file paths
         get_file_link: Callback function to generate URLs from file paths
-        base_dir: Base directory name for constructing relative paths
 
     Returns:
         List of formatted link strings
@@ -271,10 +278,7 @@ def _format_step_file_links(
     for file_type, files in file_groups.items():
         for file_path in files:
             try:
-                # Construct proper relative path using base_dir
-                full_relative_path = f"{base_dir}/{file_path}"
-
-                file_url = get_file_link(full_relative_path)
+                file_url = get_file_link(file_path)
                 file_name = _get_display_name(file_path)
                 emoji = "📊" if file_type == "visualization" else "📄"
                 lines.append(f"  - {emoji} [{file_name}]({file_url})")
