@@ -8,7 +8,7 @@ import yaml
 from projects.core.library import config as core_config
 from projects.core.library import env
 from projects.llm_d.orchestration import ci as llmd_ci
-from projects.llm_d.orchestration import runtime_config, test_phase
+from projects.llm_d.orchestration import prepare_phase, runtime_config, test_phase
 from projects.llm_d.orchestration.render_inference_service import (
     render_inference_service_from_parts,
 )
@@ -196,6 +196,114 @@ def test_ci_init_uses_project_default_preset_when_no_explicit_preset_is_provided
     assert runtime_config.get_deployment_profile_name() == "approximate-prefix-cache"
     # Default preset "smoke" enables the short benchmark
     assert runtime_config.get_benchmark_keys() == ["short"]
+
+
+def test_list_vaults_only_includes_rhoai_rc_vault_for_custom_catalog_runs() -> None:
+    _init_project_config()
+
+    core_config.project.set_config("platform.rhoai.custom_catalog.enabled", False)
+    assert "psap-rhoai-rc" not in llmd_ci.list_vaults()
+
+    core_config.project.set_config("platform.rhoai.custom_catalog.enabled", True)
+    assert "psap-rhoai-rc" in llmd_ci.list_vaults()
+
+
+def test_prepare_phase_adds_rhoai_rc_vault_only_for_custom_catalog_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _init_project_config()
+
+    calls: list[dict[str, object]] = []
+
+    def _fake_init(**kwargs):
+        calls.append(kwargs)
+
+    monkeypatch.setattr(llmd_ci.vault, "init", _fake_init)
+
+    core_config.project.set_config("platform.rhoai.custom_catalog.enabled", False)
+    llmd_ci.init_vaults_for_phase("prepare")
+
+    core_config.project.set_config("platform.rhoai.custom_catalog.enabled", True)
+    llmd_ci.init_vaults_for_phase("prepare")
+
+    assert "psap-rhoai-rc" not in calls[0]["optional_vaults"]
+    assert "psap-rhoai-rc" in calls[1]["optional_vaults"]
+
+
+def test_prepare_rhoai_operator_runs_registry_setup_before_custom_catalog_deployment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _init_project_config()
+
+    platform = {
+        "operators": {
+            "rhcl-operator": {
+                "package": "rhcl-operator",
+                "namespace": "openshift-operators",
+                "source": "redhat-operators",
+                "channel": "stable",
+            },
+            "rhods-operator": {
+                "package": "rhods-operator",
+                "namespace": "redhat-ods-operator",
+                "source": "redhat-operators",
+                "channel": "stable-3.x",
+            },
+        },
+        "rhoai": {
+            "custom_catalog": {
+                "enabled": True,
+                "name": "rhoai-catalog-dev",
+                "namespace": "openshift-marketplace",
+                "image": "quay.io/rhoai/rhoai-fbc-fragment@sha256:test",
+                "display_name": "Red Hat OpenShift AI",
+                "publisher": "RHOAI Development Catalog",
+                "pull_secret": {"vault": {"name": "psap-rhoai-rc"}},
+            },
+            "namespace": "redhat-ods-applications",
+            "datasciencecluster_name": "default-dsc",
+            "components": ["kserve"],
+            "required_crds_before_dsc": ["datascienceclusters.datasciencecluster.opendatahub.io"],
+            "required_crds_after_dsc": ["llminferenceservices.serving.kserve.io"],
+        },
+    }
+
+    calls: list[object] = []
+
+    monkeypatch.setattr(prepare_phase.runtime_config, "get_platform_config", lambda: platform)
+    monkeypatch.setattr(prepare_phase, "prepare_rhcl_operator", lambda: calls.append("rhcl"))
+    monkeypatch.setattr(
+        prepare_phase,
+        "prepare_rhoai_pull_secret",
+        lambda custom_catalog: calls.append(("pull", custom_catalog["image"])),
+    )
+    monkeypatch.setattr(prepare_phase, "apply_rhoai_icsp", lambda: calls.append("icsp"))
+    monkeypatch.setattr(
+        prepare_phase,
+        "deploy_rhoai_custom_catalog",
+        lambda rhoai: calls.append(("catalog", rhoai["custom_catalog"]["publisher"])),
+    )
+    monkeypatch.setattr(
+        prepare_phase,
+        "ensure_operator_subscription",
+        lambda operator_spec: calls.append(("sub", operator_spec["package"])),
+    )
+    monkeypatch.setattr(
+        prepare_phase,
+        "ensure_required_crds_before_dsc",
+        lambda: calls.append("crds"),
+    )
+
+    prepare_phase.prepare_rhoai_operator()
+
+    assert calls == [
+        "rhcl",
+        ("pull", "quay.io/rhoai/rhoai-fbc-fragment@sha256:test"),
+        "icsp",
+        ("catalog", "RHOAI Development Catalog"),
+        ("sub", "rhods-operator"),
+        "crds",
+    ]
 
 
 def test_model_and_deployment_profile_accept_yaml_list_strings() -> None:

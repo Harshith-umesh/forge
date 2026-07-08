@@ -36,6 +36,32 @@ def init():
     run.init()
     config.init(Path(__file__).parent)
 
+def list_vaults() -> list[str]:
+    """List all vaults (includes both mandatory and optional)."""
+    all_vaults = vault.phase_vault_list_all()
+    if config.project.get_config("platform.rhoai.custom_catalog.enabled", False):
+        return [*all_vaults, "psap-rhoai-rc"]
+
+    return all_vaults
+
+
+def init_vaults_for_phase(phase: str) -> None:
+    mandatory_vaults = [
+        *config.project.get_config("vaults.all", []),
+        *config.project.get_config(f"vaults.{phase}", []),
+    ]
+    optional_vaults = [
+        *config.project.get_config("vaults.all-optional", []),
+        *config.project.get_config(f"vaults.{phase}-optional", []),
+    ]
+
+    if phase == "prepare" and config.project.get_config(
+        "platform.rhoai.custom_catalog.enabled", False
+    ):
+        optional_vaults = [*optional_vaults, "psap-rhoai-rc"]
+
+    vault.init(mandatory_vaults=mandatory_vaults, optional_vaults=optional_vaults)
+
 
 @click.group(cls=ci_lib.HelpfulGroup)
 @click.pass_context
@@ -49,7 +75,7 @@ def main(ctx):
         logger.info("No need to initialize the vaults for the resolve step")
         return
 
-    vault.phase_vault_init(ctx.invoked_subcommand)
+    init_vaults_for_phase(ctx.invoked_subcommand)
 
 
 @main.command()
@@ -113,6 +139,7 @@ def post_cleanup(ctx) -> int:
 main.add_command(
     create_fournos_resolve_entrypoint(
         vault_list_funcs=[
+            list_vaults,
             vault.phase_vault_list_all,
             caliper_export_list_vaults,
             caliper_export_list_optional_vaults,

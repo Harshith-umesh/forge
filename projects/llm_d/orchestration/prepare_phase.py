@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
+import tempfile
+import time
+from pathlib import Path
 from typing import Any
 
 from projects.cluster.toolbox.bootstrap_lws_operator import main as bootstrap_lws_operator
@@ -35,6 +39,11 @@ from projects.rhoai.toolbox.wait_datasciencecluster_ready import (
 )
 
 logger = logging.getLogger(__name__)
+RHOAI_PULL_SECRET_NAMESPACE = "openshift-config"
+RHOAI_PULL_SECRET_NAME = "pull-secret"
+RHOAI_REGISTRY = "quay.io/rhoai"
+RHOAI_PULL_SECRET_CONTENT = "rhoai_rc.secret"
+RHOAI_ICSP_MANIFEST = Path(__file__).resolve().parent / "manifests" / "quay-registry-icsp.yaml"
 
 
 def operator_spec_by_package(platform: dict[str, Any], package: str) -> dict[str, Any]:
@@ -102,7 +111,128 @@ def deploy_rhoai_custom_catalog(*, rhoai: dict) -> int:
         catalog_namespace=custom_catalog["namespace"],
         catalog_image=custom_catalog["image"],
         display_name=custom_catalog.get("display_name", custom_catalog["name"]),
+        publisher=custom_catalog.get("publisher", ""),
     )
+
+
+def _custom_catalog_pull_secret_path(custom_catalog: dict[str, Any]) -> Path:
+    pull_secret = custom_catalog.get("pull_secret", {})
+    vault_spec = pull_secret.get("vault", {})
+    vault_name = vault_spec.get("name")
+    content_name = vault_spec.get("content", RHOAI_PULL_SECRET_CONTENT)
+
+    if not vault_name:
+        raise RuntimeError("RHOAI custom catalog pull_secret.vault.name is required")
+
+    secret_path = vault.get_vault_content_path(vault_name, content_name)
+    if secret_path is None:
+        raise RuntimeError(
+            f"RHOAI pull secret content '{content_name}' was not found in vault '{vault_name}'"
+        )
+
+    return secret_path
+
+
+def _decode_pull_secret(secret_data: dict[str, Any]) -> str:
+    encoded = secret_data.get("data", {}).get(".dockerconfigjson")
+    if not encoded:
+        raise RuntimeError("openshift-config/pull-secret is missing .dockerconfigjson data")
+
+    return base64.b64decode(encoded).decode("utf-8")
+
+
+def wait_for_rhoai_pull_secret_ready(
+    *, timeout_seconds: int = 600, poll_interval_seconds: int = 15
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    last_error: str | None = None
+
+    while time.monotonic() < deadline:
+        try:
+            secret = oc_get_json(
+                "secret",
+                name=RHOAI_PULL_SECRET_NAME,
+                namespace=RHOAI_PULL_SECRET_NAMESPACE,
+            )
+            decoded = _decode_pull_secret(secret)
+            if RHOAI_REGISTRY not in decoded:
+                raise RuntimeError(f"{RHOAI_REGISTRY} not yet present in pull secret")
+
+            mcp_status = oc(
+                "get",
+                "mcp",
+                "-o",
+                r'jsonpath={.items[*].status.conditions[?(@.type=="Updated")].status}',
+                check=False,
+                log_stdout=False,
+                log_stderr=False,
+            ).stdout.strip()
+            if "False" in mcp_status:
+                raise RuntimeError("machine config pools are still updating")
+
+            logger.info(
+                "RHOAI pull secret now contains %s and machine config pools are updated",
+                RHOAI_REGISTRY,
+            )
+            return
+        except RuntimeError as exc:
+            last_error = str(exc)
+            logger.info("Waiting for RHOAI pull secret propagation: %s", last_error)
+            time.sleep(poll_interval_seconds)
+
+    raise RuntimeError(
+        f"Timed out waiting for {RHOAI_REGISTRY} pull secret propagation: {last_error}"
+    )
+
+
+def prepare_rhoai_pull_secret(custom_catalog: dict[str, Any]) -> None:
+    pull_secret_path = _custom_catalog_pull_secret_path(custom_catalog)
+    auth_basic = pull_secret_path.read_text(encoding="utf-8").strip()
+    if not auth_basic:
+        raise RuntimeError(f"RHOAI pull secret file is empty: {pull_secret_path}")
+
+    current_secret = oc_get_json(
+        "secret",
+        name=RHOAI_PULL_SECRET_NAME,
+        namespace=RHOAI_PULL_SECRET_NAMESPACE,
+    )
+    decoded_secret = _decode_pull_secret(current_secret)
+
+    if RHOAI_REGISTRY in decoded_secret:
+        logger.info("RHOAI registry %s already present in cluster pull secret", RHOAI_REGISTRY)
+        return
+
+    logger.info("Adding %s to cluster pull secret from %s", RHOAI_REGISTRY, pull_secret_path)
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as temp_file:
+        temp_file.write(decoded_secret)
+        temp_path = Path(temp_file.name)
+
+    try:
+        oc(
+            "registry",
+            "login",
+            f"--registry={RHOAI_REGISTRY}",
+            f"--auth-basic={auth_basic}",
+            "--to",
+            str(temp_path),
+        )
+        oc(
+            "set",
+            "data",
+            f"secret/{RHOAI_PULL_SECRET_NAME}",
+            "-n",
+            RHOAI_PULL_SECRET_NAMESPACE,
+            f"--from-file=.dockerconfigjson={temp_path}",
+        )
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+    wait_for_rhoai_pull_secret_ready()
+
+
+def apply_rhoai_icsp() -> None:
+    logger.info("Applying RHOAI ICSP manifest: %s", RHOAI_ICSP_MANIFEST)
+    oc("apply", "-f", str(RHOAI_ICSP_MANIFEST))
 
 
 def rhoai_operator_spec(
@@ -179,7 +309,11 @@ def prepare_gpu_operator() -> None:
 
 def prepare_rhoai_operator() -> None:
     platform = runtime_config.get_platform_config()
+    custom_catalog = platform["rhoai"]["custom_catalog"]
     prepare_rhcl_operator()
+    if custom_catalog["enabled"]:
+        prepare_rhoai_pull_secret(custom_catalog)
+        apply_rhoai_icsp()
     deploy_rhoai_custom_catalog(rhoai=platform["rhoai"])
     operator_spec = operator_spec_by_package(platform, "rhods-operator")
     operator_spec = rhoai_operator_spec(rhoai=platform["rhoai"], operator_spec=operator_spec)

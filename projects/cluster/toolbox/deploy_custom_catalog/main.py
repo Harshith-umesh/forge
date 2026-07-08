@@ -17,6 +17,7 @@ def run(
     catalog_image: str,
     *,
     display_name: str = "",
+    publisher: str = "",
 ) -> int:
     """
     Deploy a CatalogSource from a custom index image and wait for it to become READY.
@@ -26,6 +27,7 @@ def run(
         catalog_namespace: Namespace where the CatalogSource will be deployed
         catalog_image: Index image backing the CatalogSource
         display_name: Optional human-friendly label for logs
+        publisher: Optional publisher label for the CatalogSource
     """
 
     execute_tasks(locals())
@@ -39,6 +41,7 @@ def setup_directories(args, ctx):
     shell.mkdir("src")
     shell.mkdir("artifacts")
     ctx.display_name = args.display_name or args.catalog_source_name
+    ctx.publisher = args.publisher or ""
     return f"Prepared directories for {ctx.display_name}"
 
 
