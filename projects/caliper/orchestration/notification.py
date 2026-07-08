@@ -39,12 +39,13 @@ class PostprocessResult:
 
 
 def format_postprocess_status_notification(
-    result: PostprocessResult, get_file_link: callable | None = None
+    result: PostprocessResult, base_dir: str, get_file_link: callable | None = None
 ) -> str:
     """Format postprocess result into notification text with file links.
 
     Args:
         result: Structured PostprocessResult object
+        base_dir: Base directory for relative path construction
         get_file_link: Optional callback function that takes a file path and returns a URL.
                       Signature: get_file_link(file_path: str) -> str
 
@@ -90,35 +91,18 @@ def format_postprocess_status_notification(
                     and hasattr(step_result, "output_file")
                     and step_result.output_file
                 ):
-                    try:
-                        # Extract relative path from absolute path (assume output_file contains relative path from output directory)
-                        from pathlib import Path
-
-                        output_path = Path(step_result.output_file)
-                        # For KPI files, typically just the filename is what we want
-                        relative_path = output_path.name
-                        file_url = get_file_link(relative_path)
-                        lines.append(f"  - 📄 [{relative_path}]({file_url})")
-                    except Exception:
-                        filename = step_result.output_file.split("/")[-1]
-                        lines.append(f"  - 📄 {filename}")
+                    lines.append(
+                        _create_file_link(step_result.output_file, "📄", get_file_link, base_dir)
+                    )
 
                 elif (
                     step_name == "kpis_to_csv"
                     and hasattr(step_result, "output_file")
                     and step_result.output_file
                 ):
-                    try:
-                        # Extract relative path for CSV file
-                        from pathlib import Path
-
-                        output_path = Path(step_result.output_file)
-                        relative_path = output_path.name
-                        file_url = get_file_link(relative_path)
-                        lines.append(f"  - 📊 [{relative_path}]({file_url})")
-                    except Exception:
-                        filename = step_result.output_file.split("/")[-1]
-                        lines.append(f"  - 📊 {filename}")
+                    lines.append(
+                        _create_file_link(step_result.output_file, "📊", get_file_link, base_dir)
+                    )
 
                 elif step_name == "artifacts_to_ai_data":
                     if hasattr(step_result, "ai_eval_dir") and step_result.ai_eval_dir:
@@ -159,27 +143,87 @@ def format_postprocess_status_notification(
                         lines.append(f"  - 📤 Exported to: `{step_result.exported_path}`")
 
                     # Show uploaded files count
-                    if hasattr(step_result, "uploaded_files") and step_result.uploaded_files is not None:
+                    if (
+                        hasattr(step_result, "uploaded_files")
+                        and step_result.uploaded_files is not None
+                    ):
                         lines.append(f"  - ✅ Uploaded files: {step_result.uploaded_files}")
 
                     # Show failed files count if > 0
-                    if hasattr(step_result, "failed_files") and step_result.failed_files and step_result.failed_files > 0:
+                    if (
+                        hasattr(step_result, "failed_files")
+                        and step_result.failed_files
+                        and step_result.failed_files > 0
+                    ):
                         lines.append(f"  - ❌ Failed files: {step_result.failed_files}")
 
                 elif step_name == "s3_import":
                     # Show downloaded files count
-                    if hasattr(step_result, "downloaded_files") and step_result.downloaded_files is not None:
+                    if (
+                        hasattr(step_result, "downloaded_files")
+                        and step_result.downloaded_files is not None
+                    ):
                         lines.append(f"  - ⬇️ Downloaded files: {step_result.downloaded_files}")
 
                     # Show failed files count if > 0
-                    if hasattr(step_result, "failed_files") and step_result.failed_files and step_result.failed_files > 0:
+                    if (
+                        hasattr(step_result, "failed_files")
+                        and step_result.failed_files
+                        and step_result.failed_files > 0
+                    ):
                         lines.append(f"  - ❌ Failed files: {step_result.failed_files}")
+
+                elif step_name == "analyse_kpis":
+                    # Show analysis output file
+                    if hasattr(step_result, "output_file") and step_result.output_file:
+                        lines.append(
+                            _create_file_link(
+                                step_result.output_file, "📊", get_file_link, base_dir
+                            )
+                        )
+
+                    # Show baseline files count if available
+                    if (
+                        hasattr(step_result, "baseline_files_count")
+                        and step_result.baseline_files_count is not None
+                    ):
+                        lines.append(
+                            f"  - 📈 Baseline files analyzed: {step_result.baseline_files_count}"
+                        )
 
             # Add general file links if available (for visualize step, etc.)
             if step_result.paths and get_file_link:
-                lines.extend(_format_step_file_links(step_name, step_result.paths, get_file_link))
+                lines.extend(
+                    _format_step_file_links(step_name, step_result.paths, get_file_link, base_dir)
+                )
 
     return "\n".join(lines) if lines else ""
+
+
+def _create_file_link(output_file: str, emoji: str, get_file_link: callable, base_dir: str) -> str:
+    """Create a file link line for notifications.
+
+    Args:
+        output_file: Path to the output file
+        emoji: Emoji to use for the file type
+        get_file_link: Function to generate file URLs
+        base_dir: Base directory name for constructing relative paths
+
+    Returns:
+        Formatted line with file link or plain filename
+    """
+    try:
+        from pathlib import Path
+
+        output_path = Path(output_file)
+        filename = output_path.name
+        # Construct relative path with base_dir
+        relative_path = f"{base_dir}/{filename}"
+        file_url = get_file_link(relative_path)
+        return f"  - {emoji} [{filename}]({file_url})"
+    except Exception:
+        filename = output_file.split("/")[-1]
+        return f"  - {emoji} {filename}"
 
 
 def _get_step_emoji(status: str) -> str:
@@ -195,7 +239,7 @@ def _get_step_emoji(status: str) -> str:
 
 
 def _format_step_file_links(
-    step_name: str, file_paths: list[str], get_file_link: callable
+    step_name: str, file_paths: list[str], get_file_link: callable, base_dir: str
 ) -> list[str]:
     """Format file paths as clickable links using the provided callback.
 
@@ -203,6 +247,7 @@ def _format_step_file_links(
         step_name: Name of the step
         file_paths: List of relative file paths
         get_file_link: Callback function to generate URLs from file paths
+        base_dir: Base directory name for constructing relative paths
 
     Returns:
         List of formatted link strings
@@ -219,7 +264,10 @@ def _format_step_file_links(
     for file_type, files in file_groups.items():
         for file_path in files:
             try:
-                file_url = get_file_link(file_path)
+                # Construct proper relative path using base_dir
+                full_relative_path = f"{base_dir}/{file_path}"
+
+                file_url = get_file_link(full_relative_path)
                 file_name = _get_display_name(file_path)
                 emoji = "📊" if file_type == "visualization" else "📄"
                 lines.append(f"  - {emoji} [{file_name}]({file_url})")

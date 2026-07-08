@@ -17,10 +17,15 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from projects.caliper.engine.load_plugin import load_plugin
-from projects.caliper.engine.parse import run_parse
-from projects.caliper.engine.plugin_config import resolve_plugin_module_string
-from projects.caliper.engine.visualize import run_visualize
+from projects.caliper.cli.orchestration_entrypoints import (
+    analyze_kpis_entrypoint,
+    get_kpi_functions_entrypoint,
+    load_plugin_entrypoint,
+    parse_entrypoint,
+    run_visualize_entrypoint,
+    s3_export_entrypoint,
+    s3_import_entrypoint,
+)
 from projects.caliper.orchestration.postprocess_config import (
     CaliperOrchestrationPostprocessConfig,
 )
@@ -32,17 +37,13 @@ from projects.caliper.orchestration.postprocess_outcome import (
 from projects.caliper.orchestration.step_logging import (
     cleanup_step_logging,
     log_ai_data_command,
-    log_analyze_command,
     log_artifacts_to_kpis_command,
     log_kpis_to_csv_command,
     log_parse_command,
     log_s3_export_command,
-    log_s3_import_command,
     log_visualize_command,
     step_logging,
 )
-from projects.caliper.orchestration.subcommands.s3_export import run_s3_export
-from projects.caliper.orchestration.subcommands.s3_import import run_s3_import
 from projects.core.library import env
 
 logger = logging.getLogger(__name__)
@@ -94,18 +95,7 @@ def _resolve_visualize_config_path(
     return (env.FORGE_HOME / p).resolve()
 
 
-def _load_plugin(
-    postprocess_config: CaliperOrchestrationPostprocessConfig,
-    *,
-    tree_root: Path,
-    manifest_path: Path | None,
-) -> tuple[str, object]:
-    mod_str, _manifest = resolve_plugin_module_string(
-        base_dir=tree_root,
-        postprocess_config=manifest_path,
-        cli_plugin=postprocess_config.plugin_module,
-    )
-    return mod_str, load_plugin(mod_str)
+# _load_plugin function removed - now using load_plugin_entrypoint
 
 
 def _transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
@@ -124,8 +114,6 @@ def _transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
     """
     from collections import defaultdict
 
-    from projects.caliper.engine.kpi.decorators import get_kpi_functions
-
     if not kpis:
         return {"schema_version": "2", "tests": []}
 
@@ -133,11 +121,7 @@ def _transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
     tests_data = defaultdict(lambda: {"kpis": [], "labels": {}, "metadata": {}})
 
     # Get KPI function metadata from the plugin module
-    try:
-        plugin_module = __import__(model.plugin_module, fromlist=[""])
-        kpi_functions = get_kpi_functions(plugin_module)
-    except (ImportError, AttributeError):
-        kpi_functions = {}
+    kpi_functions = get_kpi_functions_entrypoint(model.plugin_module)
 
     for kpi in kpis:
         run_id = kpi.get("run_id", "unknown")
@@ -306,39 +290,7 @@ def _run_artifacts_to_kpis(
         return {"status": "failed", "error": str(e), "completed_at": time.time()}
 
 
-def _run_s3_import(
-    postprocess_config,
-    output_dir: Path,
-) -> dict[str, Any]:
-    """Import historical data from S3."""
-
-    if not postprocess_config.s3.import_.enabled:
-        return {"status": "disabled", "reason": "s3_import disabled", "completed_at": time.time()}
-
-    try:
-        # Log command to reproduce this step
-        s3_parent_config = postprocess_config.s3
-        s3_config = postprocess_config.s3.import_
-        import_prefix = (
-            f"{s3_parent_config.instance}/{s3_parent_config.directory}"
-            if s3_parent_config.instance and s3_parent_config.directory
-            else ""
-        )
-        import_dir = output_dir / s3_config.output_dir
-
-        log_s3_import_command(
-            bucket=s3_parent_config.bucket,
-            prefix=import_prefix,
-            output_dir=import_dir,
-        )
-
-        result = run_s3_import(postprocess_config, output_dir)
-        logger.info(f"S3 import result: {result}")
-        return result
-
-    except Exception as e:
-        logger.exception("S3 import failed")
-        return {"status": "failed", "error": str(e), "completed_at": time.time()}
+# _run_s3_import function removed - now using s3_import_entrypoint directly
 
 
 def _run_artifacts_to_ai_data(
@@ -566,95 +518,6 @@ def _run_kpis_to_csv(
         return {"status": "failed", "error": str(e), "completed_at": time.time()}
 
 
-def _stub_analyze(
-    postprocess_config: CaliperOrchestrationPostprocessConfig,
-    plugin_module: str,
-    base_dir: Path,
-    output_dir: Path,
-    current_kpis_file: Path,
-) -> dict[str, Any]:
-    if not postprocess_config.analyze.enabled:
-        return {"status": "disabled", "reason": "analyze disabled"}
-
-    current_kpis_path = current_kpis_file
-
-    # Determine paths for analysis
-    analyze_config = postprocess_config.analyze
-
-    # Historical KPIs directory path
-    historical_kpis_dir = Path(analyze_config.historical_kpis)
-    if not historical_kpis_dir.is_absolute():
-        historical_kpis_dir = output_dir / historical_kpis_dir
-
-    # Output path for analysis results
-    output_path = output_dir / analyze_config.output
-
-    try:
-        # Check if required files exist
-        if not current_kpis_path.exists():
-            return {
-                "status": "failed",
-                "error": f"Current KPI file not found: {current_kpis_path}",
-                "completed_at": time.time(),
-            }
-
-        if not historical_kpis_dir.exists():
-            return {
-                "status": "failed",
-                "error": f"Historical KPIs directory not found: {historical_kpis_dir}",
-                "completed_at": time.time(),
-            }
-
-        # Log command to reproduce this step
-        log_analyze_command(
-            base_dir=base_dir,
-            plugin_module=plugin_module,
-            current_kpis_path=current_kpis_path,
-            historical_kpis_dir=historical_kpis_dir,
-            output_path=output_path,
-        )
-
-        # Load plugin for KPI definitions
-        from projects.caliper.engine.load_plugin import load_plugin
-
-        plugin = load_plugin(plugin_module)
-
-        # Run hierarchical KPI analysis using core engine
-        from projects.caliper.engine.kpi.analyze import (
-            analyze_kpis_against_baselines,
-            find_baseline_kpis,
-        )
-
-        # Load all baseline KPIs from historical directory
-        baseline_kpis = find_baseline_kpis(historical_kpis_dir)
-        logger.info(
-            f"Running KPI analysis: {current_kpis_path} vs {len(baseline_kpis)} baseline files"
-        )
-        result = analyze_kpis_against_baselines(
-            current_kpis_path=current_kpis_path,
-            baseline_kpis=baseline_kpis,
-            output_path=output_path,
-            plugin=plugin,
-        )
-
-        if result["status"] == "success":
-            logger.info(
-                f"Analysis completed: {result['regressions_count']} regressions, {result['improvements_count']} improvements"
-            )
-
-        return result
-
-    except Exception as e:
-        error_msg = f"{type(e).__name__}: {str(e)}"
-        logger.exception(f"Analysis step failed with {error_msg}")
-        return {
-            "status": "failed",
-            "error": error_msg,
-            "error_type": type(e).__name__,
-            "completed_at": time.time(),
-        }
-
-
 class CaliperPostprocessOrchestrator:
     """
     Orchestrator for running Caliper postprocessing steps in sequence.
@@ -827,8 +690,11 @@ class CaliperPostprocessOrchestrator:
 
         with step_logging("caliper_parse", self.step_logs_dir):
             try:
-                mod_str, plugin = _load_plugin(
-                    self.config, tree_root=self.tree_root, manifest_path=self.manifest_path
+                model, mod_str = parse_entrypoint(
+                    self.config,
+                    self.tree_root,
+                    self.manifest_path,
+                    use_cache=not self.config.parse.no_cache,
                 )
 
                 # Log command to reproduce this step
@@ -837,13 +703,6 @@ class CaliperPostprocessOrchestrator:
                     plugin_module=mod_str,
                     use_cache=not self.config.parse.no_cache,
                     manifest_path=self.manifest_path,
-                )
-
-                model = run_parse(
-                    base_dir=self.tree_root,
-                    plugin_module=mod_str,
-                    plugin=plugin,
-                    use_cache=not self.config.parse.no_cache,
                 )
 
                 self._add_step(
@@ -876,7 +735,7 @@ class CaliperPostprocessOrchestrator:
 
         with step_logging("caliper_visualize", self.step_logs_dir):
             try:
-                mod_str, plugin = _load_plugin(
+                mod_str, plugin = load_plugin_entrypoint(
                     self.config, tree_root=self.tree_root, manifest_path=self.manifest_path
                 )
 
@@ -905,7 +764,7 @@ class CaliperPostprocessOrchestrator:
                     use_cache=not self.config.parse.no_cache,
                 )
 
-                paths = run_visualize(
+                paths = run_visualize_entrypoint(
                     base_dir=self.tree_root,
                     plugin_module=mod_str,
                     plugin=plugin,
@@ -968,14 +827,14 @@ class CaliperPostprocessOrchestrator:
                 output_dir.mkdir(parents=True, exist_ok=True)
 
             # Load plugin and model
-            mod_str, plugin = _load_plugin(
-                self.config, tree_root=self.tree_root, manifest_path=self.manifest_path
-            )
-            model = run_parse(
-                base_dir=self.tree_root,
-                plugin_module=mod_str,
-                plugin=plugin,
+            model, mod_str = parse_entrypoint(
+                self.config,
+                self.tree_root,
+                self.manifest_path,
                 use_cache=not self.config.parse.no_cache,
+            )
+            mod_str, plugin = load_plugin_entrypoint(
+                self.config, tree_root=self.tree_root, manifest_path=self.manifest_path
             )
 
             # KPI JSON generation
@@ -1144,7 +1003,7 @@ class CaliperPostprocessOrchestrator:
 
         with step_logging("caliper_s3_import", self.step_logs_dir):
             try:
-                result = _run_s3_import(self.config, output_dir)
+                result = s3_import_entrypoint(self.config, output_dir)
                 self._add_step("s3_import", result)
                 logger.info(f"S3 import result: {result}")
 
@@ -1198,7 +1057,9 @@ class CaliperPostprocessOrchestrator:
 
         with step_logging("caliper_analyse_kpis", self.step_logs_dir):
             try:
-                result = _stub_analyze(self.config, plugin_module, self.tree_root, output_dir, Path(current_kpis_file))
+                result = analyze_kpis_entrypoint(
+                    self.config, plugin_module, self.tree_root, output_dir, Path(current_kpis_file)
+                )
                 self._add_step("analyse_kpis", result)
                 logger.info(f"KPI analysis result: {result}")
 
@@ -1253,7 +1114,7 @@ class CaliperPostprocessOrchestrator:
                     include_ai_data=include_ai_data_actual,
                 )
 
-                result = run_s3_export(self.config, output_dir, ai_data_dir)
+                result = s3_export_entrypoint(self.config, output_dir, ai_data_dir)
                 self._add_step("s3_export", result)
 
                 if result.get("status") == "success":

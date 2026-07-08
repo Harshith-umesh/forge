@@ -62,7 +62,7 @@ def s3_export_cmd(
     """Upload postprocess artifacts to S3."""
     try:
         # Import S3 functions
-        from projects.caliper.orchestration.subcommands.s3_export import run_s3_export
+        from projects.caliper.cli.s3_export import run_s3_export
         from projects.core.library import vault as vault_lib
 
         # Initialize vault system

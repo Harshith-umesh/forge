@@ -456,28 +456,6 @@ def log_s3_export_command(
     )
 
 
-def log_analyse_kpis_command(
-    current_kpi_file: Path,
-    historical_dir: Path,
-    output_file: Path,
-) -> None:
-    """Log the CLI command to reproduce the KPI analysis step."""
-    command = f'caliper analyse-kpis --current "{current_kpi_file}" --historical-dir "{historical_dir}" --output "{output_file}"'
-
-    step_args = {
-        "current_kpi_file": str(current_kpi_file),
-        "historical_dir": str(historical_dir),
-        "output_file": str(output_file),
-    }
-
-    _log_command_banner(
-        "caliper_analyse_kpis",
-        command,
-        "Analyze current KPIs against historical data",
-        step_args,
-    )
-
-
 def log_analyze_command(
     base_dir: Path,
     plugin_module: str,
@@ -486,6 +464,22 @@ def log_analyze_command(
     output_path: Path | None = None,
 ) -> None:
     """Log the CLI command to reproduce the analyze step."""
+
+    command = f'caliper kpi analyze --current "{current_kpis_path}" --baseline-dir "{historical_kpis_dir}" --output "{output_path}" --plugin "{plugin_module}"'
+
+    step_args = {
+        "current_kpis_path": str(current_kpis_path) if current_kpis_path else None,
+        "historical_kpis_dir": str(historical_kpis_dir) if historical_kpis_dir else None,
+        "output_path": str(output_path) if output_path else None,
+        "plugin_module": plugin_module,
+    }
+
+    _log_command_banner(
+        "caliper_analyze_kpis",
+        command,
+        "Analyze current KPIs against historical data for regression detection",
+        step_args,
+    )
     # Use the correct command structure: caliper kpi analyze
     command = "caliper kpi analyze"
 

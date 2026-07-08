@@ -20,7 +20,7 @@ from projects.caliper.cli.commands import (
     parse_cmd,
     visualize_cmd,
 )
-from projects.caliper.orchestration.subcommands.s3_export_cli import s3_export_cmd
+from projects.caliper.cli.s3_export_cli import s3_export_cmd
 
 
 def parse_mlflow_url(url: str) -> dict[str, str | None]:

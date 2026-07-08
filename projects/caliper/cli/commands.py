@@ -7,8 +7,10 @@ from pathlib import Path
 
 import click
 
+from projects.caliper.cli.s3_import import run_s3_import
 from projects.caliper.engine.ai_eval import run_ai_eval_export
 from projects.caliper.engine.file_export.artifacts_export_run import run_artifacts_export
+from projects.caliper.engine.file_export.artifacts_import_run import run_artifacts_import
 from projects.caliper.engine.file_export.mlflow_config import load_mlflow_config_yaml
 from projects.caliper.engine.kpi.analyze import run_analyze
 from projects.caliper.engine.kpi.generate import run_kpi_generate
@@ -19,7 +21,6 @@ from projects.caliper.engine.load_plugin import load_plugin
 from projects.caliper.engine.parse import run_parse
 from projects.caliper.engine.plugin_config import resolve_plugin_module_string
 from projects.caliper.engine.visualize import run_visualize
-from projects.caliper.orchestration.subcommands.s3_import import run_s3_import
 
 
 def _exit_with_help(ctx: click.Context, msg: str, code: int = 1) -> None:
@@ -639,6 +640,21 @@ def artifacts_import(
     verbose: bool,
 ) -> None:
     """Download artifacts from MLflow."""
-    # Simple implementation - would need full MLflow integration
-    click.echo("MLflow artifact import not fully implemented", err=True)
-    sys.exit(1)
+
+    try:
+        run_artifacts_import(
+            mlflow_run_id=mlflow_run_id,
+            mlflow_url=mlflow_url,
+            output_dir=output_dir,
+            mlflow_tracking_uri=mlflow_tracking_uri,
+            artifact_path=artifact_path,
+            timeout=timeout,
+            mlflow_insecure_tls=mlflow_insecure_tls,
+            mlflow_experiment=mlflow_experiment,
+            mlflow_workspace=mlflow_workspace,
+            mlflow_secrets_path=mlflow_secrets_path,
+            verbose=verbose,
+        )
+    except Exception as e:  # noqa: BLE001
+        click.echo(f"artifacts import failed: {e}", err=True)
+        sys.exit(3)

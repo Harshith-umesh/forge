@@ -161,18 +161,6 @@ class CaliperOrchestrationS3ImportSection(BaseModel):
     )
 
 
-class CaliperOrchestrationAnalyseKpisSection(BaseModel):
-    """Analyze current KPIs against historical data."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    enabled: bool = False
-    output: str | None = Field(
-        default="kpi_analysis.json",
-        description="Output filename for KPI analysis results; relative paths resolve under the post-processing artifact dir.",
-    )
-
-
 class CaliperOrchestrationS3ExportSection(BaseModel):
     """Export postprocess artifacts to AWS S3."""
 
@@ -289,9 +277,6 @@ class CaliperOrchestrationPostprocessConfig(BaseModel):
         default_factory=CaliperOrchestrationAnalyzeSection
     )
     s3: CaliperOrchestrationS3Section = Field(default_factory=CaliperOrchestrationS3Section)
-    analyse_kpis: CaliperOrchestrationAnalyseKpisSection = Field(
-        default_factory=CaliperOrchestrationAnalyseKpisSection
-    )
 
     @model_validator(mode="after")
     def _visualize_needs_selector(self) -> Self:
