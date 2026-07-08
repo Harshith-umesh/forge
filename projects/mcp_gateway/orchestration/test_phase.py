@@ -232,14 +232,15 @@ def _cleanup_servers(*, namespace: str, num_servers: int, mock_server: str) -> N
     deploy_mock_servers.cleanup_servers(namespace=namespace)
 
     api_group = cfg.get_api_group()
-    scale_out_label = "experiment=scale-out"
+    from projects.agentic_tools.mcp.toolbox.deploy_mock_servers.main import MOCK_MCP_LABEL
+
     run_oc(
         "delete",
         f"mcpserverregistrations.{api_group},httproute",
         "-n",
         namespace,
         "-l",
-        scale_out_label,
+        MOCK_MCP_LABEL,
         "--wait=false",
         "--ignore-not-found=true",
         check=False,
@@ -250,7 +251,7 @@ def _cleanup_servers(*, namespace: str, num_servers: int, mock_server: str) -> N
         "-n",
         "istio-system",
         "-l",
-        scale_out_label,
+        MOCK_MCP_LABEL,
         "--wait=false",
         "--ignore-not-found=true",
         check=False,
