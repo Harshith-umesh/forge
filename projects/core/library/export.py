@@ -259,6 +259,31 @@ def _get_execution_engine_config() -> str | None:
         return None
 
 
+def _check_job_shutdown_status() -> dict[str, Any] | None:
+    """Check if the job has been aborted via spec.shutdown field."""
+    try:
+        metadata_dir = ci_lib.get_ci_metadata_dir()
+        fournos_fjob_path = metadata_dir / "fournos_fjob.yaml"
+        if not fournos_fjob_path.exists():
+            return None
+
+        with open(fournos_fjob_path, encoding="utf-8") as f:
+            fjob_data = yaml.safe_load(f)
+
+        shutdown_value = fjob_data.get("spec", {}).get("shutdown")
+        if shutdown_value:
+            return {
+                "shutdown_detected": True,
+                "shutdown_value": shutdown_value,
+                "is_aborted": shutdown_value.lower() == "stop",
+            }
+
+        return {"shutdown_detected": False, "shutdown_value": None, "is_aborted": False}
+    except Exception as e:
+        logger.warning(f"Failed to check job shutdown status: {e}")
+        return None
+
+
 def _extract_artifact_links(status: dict[str, Any]) -> tuple[list[str], str | None]:
     """Extract artifact links and MLflow URL from status."""
     artifact_links = []
@@ -408,6 +433,12 @@ def _process_caliper_postprocess_status(
 
             if not status_data:
                 continue
+
+            # Check for job shutdown/abort status
+            shutdown_status = _check_job_shutdown_status()
+            if shutdown_status:
+                # Add shutdown information to status data
+                status_data["job_shutdown"] = shutdown_status
 
             # Import notification functions from caliper
             from projects.caliper.orchestration.notification import (
@@ -604,8 +635,14 @@ def _build_enhanced_notification(
     """Build enhanced notification with fournos job config and artifact links."""
     fjob_project, fjob_args_str = _get_project_and_args(project)
 
-    # Check all step statuses for overall status emoji (takes priority over finish_reason)
-    status_emoji = _get_overall_status_from_steps()
+    # Check for job shutdown first (takes highest priority)
+    shutdown_status = _check_job_shutdown_status()
+    if shutdown_status and shutdown_status.get("is_aborted"):
+        status_emoji = "🛑"  # Abort status overrides everything
+    else:
+        # Check all step statuses for overall status emoji (takes priority over finish_reason)
+        status_emoji = _get_overall_status_from_steps()
+
     base_status = f"<strong>{status_emoji} Execution of `{fjob_project}` {fjob_args_str} {status_emoji}</strong>"
     notification_parts = [base_status, "---"]
 

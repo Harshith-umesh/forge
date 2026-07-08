@@ -36,6 +36,7 @@ class PostprocessResult:
     final_status: str | None = None
     steps: dict[str, PostprocessStepResult] | None = None
     test_phase: dict[str, Any] | None = None
+    job_shutdown: dict[str, Any] | None = None
 
 
 def format_postprocess_status_notification(
@@ -57,9 +58,15 @@ def format_postprocess_status_notification(
 
     lines = []
 
-    # Check overall status
+    # Check for job abort/shutdown status first
+    if result.job_shutdown and result.job_shutdown.get("is_aborted"):
+        shutdown_value = result.job_shutdown.get("shutdown_value", "Stop")
+        lines.append(f"🛑 **JOB ABORTED** - `spec.shutdown={shutdown_value}`")
+        lines.append("")
+
+    # Check overall status (keep unchanged regardless of abort status)
     status_emoji = "✅" if result.success else "❌"
-    lines.append(f"**Post-processing Status {status_emoji}**")
+    lines.append(f"**Post-processing Status** {status_emoji}")
 
     # Add steps information if available, sorted by completion time
     if result.steps:
@@ -369,4 +376,5 @@ def parse_postprocess_result(status_data: dict) -> PostprocessResult | None:
         final_status=status_data.get("final_status"),
         steps=steps_dict if steps_dict else None,
         test_phase=status_data.get("test_phase"),
+        job_shutdown=status_data.get("job_shutdown"),
     )
