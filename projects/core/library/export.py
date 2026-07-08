@@ -573,7 +573,8 @@ def _process_postprocess_status(mlflow_run_url: str | None = None) -> list[str]:
         try:
             _process_caliper_postprocess_status(step_dir, postprocess_links, mlflow_run_url)
         except Exception as e:
-            logger.warning(f"Failed to process postprocess status for {step_dir.name}: {e}")
+            logger.error(f"Failed to process postprocess status for {step_dir.name}: {e}")
+            raise
 
     return postprocess_links
 
@@ -825,6 +826,9 @@ def caliper_export_entrypoint(_ctx, artifact_directory: Path | None):
     notification_provider = getattr(getattr(_ctx, "obj", None), "notification_provider", None)
 
     status = None
+    export_failed = False
+    notification_failed = False
+
     try:
         status = run_caliper_orchestration_export(artifact_directory=artifact_directory)
         logger.info("Export status:\n" + yaml.dump(status, indent=4))
@@ -834,9 +838,9 @@ def caliper_export_entrypoint(_ctx, artifact_directory: Path | None):
 
     except Exception as e:
         logger.error(f"Export failed: {e}")
+        export_failed = True
         # Create failure status for notification
         status = {"success": False, "error": str(e), "backends": {}}
-        raise  # Re-raise to maintain error behavior
 
     finally:
         # Send completion notifications regardless of success/failure
@@ -846,14 +850,18 @@ def caliper_export_entrypoint(_ctx, artifact_directory: Path | None):
                     status, notification_provider=notification_provider
                 )
                 if not notification_success:
-                    raise RuntimeError("Notification sending failed - export cannot continue")
+                    logger.error("Notification sending failed")
+                    notification_failed = True
             except Exception as e:
                 logger.exception(f"Failed to send notifications: {e}")
-                raise  # Re-raise to fail the export operation
+                notification_failed = True
 
         # Re-upload run.log with complete content (includes notification output)
         _try_update_run_log(status)
 
+    # Return proper exit code
+    if export_failed or notification_failed:
+        return 1
     return 0
 
 
