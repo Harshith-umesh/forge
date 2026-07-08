@@ -132,7 +132,7 @@ def send_notification(status: dict[str, Any], notification_provider=None) -> boo
             notification_file = Path(env.ARTIFACT_DIR) / "NOTIFICATION.html"
             with open(notification_file, "w", encoding="utf-8") as f:
                 f.write(notification_status)
-            logger.info("Wrote export notification file")
+            logger.info(f"Wrote export notification file {notification_file}")
         else:
             logger.warning("ARTIFACT_DIR not available, skipping notification file")
     except Exception as e:
@@ -424,8 +424,8 @@ def _read_step_duration(step_dir: Path) -> str:
 def _process_caliper_postprocess_status(
     step_dir: Path, step_log_links: list[str], mlflow_run_url: str | None = None
 ) -> None:
-    """Search for and process caliper_postprocess_status.yaml files in step directory."""
-    status_files = list(step_dir.glob("**/caliper_postprocess_status.yaml"))
+    """Search for and process postprocess_status.yaml files in step directory."""
+    status_files = list(step_dir.glob("**/postprocess_status.yaml"))
 
     for status_file in status_files:
         try:
@@ -610,27 +610,31 @@ def _read_step_exit_status(
 
 def _check_postprocess_warnings(step_dir: Path) -> StepStatus:
     """Check for warning status in postprocess status file."""
-    try:
-        status_file = step_dir / "caliper_postprocess_status.yaml"
-        if not status_file.exists():
-            return StepStatus.SUCCESS  # No postprocess status, assume no warnings
 
-        with open(status_file, encoding="utf-8") as f:
-            status_data = yaml.safe_load(f)
+    status = StepStatus.SUCCESS  # No postprocess warning/error, assume no warnings
+    for status_file in step_dir.glob("**/postprocess_status.yaml"):
+        try:
+            with open(status_file, encoding="utf-8") as f:
+                status_data = yaml.safe_load(f)
+        except Exception:
+            logging.error(f"Failed to read {status_file} as yaml: {e}")
+            status = StepStatus.WARNING
+            continue
 
-        if not status_data or "steps" not in status_data:
-            return StepStatus.SUCCESS
+        if not status_data:
+            continue
 
-        # Check if any step has warning status
-        steps = status_data["steps"]
-        for step in steps:
-            for _step_name, step_data in step.items():
-                if isinstance(step_data, dict) and step_data.get("status") == "warning":
-                    return StepStatus.WARNING
+        # Check top-level success field for warning value
+        success_value = status_data.get("success")
+        if success_value == "warning":
+            logging.warning(f"Post-process warning detected in {status_file}, setting the WARNING flag")
+            status = StepStatus.WARNING
 
-        return StepStatus.SUCCESS
-    except Exception:
-        return StepStatus.SUCCESS  # On error, assume no warnings
+        if success_value in ("failure", "error"):
+            logging.error(f"Post-process {success_value} detected, raising the FAILURE flag")
+            return StepStatus.FAILURE
+
+    return status
 
 
 def _get_overall_status_from_steps() -> str:
@@ -652,24 +656,24 @@ def _get_overall_status_from_steps() -> str:
             if not run_log.exists():
                 continue
 
-            emoji, status = _read_step_exit_status(step_dir, current_step_name)
+            _emoji, status = _read_step_exit_status(step_dir, current_step_name)
+
             step_statuses.append(status)
 
-            # Check for postprocess warnings in this step
-            if status == StepStatus.SUCCESS:  # Only check if step succeeded
-                postprocess_status = _check_postprocess_warnings(step_dir)
-                if postprocess_status == StepStatus.WARNING:
-                    step_statuses.append(StepStatus.WARNING)
+            # Check for postprocess warnings in this step (always check, regardless of exit status)
+            postprocess_status = _check_postprocess_warnings(step_dir)
+            step_statuses.append(postprocess_status)
+
 
         # Priority: failure > ongoing > warning > unknown > success
         if StepStatus.FAILURE in step_statuses:
             return "🔴"  # Any failure = red
-        elif StepStatus.ONGOING in step_statuses:
-            return "🟢"  # Ongoing --> success
         elif StepStatus.WARNING in step_statuses:
             return "🟠"  # Warning = orange
         elif StepStatus.UNKNOWN in step_statuses:
             return "🟠"  # Unknown = orange
+        elif StepStatus.ONGOING in step_statuses:
+            return "🟢"  # Ongoing --> success
         else:
             return "🟢"  # All successful = green
 

@@ -52,7 +52,7 @@ def generate_caliper_reports_index(
     html_files = []
     data_files = []
 
-    ignored_files = {index_filename, "caliper_postprocess_status.yaml"}
+    ignored_files = {index_filename, "postprocess_status.yaml"}
 
     for html_file in sorted(output_dir.glob("*.html")):
         if html_file.name not in ignored_files:

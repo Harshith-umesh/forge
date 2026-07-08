@@ -364,7 +364,7 @@ def run_orchestration_postprocess(
     if status_base is None:
         return result
 
-    status_path = Path(status_base) / "caliper_postprocess_status.yaml"
+    status_path = Path(status_base) / "postprocess_status.yaml"
     try:
         status_path.parent.mkdir(parents=True, exist_ok=True)
         status_path.write_text(

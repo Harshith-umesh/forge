@@ -17,14 +17,14 @@ def convert_status_yaml_to_html(
     """Convert a Caliper postprocess status YAML file to HTML report.
 
     Args:
-        yaml_file_path: Path to the caliper_postprocess_status.yaml file
+        yaml_file_path: Path to the postprocess_status.yaml file
         output_html_path: Path for the output HTML file. If None, uses same directory as YAML with .html extension
 
     Returns:
         Path to the generated HTML file
 
     Example:
-        convert_status_yaml_to_html("~/kserve/caliper/caliper_postprocess_status.yaml")
+        convert_status_yaml_to_html("~/kserve/caliper/postprocess_status.yaml")
     """
     yaml_path = Path(yaml_file_path).expanduser().resolve()
 
