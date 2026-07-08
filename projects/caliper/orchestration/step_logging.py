@@ -392,16 +392,36 @@ def log_s3_import_command(
     bucket: str,
     prefix: str,
     output_dir: Path,
+    include_kpis_json: bool = False,
+    include_kpis_csv: bool = False,
+    include_ai_data: bool = False,
+    max_downloads: int = 50,
 ) -> None:
     """Log the CLI command to reproduce the S3 import step."""
-    command = (
+    command_parts = [
         f'caliper s3-import --bucket "{bucket}" --prefix "{prefix}" --output-dir "{output_dir}"'
-    )
+    ]
+
+    # Add include flags if they are True (since default is False)
+    if include_kpis_json:
+        command_parts.append("--include-kpis-json")
+    if include_kpis_csv:
+        command_parts.append("--include-kpis-csv")
+    if include_ai_data:
+        command_parts.append("--include-ai-data")
+    if max_downloads != 50:
+        command_parts.append(f"--max-downloads {max_downloads}")
+
+    command = " ".join(command_parts)
 
     step_args = {
         "bucket": bucket,
         "prefix": prefix,
         "output_dir": str(output_dir),
+        "include_kpis_json": include_kpis_json,
+        "include_kpis_csv": include_kpis_csv,
+        "include_ai_data": include_ai_data,
+        "max_downloads": max_downloads,
     }
 
     _log_command_banner(
@@ -415,7 +435,6 @@ def log_s3_import_command(
 def log_s3_export_command(
     bucket: str,
     export_path: str,
-    output_dir: Path,
     kpis_file: Path | None = None,
     csv_file: Path | None = None,
     ai_data_dir: Path | None = None,
@@ -434,6 +453,11 @@ def log_s3_export_command(
     if analysis_file:
         command_parts.append(f'--analysis-file "{analysis_file}"')
 
+    # Parse export_path once and use for both command and step_args
+    instance = None
+    directory = None
+    prefix = None
+
     if export_path:
         # Parse the export path to get prefix, instance, directory
         parts = export_path.split("/")
@@ -450,13 +474,19 @@ def log_s3_export_command(
 
     step_args = {
         "bucket": bucket,
-        "export_path": export_path,
-        "output_dir": str(output_dir),
         "kpis_file": str(kpis_file) if kpis_file else None,
         "csv_file": str(csv_file) if csv_file else None,
         "ai_data_dir": str(ai_data_dir) if ai_data_dir else None,
         "analysis_file": str(analysis_file) if analysis_file else None,
     }
+
+    # Add command line parameters to step_args (same values used in command)
+    if instance:
+        step_args["instance"] = instance
+    if directory:
+        step_args["directory"] = directory
+    if prefix:
+        step_args["prefix"] = prefix
 
     _log_command_banner(
         "caliper_s3_export",

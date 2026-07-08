@@ -68,26 +68,47 @@ def s3_import_entrypoint(
         return {"status": "disabled", "reason": "s3_import disabled", "completed_at": time.time()}
 
     try:
-        from projects.caliper.cli.s3_import import run_s3_import
+        from projects.caliper.cli.s3_import import run_s3_import_with_explicit_params
         from projects.caliper.orchestration.step_logging import log_s3_import_command
 
         # Log command to reproduce this step
         s3_parent_config = postprocess_config.s3
         s3_config = postprocess_config.s3.import_
-        import_prefix = (
-            f"{s3_parent_config.instance}/{s3_parent_config.directory}"
-            if s3_parent_config.instance and s3_parent_config.directory
-            else ""
-        )
+
+        # Build import prefix using instance + s3.prefix + directory
+        import_prefix_parts = []
+        if s3_parent_config.instance:
+            import_prefix_parts.append(s3_parent_config.instance)
+        if s3_parent_config.prefix:
+            import_prefix_parts.append(s3_parent_config.prefix.rstrip("/"))
+        if s3_parent_config.directory:
+            import_prefix_parts.append(s3_parent_config.directory)
+
+        import_prefix = "/".join(import_prefix_parts) if import_prefix_parts else ""
         import_dir = output_dir / s3_config.output_dir
 
         log_s3_import_command(
             bucket=s3_parent_config.bucket,
             prefix=import_prefix,
             output_dir=import_dir,
+            include_kpis_json=s3_config.include_kpis_json,
+            include_kpis_csv=s3_config.include_kpis_csv,
+            include_ai_data=s3_config.include_ai_data,
+            max_downloads=s3_config.max_downloads,
         )
 
-        result = run_s3_import(postprocess_config, output_dir)
+        # Use explicit parameters instead of config dict
+        result = run_s3_import_with_explicit_params(
+            bucket=s3_parent_config.bucket,
+            prefix=import_prefix,
+            output_dir=import_dir,
+            vault=s3_parent_config.vault.name,
+            aws_credentials_file=s3_parent_config.vault.aws_credentials_file,
+            include_kpis_json=s3_config.include_kpis_json,
+            include_kpis_csv=s3_config.include_kpis_csv,
+            include_ai_data=s3_config.include_ai_data,
+            max_downloads=s3_config.max_downloads,
+        )
         return result
 
     except Exception as e:
@@ -118,12 +139,12 @@ def s3_export_entrypoint(
         ai_data_dir=ai_data_dir,
         analysis_file=analysis_file,
         bucket=s3_parent_config.bucket,
-        prefix=s3_config.prefix,
+        prefix=s3_parent_config.prefix,
         instance=s3_parent_config.instance,
         directory=s3_parent_config.directory,
         upload_id=s3_config.upload_id,
-        vault=s3_parent_config.vault,
-        aws_credentials_file=s3_parent_config.aws_credentials_file,
+        vault=s3_parent_config.vault.name,
+        aws_credentials_file=s3_parent_config.vault.aws_credentials_file,
         dry_run=s3_config.dry_run,
     )
 

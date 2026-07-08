@@ -144,7 +144,7 @@ class CaliperOrchestrationS3ImportSection(BaseModel):
         description="Directory name for imported data; relative paths resolve under the post-processing artifact dir.",
     )
     include_kpis_json: bool = Field(
-        default=True,
+        default=False,
         description="Whether to download kpis.json files.",
     )
     include_kpis_csv: bool = Field(
@@ -193,6 +193,21 @@ class CaliperOrchestrationS3ExportSection(BaseModel):
     )
 
 
+class CaliperOrchestrationS3VaultSection(BaseModel):
+    """Vault configuration for AWS S3 credentials."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(
+        default="psap-forge-aws-s3-export",
+        description="Vault name containing AWS credentials.",
+    )
+    aws_credentials_file: str = Field(
+        default="aws.credentials",
+        description="File name within vault containing AWS credentials.",
+    )
+
+
 class CaliperOrchestrationS3Section(BaseModel):
     """AWS S3 operations for import and export of postprocess artifacts."""
 
@@ -210,13 +225,13 @@ class CaliperOrchestrationS3Section(BaseModel):
         default=None,
         description="Directory identifier for S3 organization (required when import or export is enabled).",
     )
-    vault: str = Field(
-        default="psap-forge-aws-s3-export",
-        description="Vault name containing AWS credentials.",
+    prefix: str | None = Field(
+        default=None,
+        description="S3 prefix for organizing uploads and imports.",
     )
-    aws_credentials_file: str = Field(
-        default="aws.credentials",
-        description="File name within vault containing AWS credentials.",
+    vault: CaliperOrchestrationS3VaultSection = Field(
+        default_factory=CaliperOrchestrationS3VaultSection,
+        description="Vault configuration for AWS credentials.",
     )
     import_: CaliperOrchestrationS3ImportSection = Field(
         default_factory=CaliperOrchestrationS3ImportSection, alias="import"

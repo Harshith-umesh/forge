@@ -205,27 +205,35 @@ def filter_objects_for_download(objects: list[dict], s3_config) -> list[dict]:
     return filtered_objects
 
 
-def run_s3_import(
-    postprocess_config,
+def run_s3_import_with_explicit_params(
+    *,
+    bucket: str,
+    prefix: str,
     output_dir: Path,
+    vault: str,
+    aws_credentials_file: str,
+    include_kpis_json: bool = True,
+    include_kpis_csv: bool = False,
+    include_ai_data: bool = False,
+    max_downloads: int = 50,
 ) -> dict[str, Any]:
-    """S3 import functionality for historical data.
+    """S3 import functionality for historical data with explicit parameters.
 
     Args:
-        postprocess_config: Postprocess configuration object
-        output_dir: Path to postprocess output directory
+        bucket: S3 bucket name
+        prefix: S3 prefix path (full path including s3.prefix/instance/directory)
+        output_dir: Path to output directory for downloaded files
+        vault: Vault name containing AWS credentials
+        aws_credentials_file: AWS credentials file within vault
+        include_kpis_json: Whether to include KPI JSON files
+        include_kpis_csv: Whether to include KPI CSV files
+        include_ai_data: Whether to include AI data files
+        max_downloads: Maximum number of files to download
 
     Returns:
         Import status dictionary
     """
     start_time = time.time()
-
-    if not postprocess_config.s3.import_.enabled:
-        return {
-            "status": "disabled",
-            "reason": "s3_import disabled",
-            "completed_at": time.time(),
-        }
 
     if not BOTO3_AVAILABLE:
         return {
@@ -235,38 +243,23 @@ def run_s3_import(
         }
 
     try:
-        s3_parent_config = postprocess_config.s3
-        s3_config = postprocess_config.s3.import_
-        bucket = s3_parent_config.bucket
-        instance = s3_parent_config.instance
-        directory = s3_parent_config.directory
-        max_downloads = s3_config.max_downloads
-
-        # Construct the S3 prefix path: {instance}/{directory}/
-        s3_path_components = []
-        if instance:
-            s3_path_components.append(instance)
-        if directory:
-            s3_path_components.append(directory)
-
-        import_s3_prefix = "/".join(s3_path_components) + "/" if s3_path_components else ""
+        # Ensure prefix ends with '/' for S3 operations
+        import_s3_prefix = prefix.rstrip("/") + "/" if prefix else ""
 
         logger.info(f"Starting S3 import from bucket: {bucket}")
         logger.info(f"S3 import path: s3://{bucket}/{import_s3_prefix}")
+
         # Get AWS credentials for download
-        credentials_path = get_aws_credentials(
-            s3_parent_config.vault, s3_parent_config.aws_credentials_file
-        )
+        credentials_path = get_aws_credentials(vault, aws_credentials_file)
         if not credentials_path:
             return {
                 "status": "failed",
-                "error": f"Could not load AWS credentials from vault {s3_parent_config.vault}",
+                "error": f"Could not load AWS credentials from vault {vault}",
                 "completed_at": time.time(),
             }
 
         # Create output directory
-        import_dir = output_dir / s3_config.output_dir
-        import_dir.mkdir(parents=True, exist_ok=True)
+        output_dir.mkdir(parents=True, exist_ok=True)
 
         # Create S3 client
         try:
@@ -290,19 +283,27 @@ def run_s3_import(
             if len(objects) > 5:
                 logger.info(f"  ... and {len(objects) - 5} more objects")
 
-        # Filter objects based on configuration
+        # Filter objects based on parameters
         logger.info(
-            f"Filtering with: include_kpis_json={s3_config.include_kpis_json}, "
-            f"include_kpis_csv={s3_config.include_kpis_csv}, include_ai_data={s3_config.include_ai_data}"
+            f"Filtering with: include_kpis_json={include_kpis_json}, "
+            f"include_kpis_csv={include_kpis_csv}, include_ai_data={include_ai_data}"
         )
-        download_objects = filter_objects_for_download(objects, s3_config)
+
+        # Create filter config object for the filter function
+        class FilterConfig:
+            def __init__(self):
+                self.include_kpis_json = include_kpis_json
+                self.include_kpis_csv = include_kpis_csv
+                self.include_ai_data = include_ai_data
+
+        download_objects = filter_objects_for_download(objects, FilterConfig())
         logger.info(f"After filtering: {len(download_objects)} objects match the import filters")
 
         if not download_objects:
             logger.warning("No objects match the import filters")
             return {
-                "status": "empty",
-                "reason": "no objects match import filters",
+                "status": "warning",
+                "message": f"no KPI files found matching filters in s3://{bucket}/{import_s3_prefix}",
                 "completed_at": time.time(),
             }
 
@@ -320,7 +321,7 @@ def run_s3_import(
             else:
                 relative_key = s3_key
 
-            local_path = import_dir / relative_key
+            local_path = output_dir / relative_key
 
             download_plan.append(
                 {
@@ -365,20 +366,22 @@ def run_s3_import(
             f"S3 import completed: {downloaded_count}/{len(download_objects)} files downloaded successfully from {target_url}"
         )
 
-        # Determine final status
+        # Determine final status and message
+        message = None
         if failed_downloads:
             status = "partial_success" if downloaded_count > 0 else "failed"
+        elif downloaded_count == 0:
+            status = "warning"
+            message = f"no files downloaded from s3://{bucket}/{import_s3_prefix}"
         else:
             status = "success"
 
-        return {
+        result = {
             "status": status,
             "bucket": bucket,
-            "instance": instance,
-            "directory": directory,
             "import_s3_prefix": import_s3_prefix,
             "import_path": f"s3://{bucket}/{import_s3_prefix}",
-            "import_dir": str(import_dir),
+            "output_dir": str(output_dir),
             "downloaded_files": downloaded_count,
             "failed_files": len(failed_downloads),
             "total_files": len(download_objects),
@@ -386,6 +389,12 @@ def run_s3_import(
             "completed_at": time.time(),
             "duration": round(time.time() - start_time),
         }
+
+        # Add message if there is one
+        if message:
+            result["message"] = message
+
+        return result
 
     except Exception as e:
         logger.exception("S3 import failed")
