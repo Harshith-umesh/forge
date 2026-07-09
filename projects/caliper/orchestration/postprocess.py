@@ -1234,10 +1234,7 @@ class CaliperPostprocessOrchestrator:
 
                 # Log the CLI command to reproduce this step
                 s3_parent_config = self.config.s3
-                export_config = s3_parent_config.export
                 export_path = f"{s3_parent_config.instance}/{s3_parent_config.directory}"
-                if export_config.prefix:
-                    export_path += f"/{export_config.prefix}"
 
                 log_s3_export_command(
                     bucket=s3_parent_config.bucket,

@@ -400,12 +400,9 @@ def log_s3_import_command(
 ) -> None:
     """Log the CLI command to reproduce the S3 import step."""
     # Build prefix from instance and directory
-    prefix_parts = []
-    if instance:
-        prefix_parts.append(instance)
-    if directory:
-        prefix_parts.append(directory)
-    prefix = "/".join(prefix_parts) if prefix_parts else ""
+    from projects.caliper.cli.s3_export import build_s3_prefix
+
+    prefix = build_s3_prefix(instance=instance, directory=directory, trailing_slash=False)
 
     command_parts = [
         f'caliper s3-import --bucket "{bucket}" --prefix "{prefix}" --output-dir "{output_dir}"'

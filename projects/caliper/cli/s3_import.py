@@ -221,7 +221,7 @@ def run_s3_import_with_explicit_params(
 
     Args:
         bucket: S3 bucket name
-        prefix: S3 prefix path (full path including s3.prefix/instance/directory)
+        prefix: S3 prefix path (full path including instance/directory)
         output_dir: Path to output directory for downloaded files
         vault: Vault name containing AWS credentials
         aws_credentials_file: AWS credentials file within vault

@@ -76,13 +76,13 @@ def s3_import_entrypoint(
         s3_config = postprocess_config.s3.import_
 
         # Build import prefix using instance + directory
-        import_prefix_parts = []
-        if s3_parent_config.instance:
-            import_prefix_parts.append(s3_parent_config.instance)
-        if s3_parent_config.directory:
-            import_prefix_parts.append(s3_parent_config.directory)
+        from projects.caliper.cli.s3_export import build_s3_prefix
 
-        import_prefix = "/".join(import_prefix_parts) if import_prefix_parts else ""
+        import_prefix = build_s3_prefix(
+            instance=s3_parent_config.instance,
+            directory=s3_parent_config.directory,
+            trailing_slash=False,
+        )
         import_dir = output_dir / s3_config.output_dir
 
         log_s3_import_command(
