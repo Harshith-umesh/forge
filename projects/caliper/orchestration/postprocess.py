@@ -92,6 +92,7 @@ def _resolve_paths(
 
 def _resolve_visualize_output_dir(
     raw: str | None,
+    base_dir: Path | None = None,
 ) -> Path:
     if raw is None or not str(raw).strip():
         raise ValueError(
@@ -100,7 +101,18 @@ def _resolve_visualize_output_dir(
     p = Path(raw).expanduser()
     if p.is_absolute():
         return p.resolve()
-    raise ValueError("caliper.postprocess.visualize.output_dir must be an absolute path")
+
+    # Handle relative paths by making them relative to base_dir (defaults to env.ARTIFACT_DIR)
+    if base_dir is None:
+        base_dir = env.ARTIFACT_DIR
+
+    if base_dir is None:
+        raise ValueError(
+            "caliper.postprocess.visualize.output_dir must be an absolute path when no base directory is available"
+        )
+
+    resolved_path = (base_dir / p).resolve()
+    return resolved_path
 
 
 def _resolve_visualize_config_path(
@@ -838,9 +850,14 @@ class CaliperPostprocessOrchestrator:
 
                 if self.visualize_output_dir is not None:
                     output_dir = self.visualize_output_dir.expanduser().resolve()
+                    logger.info(f"Using explicit visualize output directory: {output_dir}")
                 else:
                     output_dir = _resolve_visualize_output_dir(
                         self.config.visualize.output_dir,
+                        base_dir=env.ARTIFACT_DIR,
+                    )
+                    logger.info(
+                        f"Resolved visualize output directory from config '{self.config.visualize.output_dir}': {output_dir}"
                     )
 
                 # Log command to reproduce this step
@@ -881,12 +898,20 @@ class CaliperPostprocessOrchestrator:
                         # If path is not under output_dir, keep as-is
                         relative_paths.append(str(path))
 
+                # Calculate relative output_dir path from base_directory
+                try:
+                    relative_output_dir = str(output_dir.relative_to(env.ARTIFACT_DIR))
+                except ValueError:
+                    # If output_dir is not under ARTIFACT_DIR, use absolute path
+                    relative_output_dir = str(output_dir)
+
                 self._add_step(
                     "visualize",
                     {
                         "status": "success",
                         "plugin_module": mod_str,
                         "output_files": relative_paths,
+                        "output_dir": relative_output_dir,
                         "completed_at": time.time(),
                     },
                     log_file,
