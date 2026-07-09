@@ -623,7 +623,6 @@ def artifacts_export(
     type=click.Path(path_type=Path, exists=True),
     default=None,
 )
-@click.option("-v", "--verbose", is_flag=True)
 @click.pass_context
 def artifacts_import(
     ctx: click.Context,
@@ -637,7 +636,6 @@ def artifacts_import(
     mlflow_experiment: str | None,
     mlflow_workspace: str | None,
     mlflow_secrets_path: Path | None,
-    verbose: bool,
 ) -> None:
     """Download artifacts from MLflow."""
 
@@ -653,8 +651,7 @@ def artifacts_import(
             mlflow_experiment=mlflow_experiment,
             mlflow_workspace=mlflow_workspace,
             mlflow_secrets_path=mlflow_secrets_path,
-            verbose=verbose,
         )
     except Exception as e:  # noqa: BLE001
-        click.echo(f"artifacts import failed: {e}", err=True)
+        click.echo(f"❌ artifacts import failed: {e}", err=True)
         sys.exit(3)
