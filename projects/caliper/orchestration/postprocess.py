@@ -20,6 +20,7 @@ from pydantic import ValidationError
 
 from projects.caliper.cli.orchestration_entrypoints import (
     analyze_kpis_entrypoint,
+    export_kpis_to_csv_entrypoint,
     get_kpi_functions_entrypoint,
     load_plugin_entrypoint,
     parse_entrypoint,
@@ -528,11 +529,10 @@ def _run_kpis_to_csv(
             output_path=output_file,
         )
 
-        # Import and use the CSV exporter
-        from projects.guidellm.postprocess.guidellm.csv_export import quick_export_kpis_to_csv
-
-        result_path = quick_export_kpis_to_csv(
-            records=kpi_records,
+        # Use Caliper entrypoint for CSV export
+        result_path = export_kpis_to_csv_entrypoint(
+            plugin=plugin,
+            kpi_records=kpi_records,
             output_path=output_file,
             include_header_comments=postprocess_config.kpi.kpis_to_csv.include_header_comments,
         )

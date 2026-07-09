@@ -175,3 +175,20 @@ def analyze_kpis_entrypoint(
         output_dir=output_dir,
         current_kpis_file=current_kpis_file,
     )
+
+
+def export_kpis_to_csv_entrypoint(
+    plugin,
+    kpi_records: list[dict[str, Any]],
+    output_path: Path,
+    include_header_comments: bool = True,
+) -> str:
+    """Entrypoint for orchestration to export KPIs to CSV."""
+    from projects.caliper.engine.kpi.csv_export import export_kpis_to_csv
+
+    return export_kpis_to_csv(
+        plugin=plugin,
+        kpi_records=kpi_records,
+        output_path=output_path,
+        include_header_comments=include_header_comments,
+    )
