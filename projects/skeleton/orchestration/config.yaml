@@ -86,7 +86,6 @@ caliper:
       bucket: psap-dashboard-data
       instance: smoke
       directory: skeleton-dashboard
-      prefix: skeleton/
       vault:
         name: psap-forge-aws-s3-export
         aws_credentials_file: aws.credentials
