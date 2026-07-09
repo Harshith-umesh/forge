@@ -95,8 +95,17 @@ spec:
 
           git -C "$FORGE_HOME" fetch --quiet origin "$PULL_PULL_SHA"
           git -C "$FORGE_HOME" reset --hard FETCH_HEAD
+        elif [[ "$PULL_NUMBER" ]]; then
+          echo
+          echo "Updating to the HEAD commit of PR $PULL_NUMBER ..."
+          commit="refs/pull/$PULL_NUMBER/head"
+
+          git -C "$FORGE_HOME" fetch --quiet origin "$commit"
+          git -C "$FORGE_HOME" reset --hard FETCH_HEAD
+          export PULL_PULL_SHA="$(git rev-parse HEAD)"
+          echo "Setting PULL_PULL_SHA to '$PULL_PULL_SHA'"
         else
-          echo "No PULL_PULL_SHA, using the image commit"
+          echo "No PULL_PULL_SHA nor PULL_NUMBER, using the image commit"
         fi
         git show --quiet
 
