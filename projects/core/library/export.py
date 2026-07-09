@@ -616,7 +616,7 @@ def _check_postprocess_warnings(step_dir: Path) -> StepStatus:
         try:
             with open(status_file, encoding="utf-8") as f:
                 status_data = yaml.safe_load(f)
-        except Exception:
+        except Exception as e:
             logging.error(f"Failed to read {status_file} as yaml: {e}")
             status = StepStatus.WARNING
             continue
@@ -627,7 +627,9 @@ def _check_postprocess_warnings(step_dir: Path) -> StepStatus:
         # Check top-level success field for warning value
         success_value = status_data.get("success")
         if success_value == "warning":
-            logging.warning(f"Post-process warning detected in {status_file}, setting the WARNING flag")
+            logging.warning(
+                f"Post-process warning detected in {status_file}, setting the WARNING flag"
+            )
             status = StepStatus.WARNING
 
         if success_value in ("failure", "error"):
@@ -663,7 +665,6 @@ def _get_overall_status_from_steps() -> str:
             # Check for postprocess warnings in this step (always check, regardless of exit status)
             postprocess_status = _check_postprocess_warnings(step_dir)
             step_statuses.append(postprocess_status)
-
 
         # Priority: failure > ongoing > warning > unknown > success
         if StepStatus.FAILURE in step_statuses:
@@ -894,8 +895,7 @@ def caliper_export_entrypoint(_ctx, artifact_directory: Path | None):
                 logger.exception(f"Failed to send notifications: {e}")
                 notification_failed = True
 
-        # Re-upload run.log with complete content (includes notification output)
-        _try_update_run_log(status)
+        _update_final_artifacts(status)
 
     # Return proper exit code
     if export_failed or notification_failed:
@@ -903,16 +903,20 @@ def caliper_export_entrypoint(_ctx, artifact_directory: Path | None):
     return 0
 
 
-def _try_update_run_log(status: dict[str, Any] | None) -> None:
-    """Best-effort re-upload of run.log to MLflow after all post-export work is done."""
-    if not status:
+def _update_final_artifacts(export_status: dict[str, Any] | None) -> None:
+    """Update the final artifacts (run.log, notifications) to MLflow after all post-export work is done."""
+    if not export_status:
+        logger.warning("No export status received, cannot update the final artifacts")
         return
 
     try:
-        caliper_export = status.get("caliper_artifacts_export", {})
+        caliper_export = export_status.get("caliper_artifacts_export", {})
         backends = caliper_export.get("backends", {})
         mlflow_meta = backends.get("mlflow")
         if not isinstance(mlflow_meta, dict):
+            logger.warning(
+                "Export status don't have the mlflow backend, cannot update the final artifacts"
+            )
             return
 
         run_id = mlflow_meta.get("run_id")
@@ -923,18 +927,13 @@ def _try_update_run_log(status: dict[str, Any] | None) -> None:
             "caliper.export.from", None, print=False, warn=False
         )
         if not artifact_from:
-            return
-
-        artifact_dir = os.environ.get("ARTIFACT_DIR", "")
-        if not artifact_dir:
-            return
-
-        log_file = Path(artifact_dir) / "run.log"
-        if not log_file.is_file():
+            logger.warning(
+                "Export status don't have the caliper.export.from field, cannot update the final artifacts"
+            )
             return
 
         artifact_root = Path(artifact_from)
-        artifact_path = str(Path(artifact_dir).relative_to(artifact_root))
+        artifact_path = str(env.ARTIFACT_DIR.relative_to(artifact_root))
 
         tracking_uri = mlflow_meta.get("tracking_uri")
 
@@ -959,18 +958,67 @@ def _try_update_run_log(status: dict[str, Any] | None) -> None:
             if secrets_path and secrets_path.exists():
                 connection = load_mlflow_secrets_yaml(secrets_path)
 
-        from projects.caliper.engine.file_export.mlflow_backend import update_run_log_artifact
+        # Upload session artifacts using MLflow backend
 
-        update_run_log_artifact(
+        _update_artifacts(
             run_id=run_id,
-            log_file=log_file,
-            tracking_uri=tracking_uri,
+            artifact_dir=env.ARTIFACT_DIR,
             artifact_path=artifact_path,
+            tracking_uri=tracking_uri,
             connection=connection,
         )
-        logger.info("Updated run.log in MLflow run %s", run_id)
+        logger.info("Updated final artifacts in MLflow run %s", run_id)
     except Exception as e:
-        logger.warning("Failed to update run.log in MLflow: %s", e)
+        logger.warning("Failed to update final artifacts in MLflow: %s", e)
+
+
+def _update_artifacts(
+    *,
+    run_id: str,
+    artifact_dir: str,
+    artifact_path: str | None = None,
+    tracking_uri: str | None = None,
+    connection: dict[str, Any] | None = None,
+) -> None:
+    """Re-upload artifacts to an existing MLflow run.
+
+    Args:
+        run_id: The MLflow run ID to update
+        artifact_dir: Directory containing the artifacts to upload
+        artifact_path: Artifact path within the MLflow run (None for root)
+        tracking_uri: MLflow tracking URI
+        connection: MLflow connection configuration
+
+    Intended to be called after all post-export work (notifications, etc.) completes,
+    so uploaded files contain the full session output.
+    """
+    from pathlib import Path
+
+    artifact_dir_path = Path(artifact_dir)
+
+    # Collect files to upload
+    files_to_upload = []
+
+    # Check for run.log
+    log_file = artifact_dir_path / "run.log"
+    if log_file.is_file():
+        files_to_upload.append(log_file)
+
+    # Check for notification file
+    notif_file = artifact_dir_path / "NOTIFICATION.html"
+    if notif_file.is_file():
+        files_to_upload.append(notif_file)
+
+    # Upload files if any exist
+    if files_to_upload:
+        from projects.caliper.engine.file_export.mlflow_backend import update_artifacts
+
+        update_artifacts(
+            run_id=run_id,
+            files=dict.fromkeys(files_to_upload, artifact_path),
+            tracking_uri=tracking_uri,
+            connection=connection,
+        )
 
 
 def caliper_export_list_vaults() -> list[str]:
@@ -997,13 +1045,14 @@ def caliper_export_list_vaults() -> list[str]:
 
         if s3_export_enabled or s3_import_enabled:
             # Add the configured vault for S3 credentials (shared between import and export)
-            vault_name = s3_parent_config.get("vault")
+            vault_config = s3_parent_config.get("vault", {})
+            vault_name = vault_config.get("name") if isinstance(vault_config, dict) else vault_config
             if vault_name:
                 export_vaults.append(vault_name)
                 logger.info(f"Added S3 vault: {vault_name}")
             else:
                 logger.warning(
-                    "S3 import/export enabled but no vault specified in caliper.postprocess.s3.vault"
+                    "S3 import/export enabled but no vault specified in caliper.postprocess.s3.vault.name"
                 )
 
         # Check if MLflow export is enabled and add its vault
