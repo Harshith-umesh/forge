@@ -519,8 +519,26 @@ def trigger_config_review_for_ci(base_artifact_dir: Path, async_mode: bool = Fal
         base_artifact_dir: Path to the base artifact directory
         async_mode: If True, run the analysis in a background thread
     """
+    from projects.core.library import config
+
     # Check if agentic dependencies are available
     if not _is_agentic_dependencies_available():
+        return
+
+    # Check if agentic features are enabled (master switch)
+    agentic_enabled = config.project.get_config("agentic.enabled", False, print=False, warn=False)
+    if not agentic_enabled:
+        logger.debug("Agentic features disabled (agentic.enabled=false) - skipping config review")
+        return
+
+    # Check if config review is specifically enabled
+    config_review_enabled = config.project.get_config(
+        "agentic.config_review.enabled", False, print=False, warn=False
+    )
+    if not config_review_enabled:
+        logger.debug(
+            "Config review disabled (agentic.config_review.enabled=false) - skipping config review"
+        )
         return
 
     def _run_config_review():
