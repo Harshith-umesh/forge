@@ -59,12 +59,6 @@ def format_postprocess_status_notification(
 
     lines = []
 
-    # Check for job abort/shutdown status first
-    if result.job_shutdown and result.job_shutdown.get("is_aborted"):
-        shutdown_value = result.job_shutdown.get("shutdown_value", "Stop")
-        lines.append(f"🛑 **JOB ABORTED** - `spec.shutdown={shutdown_value}`")
-        lines.append("")
-
     # Check overall status (keep unchanged regardless of abort status)
     status_emoji = "✅" if result.success else "❌"
     lines.append(f"**Post-processing Status** {status_emoji}")

@@ -129,7 +129,7 @@ def send_notification(status: dict[str, Any], notification_provider=None) -> boo
     # Write notification to file for GitHub pickup
     try:
         if env.ARTIFACT_DIR:
-            notification_file = Path(env.ARTIFACT_DIR) / "NOTIFICATION.html"
+            notification_file = Path(env.ARTIFACT_DIR) / "NOTIFICATION-github.md"
             with open(notification_file, "w", encoding="utf-8") as f:
                 f.write(notification_status)
             logger.info(f"Wrote export notification file {notification_file}")
@@ -697,8 +697,15 @@ def _build_enhanced_notification(
         # Check all step statuses for overall status emoji (takes priority over finish_reason)
         status_emoji = _get_overall_status_from_steps()
 
-    base_status = f"<strong>{status_emoji} Execution of `{fjob_project}` {fjob_args_str} {status_emoji}</strong>"
-    notification_parts = [base_status, "---"]
+    base_status = f"**{status_emoji} Execution of `{fjob_project}` {fjob_args_str} {status_emoji}**"
+    notification_parts = [base_status]
+
+    # Add job abort message right below overall status if applicable
+    if shutdown_status and shutdown_status.get("is_aborted"):
+        shutdown_value = shutdown_status.get("shutdown_value", "Stop")
+        notification_parts.append(f"🛑 **JOB ABORTED** - `spec.shutdown={shutdown_value}`")
+
+    notification_parts.append("---")
 
     execution_engine_config = _get_execution_engine_config()
     if execution_engine_config:
@@ -1005,7 +1012,7 @@ def _update_artifacts(
         files_to_upload.append(log_file)
 
     # Check for notification file
-    notif_file = artifact_dir_path / "NOTIFICATION.html"
+    notif_file = artifact_dir_path / "NOTIFICATION-github.md"
     if notif_file.is_file():
         files_to_upload.append(notif_file)
 
@@ -1046,7 +1053,9 @@ def caliper_export_list_vaults() -> list[str]:
         if s3_export_enabled or s3_import_enabled:
             # Add the configured vault for S3 credentials (shared between import and export)
             vault_config = s3_parent_config.get("vault", {})
-            vault_name = vault_config.get("name") if isinstance(vault_config, dict) else vault_config
+            vault_name = (
+                vault_config.get("name") if isinstance(vault_config, dict) else vault_config
+            )
             if vault_name:
                 export_vaults.append(vault_name)
                 logger.info(f"Added S3 vault: {vault_name}")

@@ -177,7 +177,7 @@ def send_github_notification(
 
         # Write simplified notification to file for notification system pickup
         try:
-            notification_file = artifact_dir / "NOTIFICATION.html"
+            notification_file = artifact_dir / "NOTIFICATION-github.md"
             with open(notification_file, "w", encoding="utf-8") as f:
                 f.write(notification_status)
             logger.info(f"Created notification content for {job_type} job")

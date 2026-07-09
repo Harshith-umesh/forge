@@ -382,17 +382,17 @@ def get_common_message(finish_reason: str, status: str, get_link, get_italics, g
 """
 
     # Include fournos_launcher generated notification content
-    fournos_notification_html = artifact_dir / "NOTIFICATION.html"
-    if fournos_notification_html.exists():
+    fournos_notification_md = artifact_dir / "NOTIFICATION-github.md"
+    if fournos_notification_md.exists():
         try:
-            with open(fournos_notification_html, encoding="utf-8") as f:
+            with open(fournos_notification_md, encoding="utf-8") as f:
                 fournos_content = f.read().strip()
             if fournos_content:
                 message += f"""
 {fournos_content}
 """
         except Exception as e:
-            logger.warning("Failed to read NOTIFICATION.html: %s", e)
+            logger.warning("Failed to read NOTIFICATION-github.md: %s", e)
 
     if (var_over := ci_lib.get_ci_metadata_dir() / "pr_config.txt").exists():
         with open(var_over) as f:
