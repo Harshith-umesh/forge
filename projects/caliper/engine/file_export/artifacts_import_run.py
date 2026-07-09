@@ -79,6 +79,13 @@ def run_artifacts_import(
         except Exception as e:
             raise ValueError(f"Failed to parse MLflow URL: {e}") from e
 
+    # Validate workspace is set
+    if not mlflow_workspace:
+        raise ValueError(
+            "MLflow workspace is required but not found. "
+            "Make sure the MLflow URL contains workspace information or specify --mlflow-workspace"
+        )
+
     if not mlflow_run_id:
         raise ValueError("Either --from-mlflow or --from-mlflow-url is required")
 
