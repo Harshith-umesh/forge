@@ -183,11 +183,9 @@ def resolve_fournos_config(
 
     # Show the updated spec
     logger.info("Updated FournosJob spec:")
-    print("=" * 60)
-    print("Updated FournosJob spec:")
-    print("=" * 60)
-    print(yaml.dump({"spec": fjob_obj["spec"]}, default_flow_style=False, sort_keys=False))
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info(yaml.dump({"spec": fjob_obj["spec"]}, default_flow_style=False, sort_keys=False))
+    logger.info("=" * 60)
 
     if dry_run:
         logger.info("DRY RUN: Not applying changes to cluster")
