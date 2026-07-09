@@ -309,61 +309,41 @@ def _try_load_mlflow_secrets_from_vault() -> dict | None:
     secret_key = os.environ.get("PSAP_FORGE_MLFLOW_EXPORT_SECRET_KEY", DEFAULT_MLFLOW_SECRET_KEY)
 
     try:
-        from projects.core.library import config
         from projects.core.library import vault as vault_lib
 
         click.echo("  🏗️  Initializing caliper vault system...")
 
-        # Discover all caliper-related vaults from configuration (same logic as export system)
-        export_vaults = []
-
+        # Use the same vault listing functions as orchestration runs
         try:
-            # Check if S3 export or import is enabled in the project configuration
-            s3_parent_config = config.project.get_config("caliper.postprocess.s3", {})
-            s3_export_config = config.project.get_config("caliper.postprocess.s3.export", {})
-            s3_import_config = config.project.get_config("caliper.postprocess.s3.import", {})
+            from projects.core.library.export import (
+                caliper_export_list_optional_vaults,
+                caliper_export_list_vaults,
+            )
 
-            s3_export_enabled = s3_export_config.get("enabled", False)
-            s3_import_enabled = s3_import_config.get("enabled", False)
+            # Get mandatory caliper vaults (S3, MLflow export, etc.)
+            mandatory_vaults = caliper_export_list_vaults()
+            click.echo(f"  📊 Found mandatory vaults: {mandatory_vaults}")
 
-            if s3_export_enabled or s3_import_enabled:
-                # Add the configured vault for S3 credentials
-                vault_name = s3_parent_config.get("vault")
-                if vault_name:
-                    export_vaults.append(vault_name)
-                    click.echo(f"  📦 Added S3 vault: {vault_name}")
-
-            # Check if MLflow export is enabled and add its vault
-            mlflow_config = config.project.get_config("caliper.export.backend.mlflow", {})
-            if mlflow_config.get("enabled", False):
-                configured_mlflow_vault = (
-                    mlflow_config.get("secrets", {}).get("vault", {}).get("name")
-                )
-                if configured_mlflow_vault:
-                    export_vaults.append(configured_mlflow_vault)
-                    click.echo(f"  📊 Added MLflow export vault: {configured_mlflow_vault}")
+            # Get optional caliper vaults (notifications, etc.)
+            optional_vaults = caliper_export_list_optional_vaults()
+            if optional_vaults:
+                click.echo(f"  📧 Found optional vaults: {optional_vaults}")
 
             # Always include the specific MLflow vault we need for import
-            if mlflow_vault_name not in export_vaults:
-                export_vaults.append(mlflow_vault_name)
+            if mlflow_vault_name not in mandatory_vaults:
+                mandatory_vaults.append(mlflow_vault_name)
                 click.echo(f"  🔍 Added MLflow import vault: {mlflow_vault_name}")
 
-        except Exception as e:
-            # Fallback to just the MLflow vault if config reading fails
-            click.echo(f"  ⚠️  Could not read caliper config: {e}")
-            export_vaults = [mlflow_vault_name]
-            click.echo(f"  🔍 Using fallback vault: {mlflow_vault_name}")
+            # Initialize using the same pattern as orchestration
+            vault_lib.init(mandatory_vaults=mandatory_vaults, optional_vaults=optional_vaults)
+            click.echo(
+                f"  ✅ Initialized {len(mandatory_vaults)} mandatory + {len(optional_vaults)} optional vaults"
+            )
 
-        # Initialize all discovered vaults
-        if export_vaults:
-            click.echo(
-                f"  🏗️  Initializing {len(export_vaults)} vault(s): {', '.join(export_vaults)}"
-            )
-            vault_lib.init(vaults=export_vaults)
-        else:
-            click.echo(
-                f"  🔍 No vaults to initialize, checking vault '{mlflow_vault_name}' directly..."
-            )
+        except Exception as e:
+            # Fallback to just the MLflow vault if vault listing fails
+            click.echo(f"  ⚠️  Vault listing failed: {e}")
+            click.echo(f"  🔍 Using fallback vault: {mlflow_vault_name}")
             vault_lib.init(vaults=[mlflow_vault_name])
 
         # Now try to get the MLflow secrets specifically
