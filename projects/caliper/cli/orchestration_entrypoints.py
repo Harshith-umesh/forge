@@ -75,12 +75,10 @@ def s3_import_entrypoint(
         s3_parent_config = postprocess_config.s3
         s3_config = postprocess_config.s3.import_
 
-        # Build import prefix using instance + s3.prefix + directory
+        # Build import prefix using instance + directory
         import_prefix_parts = []
         if s3_parent_config.instance:
             import_prefix_parts.append(s3_parent_config.instance)
-        if s3_parent_config.prefix:
-            import_prefix_parts.append(s3_parent_config.prefix.rstrip("/"))
         if s3_parent_config.directory:
             import_prefix_parts.append(s3_parent_config.directory)
 
@@ -89,7 +87,8 @@ def s3_import_entrypoint(
 
         log_s3_import_command(
             bucket=s3_parent_config.bucket,
-            prefix=import_prefix,
+            instance=s3_parent_config.instance,
+            directory=s3_parent_config.directory,
             output_dir=import_dir,
             include_kpis_json=s3_config.include_kpis_json,
             include_kpis_csv=s3_config.include_kpis_csv,
@@ -139,7 +138,6 @@ def s3_export_entrypoint(
         ai_data_dir=ai_data_dir,
         analysis_file=analysis_file,
         bucket=s3_parent_config.bucket,
-        prefix=s3_parent_config.prefix,
         instance=s3_parent_config.instance,
         directory=s3_parent_config.directory,
         upload_id=s3_config.upload_id,

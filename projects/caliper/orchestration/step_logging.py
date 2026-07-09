@@ -390,7 +390,8 @@ def log_ai_data_command(
 
 def log_s3_import_command(
     bucket: str,
-    prefix: str,
+    instance: str | None,
+    directory: str | None,
     output_dir: Path,
     include_kpis_json: bool = False,
     include_kpis_csv: bool = False,
@@ -398,6 +399,14 @@ def log_s3_import_command(
     max_downloads: int = 50,
 ) -> None:
     """Log the CLI command to reproduce the S3 import step."""
+    # Build prefix from instance and directory
+    prefix_parts = []
+    if instance:
+        prefix_parts.append(instance)
+    if directory:
+        prefix_parts.append(directory)
+    prefix = "/".join(prefix_parts) if prefix_parts else ""
+
     command_parts = [
         f'caliper s3-import --bucket "{bucket}" --prefix "{prefix}" --output-dir "{output_dir}"'
     ]
@@ -416,6 +425,8 @@ def log_s3_import_command(
 
     step_args = {
         "bucket": bucket,
+        "instance": instance,
+        "directory": directory,
         "prefix": prefix,
         "output_dir": str(output_dir),
         "include_kpis_json": include_kpis_json,

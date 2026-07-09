@@ -224,7 +224,6 @@ def run_s3_export_with_explicit_paths(
     ai_data_dir: Path | None = None,
     analysis_file: Path | None = None,
     bucket: str,
-    prefix: str = "",
     instance: str | None = None,
     directory: str | None = None,
     upload_id: str | None = None,
@@ -240,7 +239,6 @@ def run_s3_export_with_explicit_paths(
         ai_data_dir: Path to AI data directory to upload
         analysis_file: Path to analysis file to upload
         bucket: S3 bucket name
-        prefix: S3 object prefix/path
         instance: Instance identifier for S3 organization
         directory: Directory identifier for S3 organization
         upload_id: Custom upload identifier (uses timestamp if not provided)
@@ -288,12 +286,10 @@ def run_s3_export_with_explicit_paths(
             upload_id = f"{timestamp}_{microseconds}"
             logger.info(f"Using generated collision-resistant timestamp ID: {upload_id}")
 
-        # Construct the full S3 path: {instance}/{prefix}/{directory}/{upload_id}/
+        # Construct the full S3 path: {instance}/{directory}/{upload_id}/
         s3_path_components = []
         if instance:
             s3_path_components.append(instance)
-        if prefix:
-            s3_path_components.append(prefix.rstrip("/"))
         if directory:
             s3_path_components.append(directory)
         s3_path_components.append(upload_id)
@@ -302,9 +298,7 @@ def run_s3_export_with_explicit_paths(
 
         logger.info(f"Starting S3 export to bucket: {bucket}")
         logger.info(f"Full S3 export path: s3://{bucket}/{export_s3_prefix}")
-        logger.info(
-            f"Path structure: {instance}/{prefix.rstrip('/') if prefix else 'no-prefix'}/{directory}/{upload_id}/"
-        )
+        logger.info(f"Path structure: {export_s3_prefix}")
         if dry_run:
             logger.info("DRY RUN MODE: Files will not actually be uploaded")
 
@@ -601,12 +595,10 @@ def run_s3_export(
             upload_id = f"{timestamp}_{microseconds}"
             logger.info(f"Using generated collision-resistant timestamp ID: {upload_id}")
 
-        # Construct the full S3 path: {instance}/{prefix}/{directory}/{upload_id}/
+        # Construct the full S3 path: {instance}/{directory}/{upload_id}/
         s3_path_components = []
         if instance:
             s3_path_components.append(instance)
-        if hasattr(s3_parent_config, "prefix") and s3_parent_config.prefix:
-            s3_path_components.append(s3_parent_config.prefix.rstrip("/"))
         if directory:
             s3_path_components.append(directory)
         s3_path_components.append(upload_id)
@@ -615,12 +607,7 @@ def run_s3_export(
 
         logger.info(f"Starting S3 export to bucket: {bucket}")
         logger.info(f"Full S3 export path: s3://{bucket}/{export_s3_prefix}")
-        prefix_component = (
-            s3_parent_config.prefix.rstrip("/")
-            if hasattr(s3_parent_config, "prefix") and s3_parent_config.prefix
-            else "no-prefix"
-        )
-        logger.info(f"Path structure: {instance}/{prefix_component}/{directory}/{upload_id}/")
+        logger.info(f"Path structure: {export_s3_prefix}")
         if dry_run:
             logger.info("DRY RUN MODE: Files will not actually be uploaded")
 
