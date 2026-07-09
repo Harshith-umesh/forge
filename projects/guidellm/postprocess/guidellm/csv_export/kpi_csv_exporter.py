@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,8 @@ from .kpi_csv_model import (
     KPICsvSchema,
     create_csv_rows_from_kpi_record,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class KPICsvExporter:
@@ -62,7 +65,7 @@ class KPICsvExporter:
                 rows = create_csv_rows_from_kpi_record(record)
                 csv_rows.extend(rows)
             except Exception as e:
-                print(f"Warning: Failed to convert KPI record to CSV row: {e}")
+                logger.info(f"Warning: Failed to convert KPI record to CSV row: {e}")
                 continue
 
         # Write CSV file
@@ -90,14 +93,14 @@ class KPICsvExporter:
 
         # Summary info
         total_written = len(csv_rows)
-        print(f"Exported {total_written} KPI records to {output_path}")
+        logger.info(f"Exported {total_written} KPI records to {output_path}")
         if skipped_2d_count > 0:
-            print(f"Skipped {skipped_2d_count} 2D KPIs (include_2d_kpis=False)")
+            logger.info(f"Skipped {skipped_2d_count} 2D KPIs (include_2d_kpis=False)")
 
         # Count 2D KPI expansion
         total_2d_rows = sum(1 for row in csv_rows if getattr(row, "is_2d", False))
         if total_2d_rows > 0:
-            print(f"Expanded 2D KPIs into {total_2d_rows} individual data point rows")
+            logger.info(f"Expanded 2D KPIs into {total_2d_rows} individual data point rows")
 
         return str(output_path)
 
