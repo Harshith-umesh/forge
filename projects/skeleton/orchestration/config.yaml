@@ -105,7 +105,7 @@ caliper:
         include_ai_data: true
 
 agentic:
-  enabled: true
+  enabled: false
   model_key: qwen-3-6-35b
   on_failure:
     enabled: true
