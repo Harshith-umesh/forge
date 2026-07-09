@@ -22,6 +22,10 @@ from projects.caliper.engine.file_export.mlflow_secrets import (
 
 logger = logging.getLogger(__name__)
 
+# Default vault configuration for MLflow secrets
+DEFAULT_MLFLOW_VAULT_NAME = "psap-forge-mlflow-export"
+DEFAULT_MLFLOW_SECRET_KEY = "mlflow-secret.yaml"
+
 
 def run_artifacts_import(
     *,
@@ -279,3 +283,103 @@ def run_artifacts_import(
             _download_artifacts()
     else:
         _download_artifacts()
+
+
+def _try_load_mlflow_secrets_from_vault() -> dict | None:
+    """Try to load MLflow secrets from vault using environment variables or defaults.
+
+    This also initializes all caliper-related vaults for consistency with orchestration runs.
+
+    Returns:
+        MLflow secrets dictionary if found, None otherwise
+    """
+    import os
+
+    # Get vault name and secret key from environment or use defaults
+    mlflow_vault_name = os.environ.get("PSAP_FORGE_MLFLOW_EXPORT_SECRET_VAULT", DEFAULT_MLFLOW_VAULT_NAME)
+    secret_key = os.environ.get("PSAP_FORGE_MLFLOW_EXPORT_SECRET_KEY", DEFAULT_MLFLOW_SECRET_KEY)
+
+    try:
+        from projects.core.library import vault as vault_lib
+        from projects.core.library import config
+
+        click.echo("  🏗️  Initializing caliper vault system...")
+
+        # Discover all caliper-related vaults from configuration (same logic as export system)
+        export_vaults = []
+
+        try:
+            # Check if S3 export or import is enabled in the project configuration
+            s3_parent_config = config.project.get_config("caliper.postprocess.s3", {})
+            s3_export_config = config.project.get_config("caliper.postprocess.s3.export", {})
+            s3_import_config = config.project.get_config("caliper.postprocess.s3.import", {})
+
+            s3_export_enabled = s3_export_config.get("enabled", False)
+            s3_import_enabled = s3_import_config.get("enabled", False)
+
+            if s3_export_enabled or s3_import_enabled:
+                # Add the configured vault for S3 credentials
+                vault_name = s3_parent_config.get("vault")
+                if vault_name:
+                    export_vaults.append(vault_name)
+                    click.echo(f"  📦 Added S3 vault: {vault_name}")
+
+            # Check if MLflow export is enabled and add its vault
+            mlflow_config = config.project.get_config("caliper.export.backend.mlflow", {})
+            if mlflow_config.get("enabled", False):
+                configured_mlflow_vault = mlflow_config.get("secrets", {}).get("vault", {}).get("name")
+                if configured_mlflow_vault:
+                    export_vaults.append(configured_mlflow_vault)
+                    click.echo(f"  📊 Added MLflow export vault: {configured_mlflow_vault}")
+
+            # Always include the specific MLflow vault we need for import
+            if mlflow_vault_name not in export_vaults:
+                export_vaults.append(mlflow_vault_name)
+                click.echo(f"  🔍 Added MLflow import vault: {mlflow_vault_name}")
+
+        except Exception as e:
+            # Fallback to just the MLflow vault if config reading fails
+            click.echo(f"  ⚠️  Could not read caliper config: {e}")
+            export_vaults = [mlflow_vault_name]
+            click.echo(f"  🔍 Using fallback vault: {mlflow_vault_name}")
+
+        # Initialize all discovered vaults
+        if export_vaults:
+            click.echo(f"  🏗️  Initializing {len(export_vaults)} vault(s): {', '.join(export_vaults)}")
+            vault_lib.init(vaults=export_vaults)
+        else:
+            click.echo(f"  🔍 No vaults to initialize, checking vault '{mlflow_vault_name}' directly...")
+            vault_lib.init(vaults=[mlflow_vault_name])
+
+        # Now try to get the MLflow secrets specifically
+        click.echo(f"  🔍 Looking for MLflow secret '{secret_key}' in vault '{mlflow_vault_name}'...")
+        secret_path = vault_lib.get_vault_content_path(mlflow_vault_name, secret_key)
+
+        if secret_path is None:
+            click.echo(f"  ❌ Secret '{secret_key}' not found in vault '{mlflow_vault_name}'")
+            return None
+
+        if not secret_path.exists():
+            click.echo(f"  ❌ Secret file path exists but file missing: {secret_path}")
+            return None
+
+        click.echo(f"  ✅ Found MLflow secrets file: {secret_path}")
+        click.echo("  📄 Loading and validating secrets...")
+
+        # Load and validate the secrets
+        secrets_data = load_mlflow_secrets_yaml(secret_path)
+        validate_mlflow_secrets(secrets_data)
+
+        click.echo("  ✅ Successfully validated MLflow secrets from vault")
+        # Don't print actual secret contents, just structure
+        secret_keys = list(secrets_data.keys())
+        click.echo(f"  🔑 Secret contains: {', '.join(secret_keys)}")
+
+        return secrets_data
+
+    except ImportError:
+        click.echo("  ⚠️  Vault library not available, skipping vault secret lookup")
+        return None
+    except Exception as e:
+        click.echo(f"  ❌ Failed to load secrets from vault: {e}")
+        return None
