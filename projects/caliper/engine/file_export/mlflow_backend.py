@@ -643,25 +643,37 @@ def log_multi_run_artifacts(
     return _run(tracking_uri)
 
 
-def update_run_log_artifact(
+def update_artifacts(
     *,
     run_id: str,
-    log_file: Path,
+    files: dict[Path, str | None] | list[Path],
     tracking_uri: str | None = None,
-    artifact_path: str | None = None,
     connection: dict[str, Any] | None = None,
 ) -> None:
-    """Re-upload a run.log file to an existing MLflow run, replacing the previous copy.
+    """Re-upload multiple files to an existing MLflow run, replacing previous copies.
+
+    Args:
+        run_id: The MLflow run ID to update
+        files: Either a dict mapping file paths to artifact paths (None for root),
+               or a list of file paths (all uploaded to root)
+        tracking_uri: MLflow tracking URI
+        connection: MLflow connection configuration
 
     Intended to be called after all post-export work (notifications, etc.) completes,
-    so the uploaded log contains the full session output.
+    so uploaded files contain the full session output.
     """
     try:
         import mlflow
     except ImportError as e:
         raise RuntimeError(
-            "mlflow is required for run-log update. Install with: pip install -e '.[caliper]'"
+            "mlflow is required for run update. Install with: pip install -e '.[caliper]'"
         ) from e
+
+    # Normalize input to dict format
+    if isinstance(files, list):
+        files_dict = dict.fromkeys(files)
+    else:
+        files_dict = files
 
     def _upload(uri: str | None) -> None:
         import os
@@ -676,7 +688,11 @@ def update_run_log_artifact(
             handler.flush()
 
         client = mlflow.tracking.MlflowClient()
-        client.log_artifact(run_id, str(log_file), artifact_path=artifact_path)
+
+        # Upload each file to its specified artifact path
+        for file_path, artifact_path in files_dict.items():
+            if file_path.exists():
+                client.log_artifact(run_id, str(file_path), artifact_path=artifact_path)
 
     if connection is not None:
         with mlflow_connection_env(connection):

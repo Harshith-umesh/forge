@@ -303,12 +303,14 @@ def _try_load_mlflow_secrets_from_vault() -> dict | None:
     import os
 
     # Get vault name and secret key from environment or use defaults
-    mlflow_vault_name = os.environ.get("PSAP_FORGE_MLFLOW_EXPORT_SECRET_VAULT", DEFAULT_MLFLOW_VAULT_NAME)
+    mlflow_vault_name = os.environ.get(
+        "PSAP_FORGE_MLFLOW_EXPORT_SECRET_VAULT", DEFAULT_MLFLOW_VAULT_NAME
+    )
     secret_key = os.environ.get("PSAP_FORGE_MLFLOW_EXPORT_SECRET_KEY", DEFAULT_MLFLOW_SECRET_KEY)
 
     try:
-        from projects.core.library import vault as vault_lib
         from projects.core.library import config
+        from projects.core.library import vault as vault_lib
 
         click.echo("  🏗️  Initializing caliper vault system...")
 
@@ -334,7 +336,9 @@ def _try_load_mlflow_secrets_from_vault() -> dict | None:
             # Check if MLflow export is enabled and add its vault
             mlflow_config = config.project.get_config("caliper.export.backend.mlflow", {})
             if mlflow_config.get("enabled", False):
-                configured_mlflow_vault = mlflow_config.get("secrets", {}).get("vault", {}).get("name")
+                configured_mlflow_vault = (
+                    mlflow_config.get("secrets", {}).get("vault", {}).get("name")
+                )
                 if configured_mlflow_vault:
                     export_vaults.append(configured_mlflow_vault)
                     click.echo(f"  📊 Added MLflow export vault: {configured_mlflow_vault}")
@@ -352,14 +356,20 @@ def _try_load_mlflow_secrets_from_vault() -> dict | None:
 
         # Initialize all discovered vaults
         if export_vaults:
-            click.echo(f"  🏗️  Initializing {len(export_vaults)} vault(s): {', '.join(export_vaults)}")
+            click.echo(
+                f"  🏗️  Initializing {len(export_vaults)} vault(s): {', '.join(export_vaults)}"
+            )
             vault_lib.init(vaults=export_vaults)
         else:
-            click.echo(f"  🔍 No vaults to initialize, checking vault '{mlflow_vault_name}' directly...")
+            click.echo(
+                f"  🔍 No vaults to initialize, checking vault '{mlflow_vault_name}' directly..."
+            )
             vault_lib.init(vaults=[mlflow_vault_name])
 
         # Now try to get the MLflow secrets specifically
-        click.echo(f"  🔍 Looking for MLflow secret '{secret_key}' in vault '{mlflow_vault_name}'...")
+        click.echo(
+            f"  🔍 Looking for MLflow secret '{secret_key}' in vault '{mlflow_vault_name}'..."
+        )
         secret_path = vault_lib.get_vault_content_path(mlflow_vault_name, secret_key)
 
         if secret_path is None:
