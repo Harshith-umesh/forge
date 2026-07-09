@@ -93,27 +93,18 @@ def _resolve_paths(
 
 def _resolve_visualize_output_dir(
     raw: str | None,
-    base_dir: Path | None = None,
 ) -> Path:
     if raw is None or not str(raw).strip():
-        raise ValueError(
-            "caliper.postprocess.visualize.output_dir is required when no explicit visualize_output_directory is provided"
-        )
+        # If empty, use env.ARTIFACT_DIR
+        return env.ARTIFACT_DIR
+
     p = Path(raw).expanduser()
     if p.is_absolute():
+        # If absolute, don't touch
         return p.resolve()
-
-    # Handle relative paths by making them relative to base_dir (defaults to env.ARTIFACT_DIR)
-    if base_dir is None:
-        base_dir = env.ARTIFACT_DIR
-
-    if base_dir is None:
-        raise ValueError(
-            "caliper.postprocess.visualize.output_dir must be an absolute path when no base directory is available"
-        )
-
-    resolved_path = (base_dir / p).resolve()
-    return resolved_path
+    else:
+        # If relative, use env.ARTIFACT_DIR / output_dir
+        return (env.ARTIFACT_DIR / p).resolve()
 
 
 def _resolve_visualize_config_path(
@@ -854,7 +845,6 @@ class CaliperPostprocessOrchestrator:
                 else:
                     output_dir = _resolve_visualize_output_dir(
                         self.config.visualize.output_dir,
-                        base_dir=env.ARTIFACT_DIR,
                     )
                     logger.info(
                         f"Resolved visualize output directory from config '{self.config.visualize.output_dir}': {output_dir}"
@@ -937,12 +927,10 @@ class CaliperPostprocessOrchestrator:
             return
 
         try:
-            # Determine output directory
-            if self.config.visualize.enabled and self.visualize_output_dir:
-                output_dir = Path(self.visualize_output_dir)
-            else:
-                output_dir = Path(self.artifacts_dir) / "postprocess_output"
-                output_dir.mkdir(parents=True, exist_ok=True)
+            # Determine output directory for KPI/AI data steps - use base artifact directory
+            output_dir = env.ARTIFACT_DIR
+            logger.info(f"KPI steps using base artifact directory: {output_dir}")
+            output_dir.mkdir(parents=True, exist_ok=True)
 
             # Load plugin and model
             model, mod_str = parse_entrypoint(
