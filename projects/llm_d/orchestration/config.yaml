@@ -78,7 +78,6 @@ caliper:
       vault:
         name: psap-forge-aws-s3-export
         aws_credentials_file: aws.credentials
-      prefix: llm_d/
       import:
         enabled: true
         output_dir: historical_data
