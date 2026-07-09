@@ -513,21 +513,6 @@ def log_analyze_command(
 ) -> None:
     """Log the CLI command to reproduce the analyze step."""
 
-    command = f'caliper kpi analyze --current "{current_kpis_path}" --baseline-dir "{historical_kpis_dir}" --output "{output_path}" --plugin "{plugin_module}"'
-
-    step_args = {
-        "current_kpis_path": str(current_kpis_path) if current_kpis_path else None,
-        "historical_kpis_dir": str(historical_kpis_dir) if historical_kpis_dir else None,
-        "output_path": str(output_path) if output_path else None,
-        "plugin_module": plugin_module,
-    }
-
-    _log_command_banner(
-        "caliper_analyze_kpis",
-        command,
-        "Analyze current KPIs against historical data for regression detection",
-        step_args,
-    )
     # Use the correct command structure: caliper kpi analyze
     command = "caliper kpi analyze"
 
