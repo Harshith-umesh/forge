@@ -105,8 +105,11 @@ def step_logging_indexed(
     """
     Context manager for step-specific logging with explicit step index.
 
-    Captures all logging output during the context and writes it to a dedicated
+    Captures ALL logging output during the context and writes it to a dedicated
     file named with the pattern: {step_index:03d}__{step_name}.log
+
+    This context manager temporarily configures the entire logging system to
+    ensure that ALL log messages from any logger get captured to the step log file.
 
     Args:
         step_name: Name of the step (e.g., "caliper_parse", "caliper_visualize")
@@ -121,9 +124,6 @@ def step_logging_indexed(
             logger.info("This will go to 000__caliper_parse.log")
             run_parse_operations()
     """
-    # Ensure the global step handler is attached
-    _ensure_step_handler()
-
     # Create the log file path
     log_filename = f"{step_index:03d}__{step_name}.log"
     log_file = output_dir / log_filename
@@ -138,16 +138,55 @@ def step_logging_indexed(
     # Use same format as console output (no timestamp prefix, just the message)
     file_handler.setFormatter(logging.Formatter("%(message)s"))
 
-    # Store the file handler in thread-local storage
-    _step_local_handlers.file_handler = file_handler
+    # Get the root logger to capture everything
+    root_logger = logging.getLogger()
+
+    # Save original state to restore later
+    original_handlers = root_logger.handlers.copy()
+
+    # Note: We now use direct root logger capture instead of the StepLocalHandler mechanism
+    # This provides more reliable and comprehensive log capture
 
     try:
+        # Add our file handler directly to the root logger
+        root_logger.addHandler(file_handler)
+
+        # Save propagation states and ensure loggers propagate to root
+        saved_logger_states = {}
+
+        # Get all existing loggers from the logger registry
+        for logger_name in logging.getLogger().manager.loggerDict:
+            existing_logger = logging.getLogger(logger_name)
+            # Save original state (only propagate, don't touch levels)
+            saved_logger_states[logger_name] = {
+                "propagate": existing_logger.propagate,
+            }
+            # Only ensure propagation, don't change levels
+            existing_logger.propagate = True
+
         yield log_file
+
     finally:
-        # Clean up: close and remove the thread-local handler
-        if hasattr(_step_local_handlers, "file_handler"):
-            _step_local_handlers.file_handler.close()
-            del _step_local_handlers.file_handler
+        # Remove our file handler from root logger
+        if file_handler in root_logger.handlers:
+            root_logger.removeHandler(file_handler)
+
+        # Restore original handlers completely
+        # (Remove any handlers that were added, restore original list)
+        root_logger.handlers.clear()
+        root_logger.handlers.extend(original_handlers)
+
+        # Restore original logger propagation states
+        for logger_name, state in saved_logger_states.items():
+            try:
+                existing_logger = logging.getLogger(logger_name)
+                existing_logger.propagate = state["propagate"]
+            except Exception:
+                # Ignore errors when restoring logger states
+                pass
+
+        # Close the file handler
+        file_handler.close()
 
 
 @contextmanager
@@ -213,7 +252,8 @@ def _log_command_banner(
         description: Brief description of what this step does
         step_args: Dictionary of step arguments for reference
     """
-    logger = logging.getLogger(__name__)
+    # Use root logger to ensure step handler captures the banner
+    logger = logging.getLogger()
 
     LINE_WIDTH = 80
 
