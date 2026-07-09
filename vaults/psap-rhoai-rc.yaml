@@ -6,3 +6,5 @@ content:
   rhoai_rc.secret:
     description: |
       Basic auth string used to extend the cluster pull secret for quay.io/rhoai
+    sample: |
+      rhoai+rhoai_external_readonly_bot:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx

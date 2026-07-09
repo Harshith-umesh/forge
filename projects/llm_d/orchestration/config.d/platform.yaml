@@ -58,6 +58,7 @@ rhoai:
     pull_secret:
       vault:
         name: psap-rhoai-rc
+        content: rhoai_rc.secret
   namespace: redhat-ods-applications
   datasciencecluster_name: default-dsc
   components:

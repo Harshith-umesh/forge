@@ -8,10 +8,11 @@ import yaml
 from projects.core.library import config as core_config
 from projects.core.library import env
 from projects.llm_d.orchestration import ci as llmd_ci
-from projects.llm_d.orchestration import prepare_phase, runtime_config, test_phase
+from projects.llm_d.orchestration import runtime_config, test_phase
 from projects.llm_d.orchestration.render_inference_service import (
     render_inference_service_from_parts,
 )
+from projects.rhoai.library import deploy as rhoai_deploy
 
 PROJECT_ORCHESTRATION_DIR = Path(__file__).resolve().parents[1] / "orchestration"
 
@@ -258,7 +259,7 @@ def test_prepare_rhoai_operator_runs_registry_setup_before_custom_catalog_deploy
                 "image": "quay.io/rhoai/rhoai-fbc-fragment@sha256:test",
                 "display_name": "Red Hat OpenShift AI",
                 "publisher": "RHOAI Development Catalog",
-                "pull_secret": {"vault": {"name": "psap-rhoai-rc"}},
+                "pull_secret": {"vault": {"name": "psap-rhoai-rc", "content": "rhoai_rc.secret"}},
             },
             "namespace": "redhat-ods-applications",
             "datasciencecluster_name": "default-dsc",
@@ -270,31 +271,35 @@ def test_prepare_rhoai_operator_runs_registry_setup_before_custom_catalog_deploy
 
     calls: list[object] = []
 
-    monkeypatch.setattr(prepare_phase.runtime_config, "get_platform_config", lambda: platform)
-    monkeypatch.setattr(prepare_phase, "prepare_rhcl_operator", lambda: calls.append("rhcl"))
     monkeypatch.setattr(
-        prepare_phase,
+        rhoai_deploy, "prepare_rhcl_operator", lambda platform: calls.append("rhcl")
+    )
+    monkeypatch.setattr(
+        rhoai_deploy,
         "prepare_rhoai_pull_secret",
-        lambda custom_catalog: calls.append(("pull", custom_catalog["image"])),
+        lambda custom_catalog: calls.append(("pull", custom_catalog.image)),
     )
-    monkeypatch.setattr(prepare_phase, "apply_rhoai_icsp", lambda: calls.append("icsp"))
     monkeypatch.setattr(
-        prepare_phase,
+        rhoai_deploy,
         "deploy_rhoai_custom_catalog",
-        lambda rhoai: calls.append(("catalog", rhoai["custom_catalog"]["publisher"])),
+        lambda custom_catalog: calls.append(("catalog", custom_catalog.publisher)),
     )
     monkeypatch.setattr(
-        prepare_phase,
+        rhoai_deploy,
         "ensure_operator_subscription",
         lambda operator_spec: calls.append(("sub", operator_spec["package"])),
     )
     monkeypatch.setattr(
-        prepare_phase,
+        rhoai_deploy,
         "ensure_required_crds_before_dsc",
-        lambda: calls.append("crds"),
+        lambda rhoai: calls.append("crds"),
     )
 
-    prepare_phase.prepare_rhoai_operator()
+    rhoai_deploy.prepare_rhoai_operator(
+        platform=platform,
+        rhoai=platform["rhoai"],
+        icsp_applier=lambda: calls.append("icsp"),
+    )
 
     assert calls == [
         "rhcl",
@@ -304,6 +309,28 @@ def test_prepare_rhoai_operator_runs_registry_setup_before_custom_catalog_deploy
         ("sub", "rhods-operator"),
         "crds",
     ]
+
+
+def test_custom_catalog_pull_secret_path_uses_explicit_vault_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, str] = {}
+
+    def _fake_get_vault_content_path(vault_name: str, content_name: str):
+        captured["vault_name"] = vault_name
+        captured["content_name"] = content_name
+        return Path("/tmp/rhoai_rc.secret")
+
+    monkeypatch.setattr(rhoai_deploy.vault, "get_vault_content_path", _fake_get_vault_content_path)
+
+    path = rhoai_deploy.custom_catalog_pull_secret_path(
+        {
+            "pull_secret": {"vault": {"name": "psap-rhoai-rc", "content": "rhoai_rc.secret"}},
+        }
+    )
+
+    assert path == Path("/tmp/rhoai_rc.secret")
+    assert captured == {"vault_name": "psap-rhoai-rc", "content_name": "rhoai_rc.secret"}
 
 
 def test_model_and_deployment_profile_accept_yaml_list_strings() -> None:
