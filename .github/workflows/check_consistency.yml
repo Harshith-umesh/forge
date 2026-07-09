@@ -18,9 +18,10 @@ jobs:
       PYTHONPATH: ${{ github.workspace }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: ./.github/steps/prepare_minimal_ubuntu_image
 
