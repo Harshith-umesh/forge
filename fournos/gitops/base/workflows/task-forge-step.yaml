@@ -75,19 +75,23 @@ spec:
 
         export KUBECONFIG=$TARGET_KUBECONFIG
 
-        PULL_BASE_SHA=$(cat "$ARTIFACT_DIR/fournos_fjob.yaml" | yq -r .spec.env.PULL_BASE_SHA)
-        if [[ "$PULL_BASE_SHA" != null ]]; then
-          export PULL_BASE_SHA
-        else
-          unset PULL_BASE_SHA
-        fi
+        # Function to conditionally export environment variables from FournosJob spec
+        export_env_var_from_fjob() {
+          local var_name="$1"
+          local value=$(cat "$ARTIFACT_DIR/fournos_fjob.yaml" | yq -r ".spec.env.${var_name}")
+          if [[ "$value" != null ]]; then
+            export "$var_name=$value"
+            echo "Exported $var_name=$value"
+          else
+            unset "$var_name" 2>/dev/null || true
+            echo "Unset $var_name (was null in FournosJob spec)"
+          fi
+        }
 
-        PULL_PULL_SHA=$(cat "$ARTIFACT_DIR/fournos_fjob.yaml" | yq -r .spec.env.PULL_PULL_SHA)
-        if [[ "$PULL_PULL_SHA" != null ]]; then
-          export PULL_PULL_SHA
-        else
-          unset PULL_PULL_SHA
-        fi
+        # Export environment variables from FournosJob spec
+        export_env_var_from_fjob PULL_BASE_SHA
+        export_env_var_from_fjob PULL_PULL_SHA
+        export_env_var_from_fjob PULL_NUMBER
 
         if [[ "${PULL_PULL_SHA:-}" ]]; then
           echo
@@ -95,7 +99,8 @@ spec:
 
           git -C "$FORGE_HOME" fetch --quiet origin "$PULL_PULL_SHA"
           git -C "$FORGE_HOME" reset --hard FETCH_HEAD
-        elif [[ "$PULL_NUMBER" ]]; then
+
+        elif [[ "${PULL_NUMBER:-}" ]]; then
           echo
           echo "Updating to the HEAD commit of PR $PULL_NUMBER ..."
           commit="refs/pull/$PULL_NUMBER/head"
