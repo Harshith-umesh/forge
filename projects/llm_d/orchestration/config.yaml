@@ -48,7 +48,7 @@ caliper:
       no_cache: false
     visualize:
       enabled: true
-      output_dir: null
+      output_dir: reports
       reports: []
       report_group: all
       visualize_config: projects/guidellm/postprocess/guidellm/visualize-groups.yaml
