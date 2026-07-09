@@ -11,6 +11,9 @@ from pathlib import Path
 
 import click
 
+# Will conditionally suppress SSL warnings based on insecure_tls flag
+import urllib3
+
 from projects.caliper.engine.file_export.mlflow_secrets import (
     load_mlflow_secrets_yaml,
     mlflow_connection_env,
@@ -34,6 +37,7 @@ def run_artifacts_import(
     mlflow_secrets_path: Path | None = None,
 ) -> None:
     """Download artifacts from MLflow."""
+
     try:
         import mlflow
     except ImportError as e:
@@ -113,6 +117,12 @@ def run_artifacts_import(
     if mlflow_insecure_tls:
         connection_config["insecure_tls"] = True
 
+    # Check if insecure_tls was loaded from vault secrets and update the flag
+    if connection_config.get("insecure_tls", False):
+        mlflow_insecure_tls = True
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        click.echo("🔓 SSL warnings suppressed due to vault insecure_tls setting")
+
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -139,6 +149,7 @@ def run_artifacts_import(
                 import urllib3
 
                 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+                click.echo("🔓 SSL warnings suppressed for MLflow connection")
             except Exception:
                 pass
 
