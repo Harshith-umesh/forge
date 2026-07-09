@@ -60,7 +60,7 @@ caliper:
       no_cache: false
     visualize:
       enabled: true
-      output_dir: null
+      output_dir: reports
       reports: [summary_table, throughput_chart]
       report_group: null
 
