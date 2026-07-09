@@ -501,6 +501,10 @@ def _phase_vault_get_for_phase(phase: str) -> list[str]:
 def phase_vault_init(phase: str) -> None:
     """Initialize vaults for a specific phase."""
 
+    if phase == "resolve-fournos-config":
+        logger.info("No need to initialize the vaults for the resolve step")
+        return
+
     # Get global mandatory vaults (always loaded)
     global_mandatory = _phase_vault_get_for_phase("all")
 
