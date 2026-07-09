@@ -9,6 +9,7 @@ Computes ``final_status`` from the FORGE test phase outcome plus all enabled ste
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 import traceback
@@ -291,8 +292,6 @@ def _run_artifacts_to_kpis(
         kpis = plugin.compute_kpis(model)
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
-        import json
-
         # Transform flat KPI list into hierarchical structure
         hierarchical_data = _transform_kpis_to_hierarchical_format(kpis, model)
 
@@ -356,8 +355,6 @@ def _run_artifacts_to_ai_data(
 
         # Write main AI eval payload
         output_file.parent.mkdir(parents=True, exist_ok=True)
-
-        import json
 
         with open(output_file, "w") as f:
             json.dump(payload, f, indent=2)
@@ -478,7 +475,6 @@ def _export_test_entries_with_artifacts(
 
         # Write entry metadata
         entry_metadata_file = test_entry_dir / "entry_metadata.json"
-        import json
 
         with open(entry_metadata_file, "w") as f:
             json.dump(entry_info, f, indent=2)
@@ -1073,7 +1069,9 @@ class CaliperPostprocessOrchestrator:
                     self.config, plugin, model, output_dir, mod_str, self.tree_root
                 )
                 self._add_step("artifacts_to_ai_data", result, log_file)
-                logger.info(f"AI eval export result: {result}")
+
+                logger.info("AI eval export result:")
+                logger.info(json.dumps(result, indent=2, default=str))
 
                 # Check if the result indicates failure or warning
                 self._check_step_result_and_set_failure("artifacts_to_ai_data", result)
@@ -1109,7 +1107,9 @@ class CaliperPostprocessOrchestrator:
                     )
 
                 self._add_step("s3_import", result, log_file)
-                logger.info(f"S3 import result: {result}")
+
+                logger.info("S3 import result:")
+                logger.info(json.dumps(result, indent=2, default=str))
 
                 self._check_step_result_and_set_failure("s3_import", result)
 
@@ -1175,7 +1175,9 @@ class CaliperPostprocessOrchestrator:
                     )
 
                 self._add_step("analyse_kpis", result, log_file)
-                logger.info(f"KPI analysis result: {result}")
+
+                logger.info("KPI analysis result:")
+                logger.info(json.dumps(result, indent=2, default=str))
 
                 self._check_step_result_and_set_failure("analyse_kpis", result)
 
