@@ -175,7 +175,7 @@ def wait_for_rhoai_pull_secret_ready(
                 log_stdout=False,
                 log_stderr=False,
             ).stdout.strip()
-            if "False" in mcp_status:
+            if not mcp_status or "False" in mcp_status:
                 raise RuntimeError("machine config pools are still updating")
 
             logger.info(

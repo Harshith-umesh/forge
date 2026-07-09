@@ -333,6 +333,37 @@ def test_custom_catalog_pull_secret_path_uses_explicit_vault_content(
     assert captured == {"vault_name": "psap-rhoai-rc", "content_name": "rhoai_rc.secret"}
 
 
+def test_wait_for_rhoai_pull_secret_ready_treats_empty_mcp_status_as_not_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mcp_outputs = iter(["", "True"])
+    clock = {"value": 0.0}
+
+    def _fake_monotonic() -> float:
+        value = clock["value"]
+        clock["value"] += 0.1
+        return value
+
+    def _fake_sleep(_seconds: float) -> None:
+        clock["value"] += 0.1
+
+    def _fake_oc_get_json(*args, **kwargs):
+        return {"data": {".dockerconfigjson": "unused"}}
+
+    def _fake_oc(*args, **kwargs):
+        if args[:2] == ("get", "mcp"):
+            return type("Result", (), {"stdout": next(mcp_outputs), "returncode": 0})()
+        raise AssertionError(f"Unexpected oc call: {args}")
+
+    monkeypatch.setattr(rhoai_deploy, "oc_get_json", _fake_oc_get_json)
+    monkeypatch.setattr(rhoai_deploy, "oc", _fake_oc)
+    monkeypatch.setattr(rhoai_deploy, "_decode_pull_secret", lambda _secret: "quay.io/rhoai")
+    monkeypatch.setattr(rhoai_deploy.time, "monotonic", _fake_monotonic)
+    monkeypatch.setattr(rhoai_deploy.time, "sleep", _fake_sleep)
+
+    rhoai_deploy.wait_for_rhoai_pull_secret_ready(timeout_seconds=1, poll_interval_seconds=0)
+
+
 def test_model_and_deployment_profile_accept_yaml_list_strings() -> None:
     _init_project_config()
 
