@@ -17,11 +17,16 @@ class PostprocessStepResult:
 
     status: str
     message: str | None = None
-    paths: list[str] | None = None
+    output_files: list[str] | None = None  # renamed from "paths"
     completed_at: float | None = None
     reason: str | None = None
     output_file: str | None = None
+    output_dir: str | None = None  # relative directory path
     ai_eval_dir: str | None = None
+    exported_path: str | None = None
+    uploaded_files: int | None = None
+    downloaded_files: int | None = None
+    failed_files: int | None = None
 
 
 @dataclass
@@ -30,8 +35,10 @@ class PostprocessResult:
 
     success: bool
     final_status: str | None = None
+    base_directory: str | None = None
     steps: dict[str, PostprocessStepResult] | None = None
     test_phase: dict[str, Any] | None = None
+    job_shutdown: dict[str, Any] | None = None
 
 
 def format_postprocess_status_notification(
@@ -52,9 +59,9 @@ def format_postprocess_status_notification(
 
     lines = []
 
-    # Check overall status
+    # Check overall status (keep unchanged regardless of abort status)
     status_emoji = "✅" if result.success else "❌"
-    lines.append(f"**Post-processing Status {status_emoji}**")
+    lines.append(f"**Post-processing Status** {status_emoji}")
 
     # Add steps information if available, sorted by completion time
     if result.steps:
@@ -71,52 +78,47 @@ def format_postprocess_status_notification(
             step_emoji = _get_step_emoji(step_result.status)
             lines.append(f"- {step_emoji} **{step_name}**: `{step_result.status}`")
 
-            # Add step message if available
-            if step_result.message:
+            # Add step message if available (but not for warning/failed steps to avoid duplication)
+            if step_result.message and step_result.status not in ("warning", "failed", "failure"):
                 lines.append(f"  > {step_result.message}")
 
             # Add reason for skipped steps
             if step_result.status in ("skipped", "disabled") and step_result.reason:
                 lines.append(f"  > {step_result.reason}")
 
+            # Add error message for failed steps
+            if (
+                step_result.status in ("failed", "failure")
+                and hasattr(step_result, "error")
+                and step_result.error
+            ):
+                lines.append(f"  > ❌ {step_result.error}")
+
+            # Add warning message for warning steps
+            if (
+                step_result.status == "warning"
+                and hasattr(step_result, "message")
+                and step_result.message
+            ):
+                lines.append(f"  > ⚠️ {step_result.message}")
+
             # Add specific file links for certain steps
             if step_result.status == "success" and get_file_link:
                 if (
-                    step_name == "kpi_generate"
+                    step_name == "artifacts_to_kpis"
                     and hasattr(step_result, "output_file")
                     and step_result.output_file
                 ):
-                    try:
-                        # Extract relative path from absolute path (assume output_file contains relative path from output directory)
-                        from pathlib import Path
-
-                        output_path = Path(step_result.output_file)
-                        # For KPI files, typically just the filename is what we want
-                        relative_path = output_path.name
-                        file_url = get_file_link(relative_path)
-                        lines.append(f"  - 📄 [{relative_path}]({file_url})")
-                    except Exception:
-                        filename = step_result.output_file.split("/")[-1]
-                        lines.append(f"  - 📄 {filename}")
+                    lines.append(_create_file_link(step_result.output_file, "📄", get_file_link))
 
                 elif (
-                    step_name == "kpi_csv_export"
+                    step_name == "kpis_to_csv"
                     and hasattr(step_result, "output_file")
                     and step_result.output_file
                 ):
-                    try:
-                        # Extract relative path for CSV file
-                        from pathlib import Path
+                    lines.append(_create_file_link(step_result.output_file, "📊", get_file_link))
 
-                        output_path = Path(step_result.output_file)
-                        relative_path = output_path.name
-                        file_url = get_file_link(relative_path)
-                        lines.append(f"  - 📊 [{relative_path}]({file_url})")
-                    except Exception:
-                        filename = step_result.output_file.split("/")[-1]
-                        lines.append(f"  - 📊 {filename}")
-
-                elif step_name == "ai_eval_export":
+                elif step_name == "artifacts_to_ai_data":
                     if hasattr(step_result, "ai_eval_dir") and step_result.ai_eval_dir:
                         try:
                             dir_url = get_file_link("")  # Get base directory URL
@@ -149,11 +151,91 @@ def format_postprocess_status_notification(
                             filename = step_result.output_file.split("/")[-1]
                             lines.append(f"  - 📄 {filename}")
 
+                elif step_name == "s3_export":
+                    # Show exported path
+                    if hasattr(step_result, "exported_path") and step_result.exported_path:
+                        lines.append(f"  - 📤 Exported to: `{step_result.exported_path}`")
+
+                    # Show uploaded files count
+                    if (
+                        hasattr(step_result, "uploaded_files")
+                        and step_result.uploaded_files is not None
+                    ):
+                        lines.append(f"  - ✅ Uploaded files: {step_result.uploaded_files}")
+
+                    # Show failed files count if > 0
+                    if (
+                        hasattr(step_result, "failed_files")
+                        and step_result.failed_files
+                        and step_result.failed_files > 0
+                    ):
+                        lines.append(f"  - ❌ Failed files: {step_result.failed_files}")
+
+                elif step_name == "s3_import":
+                    # Show downloaded files count
+                    if (
+                        hasattr(step_result, "downloaded_files")
+                        and step_result.downloaded_files is not None
+                    ):
+                        lines.append(f"  - ⬇️ Downloaded files: {step_result.downloaded_files}")
+
+                    # Show failed files count if > 0
+                    if (
+                        hasattr(step_result, "failed_files")
+                        and step_result.failed_files
+                        and step_result.failed_files > 0
+                    ):
+                        lines.append(f"  - ❌ Failed files: {step_result.failed_files}")
+
+                elif step_name == "analyse_kpis":
+                    # Show analysis output file
+                    if hasattr(step_result, "output_file") and step_result.output_file:
+                        lines.append(
+                            _create_file_link(step_result.output_file, "📊", get_file_link)
+                        )
+
+                    # Show baseline files count if available
+                    if (
+                        hasattr(step_result, "baseline_files_count")
+                        and step_result.baseline_files_count is not None
+                    ):
+                        lines.append(
+                            f"  - 📈 Baseline files analyzed: {step_result.baseline_files_count}"
+                        )
+
             # Add general file links if available (for visualize step, etc.)
-            if step_result.paths and get_file_link:
-                lines.extend(_format_step_file_links(step_name, step_result.paths, get_file_link))
+            file_paths = getattr(step_result, "output_files", None) or getattr(
+                step_result, "paths", None
+            )
+            if file_paths and get_file_link:
+                lines.extend(_format_step_file_links(step_name, file_paths, get_file_link))
 
     return "\n".join(lines) if lines else ""
+
+
+def _create_file_link(output_file: str, emoji: str, get_file_link: callable) -> str:
+    """Create a file link line for notifications.
+
+    Args:
+        output_file: Path to the output file
+        emoji: Emoji to use for the file type
+        get_file_link: Function to generate file URLs
+
+    Returns:
+        Formatted line with file link or plain filename
+    """
+    try:
+        from pathlib import Path
+
+        output_path = Path(output_file)
+        filename = output_path.name
+
+        # In the standardized format, output_file is already relative to base_directory
+        file_url = get_file_link(output_file)
+        return f"  - {emoji} [{filename}]({file_url})"
+    except Exception:
+        filename = output_file.split("/")[-1]
+        return f"  - {emoji} {filename}"
 
 
 def _get_step_emoji(status: str) -> str:
@@ -164,6 +246,8 @@ def _get_step_emoji(status: str) -> str:
         return "❌"
     elif status in ("skipped", "disabled"):
         return "⏭️"
+    elif status == "warning":
+        return "⚠️"
     else:
         return "⚠️"
 
@@ -265,25 +349,41 @@ def parse_postprocess_result(status_data: dict) -> PostprocessResult | None:
     if not status_data or not isinstance(status_data, dict):
         return None
 
-    # Parse steps
+    # Parse steps from new list-based format
     steps_dict = {}
-    steps_raw = status_data.get("steps", {})
-    if isinstance(steps_raw, dict):
-        for step_name, step_data in steps_raw.items():
-            if isinstance(step_data, dict):
-                steps_dict[step_name] = PostprocessStepResult(
-                    status=step_data.get("status", "unknown"),
-                    message=step_data.get("message"),
-                    paths=step_data.get("paths"),
-                    completed_at=step_data.get("completed_at"),
-                    reason=step_data.get("reason"),
-                    output_file=step_data.get("output_file"),
-                    ai_eval_dir=step_data.get("ai_eval_dir"),
-                )
+    steps_raw = status_data.get("steps", [])
+
+    if isinstance(steps_raw, list):
+        # List-based format with step name as dictionary key
+        for step_dict in steps_raw:
+            if isinstance(step_dict, dict):
+                # Each item in the list is {step_name: step_data}
+                for step_name, step_data in step_dict.items():
+                    if isinstance(step_data, dict):
+                        # Handle both old and new field names for backward compatibility
+                        output_files = step_data.get("output_files") or step_data.get("paths")
+                        output_dir = step_data.get("output_dir") or step_data.get("import_dir")
+
+                        steps_dict[step_name] = PostprocessStepResult(
+                            status=step_data.get("status", "unknown"),
+                            message=step_data.get("message"),
+                            output_files=output_files,
+                            completed_at=step_data.get("completed_at"),
+                            reason=step_data.get("reason"),
+                            output_file=step_data.get("output_file"),
+                            output_dir=output_dir,
+                            ai_eval_dir=step_data.get("ai_eval_dir"),
+                            exported_path=step_data.get("exported_path"),
+                            uploaded_files=step_data.get("uploaded_files"),
+                            downloaded_files=step_data.get("downloaded_files"),
+                            failed_files=step_data.get("failed_files"),
+                        )
 
     return PostprocessResult(
         success=status_data.get("success", False),
         final_status=status_data.get("final_status"),
+        base_directory=status_data.get("base_directory"),
         steps=steps_dict if steps_dict else None,
         test_phase=status_data.get("test_phase"),
+        job_shutdown=status_data.get("job_shutdown"),
     )

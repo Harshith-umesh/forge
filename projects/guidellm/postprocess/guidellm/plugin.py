@@ -175,11 +175,11 @@ class GuideLLMPlugin(PostProcessingPlugin):
         """Compute KPI values from the unified model."""
         return self.kpi_handler.compute_kpis(model)
 
-    def build_ai_eval_payload(self, model: UnifiedRunModel) -> dict[str, Any]:
+    def build_ai_data_payload(self, model: UnifiedRunModel) -> dict[str, Any]:
         """Build AI evaluation payload from the unified model."""
         return self.ai_evaluator.build_payload(model, self)
 
-    def get_ai_eval_artifact_files_for_test(self, test_dir: Path) -> list[str]:
+    def get_ai_data_artifact_files_for_test(self, test_dir: Path) -> list[str]:
         """Return list of artifact files to copy for AI evaluation export from a specific test directory.
 
         Args:
@@ -221,6 +221,15 @@ class GuideLLMPlugin(PostProcessingPlugin):
                 logger.debug(f"Found GuideLLM benchmark artifact: {relative_path}")
         else:
             logger.debug(f"No benchmark files found in {test_dir}")
+
+        # Project configuration file - include if present
+        config_file = test_dir / "config.yaml"
+        if config_file.exists():
+            relative_path = str(config_file.relative_to(test_dir))
+            artifact_files.append(relative_path)
+            logger.info(f"Found project config artifact: {relative_path}")
+        else:
+            logger.warning(f"No config.yaml found in {test_dir}")
 
         logger.info(
             f"AI eval export will copy {len(artifact_files)} artifact files from {test_dir}"

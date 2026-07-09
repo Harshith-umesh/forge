@@ -32,13 +32,16 @@ from projects.core.library.status_to_html import convert_status_yaml_to_html
 logger = logging.getLogger(__name__)
 
 
-def write_test_labels(directory: Path, labels: dict[str, str], *, version: str = "1") -> Path:
+def write_test_labels(
+    directory: Path, labels: dict[str, str], *, version: str = "1", dump_config: bool = True
+) -> Path:
     """Write a __test_labels__.yaml file to mark a directory as a Caliper test base.
 
     Args:
         directory: Directory to create the test labels file in
         labels: Dictionary of label key-value pairs
         version: Version string for the test labels format (default: "1")
+        dump_config: Whether to save project configuration to config.yaml (default: True)
 
     Returns:
         Path to the created __test_labels__.yaml file
@@ -63,6 +66,18 @@ def write_test_labels(directory: Path, labels: dict[str, str], *, version: str =
     test_labels_path.parent.mkdir(parents=True, exist_ok=True)
     with test_labels_path.open("w", encoding="utf-8") as handle:
         yaml.safe_dump(payload, handle, sort_keys=False)
+
+    # Optionally save project configuration
+    if dump_config:
+        from projects.core.library import config
+
+        try:
+            if config.project is not None:
+                config_path = directory / "config.yaml"
+                config.project.save_config(dest=config_path)
+                logger.info(f"Saved project configuration to {config_path}")
+        except Exception as e:
+            logger.warning(f"Failed to save project configuration: {e}")
 
     return test_labels_path
 
@@ -155,19 +170,38 @@ def run_and_postprocess(test_func, *args, **kwargs):
             success = status.get("success", False)
             if not success:
                 final_status = status.get("final_status", "unknown")
-                if original_exc is not None:
-                    # Both test and postprocess failed: log both issues
-                    logger.error(
-                        "Both test and postprocessing failed (final_status: %s)", final_status
-                    )
-                    raise  # Re-raise the original test exception
+
+                # Check if failure is only due to warnings
+                if _is_warnings_only_failure(status):
+                    if original_exc is not None:
+                        # Test failed, postprocess has warnings: still fail due to test
+                        logger.error(
+                            "Test failed and postprocessing completed with warnings (final_status: %s)",
+                            final_status,
+                        )
+                        raise  # Re-raise the original test exception
+                    else:
+                        # Test succeeded, postprocess has warnings only: treat as success
+                        logger.warning(
+                            "Test succeeded and postprocessing completed with warnings (final_status: %s) - returning exit code 0",
+                            final_status,
+                        )
+                        return 0
                 else:
-                    # Only postprocess failed: return failure code
-                    logger.error(
-                        "Test succeeded but postprocessing failed (final_status: %s) - returning exit code 1",
-                        final_status,
-                    )
-                    return 1
+                    # Actual postprocessing failures (not just warnings)
+                    if original_exc is not None:
+                        # Both test and postprocess failed: log both issues
+                        logger.error(
+                            "Both test and postprocessing failed (final_status: %s)", final_status
+                        )
+                        raise  # Re-raise the original test exception
+                    else:
+                        # Only postprocess failed: return failure code
+                        logger.error(
+                            "Test succeeded but postprocessing failed (final_status: %s) - returning exit code 1",
+                            final_status,
+                        )
+                        return 1
 
         except Exception as postprocess_exc:
             logger.exception("Caliper postprocess after test failed with exception")
@@ -180,6 +214,38 @@ def run_and_postprocess(test_func, *args, **kwargs):
                     "Test succeeded but postprocessing failed with exception - returning exit code 1"
                 )
                 return 1
+
+
+def _is_warnings_only_failure(status: dict) -> bool:
+    """Check if postprocessing failure is only due to warnings, not actual errors.
+
+    Args:
+        status: Postprocessing result dictionary
+
+    Returns:
+        True if all failures are actually warnings, False if there are real failures
+    """
+    steps = status.get("steps", [])
+    if not steps:
+        return False
+
+    # Check each step for actual failures vs warnings
+    has_any_problematic_steps = False
+    has_actual_failures = False
+
+    for step_dict in steps:
+        for _step_name, step_data in step_dict.items():
+            step_status = step_data.get("status")
+            if step_status in ("failed", "warning"):
+                has_any_problematic_steps = True
+
+                if step_status == "failed":
+                    has_actual_failures = True
+
+    # Only treat as warnings-only if:
+    # 1. We have some problematic steps (otherwise why did overall success=False?)
+    # 2. None of them are actual failures (all are warnings)
+    return has_any_problematic_steps and not has_actual_failures
 
 
 def run_postprocess_after_test(
@@ -298,7 +364,7 @@ def run_orchestration_postprocess(
     if status_base is None:
         return result
 
-    status_path = Path(status_base) / "caliper_postprocess_status.yaml"
+    status_path = Path(status_base) / "postprocess_status.yaml"
     try:
         status_path.parent.mkdir(parents=True, exist_ok=True)
         status_path.write_text(

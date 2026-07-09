@@ -2,25 +2,15 @@
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import click
 
-from projects.caliper.cli.commands import (
-    ai_eval_export,
-    artifacts_export,
-    artifacts_import,
-    kpi_analyze,
-    kpi_generate,
-    kpi_import,
-    kpi_s3_import,
-    list_reports_cmd,
-    parse_cmd,
-    visualize_cmd,
-)
-from projects.caliper.cli.s3_export_cli import s3_export_cmd
+from projects.caliper.orchestration.subcommands.s3_export_cli import s3_export_cmd
 
 
 def parse_mlflow_url(url: str) -> dict[str, str | None]:
@@ -190,6 +180,20 @@ def run_cli() -> None:
     except SystemExit:
         raise
 
+
+# Import and register commands
+from projects.caliper.cli.commands import (
+    ai_eval_export,
+    artifacts_export,
+    artifacts_import,
+    kpi_analyze,
+    kpi_generate,
+    kpi_import,
+    kpi_s3_import,
+    list_reports_cmd,
+    parse_cmd,
+    visualize_cmd,
+)
 
 # Register main commands
 main.add_command(parse_cmd)

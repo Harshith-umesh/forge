@@ -13,6 +13,7 @@ from projects.caliper.engine.file_export.mlflow_secrets import (
     assert_tracking_uri_has_no_userinfo,
     mlflow_connection_env,
 )
+from projects.core.library import env
 
 logger = logging.getLogger(__name__)
 
@@ -320,7 +321,7 @@ def _upload_mlflow_files_parallel(
             else:
                 rel_name = pr.relative_to(ar).as_posix()
             with lock:
-                logger.info(f"log artifact {p} -> {rel_name}")
+                logger.debug(f"log artifact {p} -> {rel_name}")
         client.log_artifact(run_id, str(p), artifact_path=subdir)
 
     if workers <= 1:
@@ -385,6 +386,30 @@ def log_artifacts(
                 f"MLflow upload starting ({n} file(s), workers={workers}, "
                 f"experiment={experiment or 'default'})"
             )
+
+            # Save file list to artifact directory to avoid log spam
+            try:
+                if env.ARTIFACT_DIR:
+                    upload_list_file = Path(env.ARTIFACT_DIR) / "mlflow_upload_files.txt"
+                    with open(upload_list_file, "w") as f:
+                        f.write("MLflow Upload File List\n")
+                        f.write("======================\n")
+                        f.write(f"Experiment: {experiment or 'default'}\n")
+                        f.write(f"Total files: {n}\n")
+                        f.write(f"Workers: {workers}\n")
+                        f.write(f"Artifact root: {artifact_root}\n\n")
+
+                        for file_path in file_paths:
+                            # Calculate relative path for display
+                            try:
+                                rel_path = file_path.relative_to(artifact_root)
+                            except ValueError:
+                                rel_path = file_path
+                            f.write(f"{file_path} -> {rel_path}\n")
+
+                    logger.info(f"MLflow upload file list saved to: {upload_list_file}")
+            except Exception as e:
+                logger.warning(f"Failed to save MLflow upload file list: {e}")
 
         effective_meta = merge_run_metadata_with_git_source(artifact_root, run_metadata)
 
@@ -618,25 +643,37 @@ def log_multi_run_artifacts(
     return _run(tracking_uri)
 
 
-def update_run_log_artifact(
+def update_artifacts(
     *,
     run_id: str,
-    log_file: Path,
+    files: dict[Path, str | None] | list[Path],
     tracking_uri: str | None = None,
-    artifact_path: str | None = None,
     connection: dict[str, Any] | None = None,
 ) -> None:
-    """Re-upload a run.log file to an existing MLflow run, replacing the previous copy.
+    """Re-upload multiple files to an existing MLflow run, replacing previous copies.
+
+    Args:
+        run_id: The MLflow run ID to update
+        files: Either a dict mapping file paths to artifact paths (None for root),
+               or a list of file paths (all uploaded to root)
+        tracking_uri: MLflow tracking URI
+        connection: MLflow connection configuration
 
     Intended to be called after all post-export work (notifications, etc.) completes,
-    so the uploaded log contains the full session output.
+    so uploaded files contain the full session output.
     """
     try:
         import mlflow
     except ImportError as e:
         raise RuntimeError(
-            "mlflow is required for run-log update. Install with: pip install -e '.[caliper]'"
+            "mlflow is required for run update. Install with: pip install -e '.[caliper]'"
         ) from e
+
+    # Normalize input to dict format
+    if isinstance(files, list):
+        files_dict = dict.fromkeys(files)
+    else:
+        files_dict = files
 
     def _upload(uri: str | None) -> None:
         import os
@@ -651,7 +688,11 @@ def update_run_log_artifact(
             handler.flush()
 
         client = mlflow.tracking.MlflowClient()
-        client.log_artifact(run_id, str(log_file), artifact_path=artifact_path)
+
+        # Upload each file to its specified artifact path
+        for file_path, artifact_path in files_dict.items():
+            if file_path.exists():
+                client.log_artifact(run_id, str(file_path), artifact_path=artifact_path)
 
     if connection is not None:
         with mlflow_connection_env(connection):

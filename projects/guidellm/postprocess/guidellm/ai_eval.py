@@ -40,8 +40,8 @@ class GuideLLMAIEvaluator:
             ):
                 # Get artifact files specific to this test directory only
                 test_dir = base_dir / record.test_base_path
-                if plugin and hasattr(plugin, "get_ai_eval_artifact_files_for_test"):
-                    test_relative_files = plugin.get_ai_eval_artifact_files_for_test(test_dir)
+                if plugin and hasattr(plugin, "get_ai_data_artifact_files_for_test"):
+                    test_relative_files = plugin.get_ai_data_artifact_files_for_test(test_dir)
                     # Convert test-relative paths to base-relative paths for artifact copying
                     relevant_artifact_files = [
                         str(Path(record.test_base_path) / test_relative_file)

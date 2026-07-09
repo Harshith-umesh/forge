@@ -29,6 +29,7 @@ class StepStatus(StrEnum):
     FAILURE = "failure"
     ONGOING = "ongoing"
     UNKNOWN = "unknown"
+    WARNING = "warning"
 
 
 logger = logging.getLogger(__name__)
@@ -97,12 +98,15 @@ def _update_fjob_export_status(status: dict):
             os.environ["KUBECONFIG"] = original_kubeconfig
 
 
-def send_notification(status: dict[str, Any], notification_provider=None) -> None:
+def send_notification(status: dict[str, Any], notification_provider=None) -> bool:
     """Send job completion notifications based on caliper export status.
 
     Args:
         status: Caliper export status object containing backend results and metadata
         notification_provider: Optional per-project SlackNotificationProvider instance
+
+    Returns:
+        bool: True if notifications were sent successfully, False otherwise
     """
     # Extract notification parameters from status object
     project = _extract_project_from_status(status)
@@ -113,9 +117,10 @@ def send_notification(status: dict[str, Any], notification_provider=None) -> Non
     # Apply minimal filtering logic
     if _should_skip_notification(project, operation, finish_reason):
         logger.info(f"Skipping notification for {project} {operation}")
-        return
+        return True  # Skipped is considered success
 
     # Send actual notifications
+    notification_success = True
     logger.info(f"Sending notification: {project} {operation} {finish_reason}{duration_str}")
 
     # Build enhanced notification with fournos job info and artifact links
@@ -124,10 +129,10 @@ def send_notification(status: dict[str, Any], notification_provider=None) -> Non
     # Write notification to file for GitHub pickup
     try:
         if env.ARTIFACT_DIR:
-            notification_file = Path(env.ARTIFACT_DIR) / "NOTIFICATION.html"
+            notification_file = Path(env.ARTIFACT_DIR) / "NOTIFICATION-github.md"
             with open(notification_file, "w", encoding="utf-8") as f:
                 f.write(notification_status)
-            logger.info("Wrote export notification file")
+            logger.info(f"Wrote export notification file {notification_file}")
         else:
             logger.warning("ARTIFACT_DIR not available, skipping notification file")
     except Exception as e:
@@ -137,15 +142,33 @@ def send_notification(status: dict[str, Any], notification_provider=None) -> Non
     try:
         from projects.core.notifications.send import send_notification as send_github_notification
 
+        # Get notification vault from configuration
+        notification_vault = None
+        try:
+            from projects.core.library import config
+
+            notification_config = config.project.get_config("caliper.export.notifications", {})
+            notification_vault = notification_config.get("vault")
+            if notification_vault:
+                logger.info(f"Using notification vault from config: {notification_vault}")
+        except Exception as e:
+            logger.warning(f"Failed to get notification vault from config: {e}")
+
         success = send_github_notification(
-            message=notification_status, github=True, slack=False, dry_run=False
+            message=notification_status,
+            github=True,
+            slack=False,
+            dry_run=False,
+            notification_vault=notification_vault,
         )
         if success:
             logger.info("Successfully sent GitHub notification")
         else:
-            logger.warning("GitHub notification sending failed")
+            logger.error("GitHub notification sending failed")
+            notification_success = False
     except Exception as e:
-        logger.warning(f"Failed to send GitHub notification: {e}")
+        logger.error(f"Failed to send GitHub notification: {e}")
+        notification_success = False
 
     # Per-project Slack notification via provider
     if notification_provider:
@@ -166,8 +189,12 @@ def send_notification(status: dict[str, Any], notification_provider=None) -> Non
                 logger.info("Successfully sent per-project Slack notification")
             else:
                 logger.warning("Per-project Slack notification failed")
+                notification_success = False
         except Exception as e:
             logger.warning(f"Failed to send per-project Slack notification: {e}")
+            notification_success = False
+
+    return notification_success
 
 
 def _get_project_and_args(project: str) -> tuple[str, str]:
@@ -203,7 +230,7 @@ def _get_project_and_args(project: str) -> tuple[str, str]:
     try:
         from projects.core.library import config
 
-        job_args = config.project.get_config("ci_job.args")
+        job_args = config.project.get_config("ci_job.args", [], warn=False)
         fjob_args_str = " ".join(job_args) if job_args else ""
     except Exception as e:
         logger.warning(f"Failed to get args from config: {e}")
@@ -230,6 +257,31 @@ def _get_execution_engine_config() -> str | None:
         return f"```yaml\n{engine_yaml.strip()}\n```"
     except Exception as e:
         logger.warning(f"Failed to read fournos job config: {e}")
+        return None
+
+
+def _check_job_shutdown_status() -> dict[str, Any] | None:
+    """Check if the job has been aborted via spec.shutdown field."""
+    try:
+        metadata_dir = ci_lib.get_ci_metadata_dir()
+        fournos_fjob_path = metadata_dir / "fournos_fjob.yaml"
+        if not fournos_fjob_path.exists():
+            return None
+
+        with open(fournos_fjob_path, encoding="utf-8") as f:
+            fjob_data = yaml.safe_load(f)
+
+        shutdown_value = fjob_data.get("spec", {}).get("shutdown")
+        if shutdown_value:
+            return {
+                "shutdown_detected": True,
+                "shutdown_value": shutdown_value,
+                "is_aborted": shutdown_value.lower() == "stop",
+            }
+
+        return {"shutdown_detected": False, "shutdown_value": None, "is_aborted": False}
+    except Exception as e:
+        logger.warning(f"Failed to check job shutdown status: {e}")
         return None
 
 
@@ -372,8 +424,8 @@ def _read_step_duration(step_dir: Path) -> str:
 def _process_caliper_postprocess_status(
     step_dir: Path, step_log_links: list[str], mlflow_run_url: str | None = None
 ) -> None:
-    """Search for and process caliper_postprocess_status.yaml files in step directory."""
-    status_files = list(step_dir.glob("**/caliper_postprocess_status.yaml"))
+    """Search for and process postprocess_status.yaml files in step directory."""
+    status_files = list(step_dir.glob("**/postprocess_status.yaml"))
 
     for status_file in status_files:
         try:
@@ -382,6 +434,12 @@ def _process_caliper_postprocess_status(
 
             if not status_data:
                 continue
+
+            # Check for job shutdown/abort status
+            shutdown_status = _check_job_shutdown_status()
+            if shutdown_status:
+                # Add shutdown information to status data
+                status_data["job_shutdown"] = shutdown_status
 
             # Import notification functions from caliper
             from projects.caliper.orchestration.notification import (
@@ -397,11 +455,24 @@ def _process_caliper_postprocess_status(
             # Create file link generator function
             get_file_link = None
             if mlflow_run_url:
+                # Use base_directory from status data for MLflow URL construction
+                base_directory = result.base_directory
+                if base_directory:
+                    # Calculate path relative to BASE_ARTIFACT_DIR.parent
+                    # e.g., "/workspace/artifacts/000__replot/postprocess_output" -> "000__replot/postprocess_output"
+                    from projects.core.library import env
 
-                def get_file_link(file_path: str) -> str:
-                    return _create_mlflow_file_url_for_step(
-                        mlflow_run_url, step_dir.name, file_path
-                    )
+                    base_path = Path(base_directory)
+
+                    # Calculate step subdirectory relative to BASE_ARTIFACT_DIR.parent
+                    # e.g., "/workspace/artifacts/000__replot/postprocess_output" relative to "/workspace/artifacts" = "000__replot/postprocess_output"
+                    step_subdir = str(base_path.relative_to(env.BASE_ARTIFACT_DIR.parent))
+                else:
+                    # Fallback to step_dir.name for backward compatibility
+                    step_subdir = step_dir.name
+
+                def get_file_link(file_path: str, step_subdir=step_subdir) -> str:
+                    return _create_mlflow_file_url_for_step(mlflow_run_url, step_subdir, file_path)
 
             # Generate notification text from the structured result
             notification_text = format_postprocess_status_notification(result, get_file_link)
@@ -409,7 +480,8 @@ def _process_caliper_postprocess_status(
                 step_log_links.append(notification_text)
 
         except Exception as e:
-            logger.warning(f"Failed to process caliper postprocess status file {status_file}: {e}")
+            logger.error(f"Failed to process caliper postprocess status file {status_file}: {e}")
+            raise
 
 
 def _process_notification_files(step_dir: Path, step_log_links: list[str]) -> None:
@@ -502,7 +574,8 @@ def _process_postprocess_status(mlflow_run_url: str | None = None) -> list[str]:
         try:
             _process_caliper_postprocess_status(step_dir, postprocess_links, mlflow_run_url)
         except Exception as e:
-            logger.warning(f"Failed to process postprocess status for {step_dir.name}: {e}")
+            logger.error(f"Failed to process postprocess status for {step_dir.name}: {e}")
+            raise
 
     return postprocess_links
 
@@ -535,6 +608,37 @@ def _read_step_exit_status(
         return "❓", StepStatus.UNKNOWN  # Unknown status on error
 
 
+def _check_postprocess_warnings(step_dir: Path) -> StepStatus:
+    """Check for warning status in postprocess status file."""
+
+    status = StepStatus.SUCCESS  # No postprocess warning/error, assume no warnings
+    for status_file in step_dir.glob("**/postprocess_status.yaml"):
+        try:
+            with open(status_file, encoding="utf-8") as f:
+                status_data = yaml.safe_load(f)
+        except Exception as e:
+            logging.error(f"Failed to read {status_file} as yaml: {e}")
+            status = StepStatus.WARNING
+            continue
+
+        if not status_data:
+            continue
+
+        # Check top-level success field for warning value
+        success_value = status_data.get("success")
+        if success_value == "warning":
+            logging.warning(
+                f"Post-process warning detected in {status_file}, setting the WARNING flag"
+            )
+            status = StepStatus.WARNING
+
+        if success_value in ("failure", "error"):
+            logging.error(f"Post-process {success_value} detected, raising the FAILURE flag")
+            return StepStatus.FAILURE
+
+    return status
+
+
 def _get_overall_status_from_steps() -> str:
     """Check all step exit statuses and return overall status emoji."""
     try:
@@ -554,16 +658,23 @@ def _get_overall_status_from_steps() -> str:
             if not run_log.exists():
                 continue
 
-            emoji, status = _read_step_exit_status(step_dir, current_step_name)
+            _emoji, status = _read_step_exit_status(step_dir, current_step_name)
+
             step_statuses.append(status)
 
-        # Priority: failure > ongoing > unknown > success
+            # Check for postprocess warnings in this step (always check, regardless of exit status)
+            postprocess_status = _check_postprocess_warnings(step_dir)
+            step_statuses.append(postprocess_status)
+
+        # Priority: failure > ongoing > warning > unknown > success
         if StepStatus.FAILURE in step_statuses:
             return "🔴"  # Any failure = red
-        elif StepStatus.ONGOING in step_statuses:
-            return "🟡"  # Ongoing = yellow
+        elif StepStatus.WARNING in step_statuses:
+            return "🟠"  # Warning = orange
         elif StepStatus.UNKNOWN in step_statuses:
             return "🟠"  # Unknown = orange
+        elif StepStatus.ONGOING in step_statuses:
+            return "🟢"  # Ongoing --> success
         else:
             return "🟢"  # All successful = green
 
@@ -578,10 +689,23 @@ def _build_enhanced_notification(
     """Build enhanced notification with fournos job config and artifact links."""
     fjob_project, fjob_args_str = _get_project_and_args(project)
 
-    # Check all step statuses for overall status emoji (takes priority over finish_reason)
-    status_emoji = _get_overall_status_from_steps()
-    base_status = f"<strong>{status_emoji} Execution of `{fjob_project}` {fjob_args_str} {status_emoji}</strong>"
-    notification_parts = [base_status, "---"]
+    # Check for job shutdown first (takes highest priority)
+    shutdown_status = _check_job_shutdown_status()
+    if shutdown_status and shutdown_status.get("is_aborted"):
+        status_emoji = "🛑"  # Abort status overrides everything
+    else:
+        # Check all step statuses for overall status emoji (takes priority over finish_reason)
+        status_emoji = _get_overall_status_from_steps()
+
+    base_status = f"**{status_emoji} Execution of `{fjob_project}` {fjob_args_str} {status_emoji}**"
+    notification_parts = [base_status]
+
+    # Add job abort message right below overall status if applicable
+    if shutdown_status and shutdown_status.get("is_aborted"):
+        shutdown_value = shutdown_status.get("shutdown_value", "Stop")
+        notification_parts.append(f"🛑 **JOB ABORTED** - `spec.shutdown={shutdown_value}`")
+
+    notification_parts.append("---")
 
     execution_engine_config = _get_execution_engine_config()
     if execution_engine_config:
@@ -690,6 +814,43 @@ def run_caliper_orchestration_export(*, artifact_directory: Path | None):
             "caliper.export.backend.mlflow.config.run_name", os.environ["FJOB_NAME"], print=False
         )
 
+    # Initialize vaults needed for export operations
+    logger.info("Checking vaults for export operations")
+    try:
+        # Get export-specific vaults (MLflow, S3, notifications)
+        export_vaults = caliper_export_list_vaults()
+        logger.info(f"Export vaults needed: {len(export_vaults)} - {export_vaults}")
+
+        # Initialize vaults if any are needed
+        if export_vaults:
+            from projects.core.library import vault
+
+            # Check if vault manager is already initialized
+            try:
+                vault.get_vault_manager()
+                logger.info(
+                    f"Vault manager already initialized, checking {len(export_vaults)} export vaults"
+                )
+                manager_already_initialized = True
+            except RuntimeError:
+                logger.info(f"Initializing vault manager with {len(export_vaults)} export vaults")
+                manager_already_initialized = False
+
+            vault.init(vaults=export_vaults)
+
+            if manager_already_initialized:
+                logger.info(f"Export vault check completed for {len(export_vaults)} vaults")
+            else:
+                logger.info(
+                    f"Successfully initialized vault manager with {len(export_vaults)} vaults for export"
+                )
+        else:
+            logger.info("No vaults needed for export operation")
+
+    except Exception as e:
+        logger.warning(f"Failed to initialize vaults for export: {e}")
+        logger.warning("Continuing with export operation - some features may not work")
+
     caliper_cfg = config.project.get_config("caliper", print=False)
 
     return run_from_orchestration_config(caliper_cfg)
@@ -711,6 +872,9 @@ def caliper_export_entrypoint(_ctx, artifact_directory: Path | None):
     notification_provider = getattr(getattr(_ctx, "obj", None), "notification_provider", None)
 
     status = None
+    export_failed = False
+    notification_failed = False
+
     try:
         status = run_caliper_orchestration_export(artifact_directory=artifact_directory)
         logger.info("Export status:\n" + yaml.dump(status, indent=4))
@@ -720,34 +884,46 @@ def caliper_export_entrypoint(_ctx, artifact_directory: Path | None):
 
     except Exception as e:
         logger.error(f"Export failed: {e}")
+        export_failed = True
         # Create failure status for notification
         status = {"success": False, "error": str(e), "backends": {}}
-        raise  # Re-raise to maintain error behavior
 
     finally:
         # Send completion notifications regardless of success/failure
         if status:
             try:
-                send_notification(status, notification_provider=notification_provider)
+                notification_success = send_notification(
+                    status, notification_provider=notification_provider
+                )
+                if not notification_success:
+                    logger.error("Notification sending failed")
+                    notification_failed = True
             except Exception as e:
                 logger.exception(f"Failed to send notifications: {e}")
+                notification_failed = True
 
-        # Re-upload run.log with complete content (includes notification output)
-        _try_update_run_log(status)
+        _update_final_artifacts(status)
 
+    # Return proper exit code
+    if export_failed or notification_failed:
+        return 1
     return 0
 
 
-def _try_update_run_log(status: dict[str, Any] | None) -> None:
-    """Best-effort re-upload of run.log to MLflow after all post-export work is done."""
-    if not status:
+def _update_final_artifacts(export_status: dict[str, Any] | None) -> None:
+    """Update the final artifacts (run.log, notifications) to MLflow after all post-export work is done."""
+    if not export_status:
+        logger.warning("No export status received, cannot update the final artifacts")
         return
 
     try:
-        caliper_export = status.get("caliper_artifacts_export", {})
+        caliper_export = export_status.get("caliper_artifacts_export", {})
         backends = caliper_export.get("backends", {})
         mlflow_meta = backends.get("mlflow")
         if not isinstance(mlflow_meta, dict):
+            logger.warning(
+                "Export status don't have the mlflow backend, cannot update the final artifacts"
+            )
             return
 
         run_id = mlflow_meta.get("run_id")
@@ -758,18 +934,13 @@ def _try_update_run_log(status: dict[str, Any] | None) -> None:
             "caliper.export.from", None, print=False, warn=False
         )
         if not artifact_from:
-            return
-
-        artifact_dir = os.environ.get("ARTIFACT_DIR", "")
-        if not artifact_dir:
-            return
-
-        log_file = Path(artifact_dir) / "run.log"
-        if not log_file.is_file():
+            logger.warning(
+                "Export status don't have the caliper.export.from field, cannot update the final artifacts"
+            )
             return
 
         artifact_root = Path(artifact_from)
-        artifact_path = str(Path(artifact_dir).relative_to(artifact_root))
+        artifact_path = str(env.ARTIFACT_DIR.relative_to(artifact_root))
 
         tracking_uri = mlflow_meta.get("tracking_uri")
 
@@ -794,15 +965,210 @@ def _try_update_run_log(status: dict[str, Any] | None) -> None:
             if secrets_path and secrets_path.exists():
                 connection = load_mlflow_secrets_yaml(secrets_path)
 
-        from projects.caliper.engine.file_export.mlflow_backend import update_run_log_artifact
+        # Upload session artifacts using MLflow backend
 
-        update_run_log_artifact(
+        _update_artifacts(
             run_id=run_id,
-            log_file=log_file,
-            tracking_uri=tracking_uri,
+            artifact_dir=env.ARTIFACT_DIR,
             artifact_path=artifact_path,
+            tracking_uri=tracking_uri,
             connection=connection,
         )
-        logger.info("Updated run.log in MLflow run %s", run_id)
+        logger.info("Updated final artifacts in MLflow run %s", run_id)
     except Exception as e:
-        logger.warning("Failed to update run.log in MLflow: %s", e)
+        logger.warning("Failed to update final artifacts in MLflow: %s", e)
+
+
+def _update_artifacts(
+    *,
+    run_id: str,
+    artifact_dir: str,
+    artifact_path: str | None = None,
+    tracking_uri: str | None = None,
+    connection: dict[str, Any] | None = None,
+) -> None:
+    """Re-upload artifacts to an existing MLflow run.
+
+    Args:
+        run_id: The MLflow run ID to update
+        artifact_dir: Directory containing the artifacts to upload
+        artifact_path: Artifact path within the MLflow run (None for root)
+        tracking_uri: MLflow tracking URI
+        connection: MLflow connection configuration
+
+    Intended to be called after all post-export work (notifications, etc.) completes,
+    so uploaded files contain the full session output.
+    """
+    from pathlib import Path
+
+    artifact_dir_path = Path(artifact_dir)
+
+    # Collect files to upload
+    files_to_upload = []
+
+    # Check for run.log
+    log_file = artifact_dir_path / "run.log"
+    if log_file.is_file():
+        files_to_upload.append(log_file)
+
+    # Check for notification file
+    notif_file = artifact_dir_path / "NOTIFICATION-github.md"
+    if notif_file.is_file():
+        files_to_upload.append(notif_file)
+
+    # Upload files if any exist
+    if files_to_upload:
+        from projects.caliper.engine.file_export.mlflow_backend import update_artifacts
+
+        update_artifacts(
+            run_id=run_id,
+            files=dict.fromkeys(files_to_upload, artifact_path),
+            tracking_uri=tracking_uri,
+            connection=connection,
+        )
+
+
+def caliper_export_list_vaults() -> list[str]:
+    """List vaults required for Caliper export operations.
+
+    Returns:
+        List of vault names needed for export functionality
+    """
+    # STUB: This function determines which vaults are needed for export operations
+    # Currently returns the S3 export vault if S3 export is enabled in the project config
+
+    export_vaults = []
+
+    try:
+        from projects.core.library import config
+
+        # Check if S3 export or import is enabled in the project configuration
+        s3_parent_config = config.project.get_config("caliper.postprocess.s3", {})
+        s3_export_config = config.project.get_config("caliper.postprocess.s3.export", {})
+        s3_import_config = config.project.get_config("caliper.postprocess.s3.import", {})
+
+        s3_export_enabled = s3_export_config.get("enabled", False)
+        s3_import_enabled = s3_import_config.get("enabled", False)
+
+        if s3_export_enabled or s3_import_enabled:
+            # Add the configured vault for S3 credentials (shared between import and export)
+            vault_config = s3_parent_config.get("vault", {})
+            vault_name = (
+                vault_config.get("name") if isinstance(vault_config, dict) else vault_config
+            )
+            if vault_name:
+                export_vaults.append(vault_name)
+                logger.info(f"Added S3 vault: {vault_name}")
+            else:
+                logger.warning(
+                    "S3 import/export enabled but no vault specified in caliper.postprocess.s3.vault.name"
+                )
+
+        # Check if MLflow export is enabled and add its vault
+        mlflow_config = config.project.get_config("caliper.export.backend.mlflow", {})
+        if mlflow_config.get("enabled", False):
+            mlflow_vault = mlflow_config.get("secrets", {}).get("vault", {}).get("name")
+            if mlflow_vault:
+                export_vaults.append(mlflow_vault)
+                logger.info(f"Added MLflow export vault: {mlflow_vault}")
+            else:
+                logger.warning(
+                    "MLflow export enabled but no vault specified in caliper.export.backend.mlflow.secrets.vault.name"
+                )
+
+        # Check if notifications are enabled and any export backend is enabled
+        config.project.get_config("caliper.export.notifications", {})
+        (s3_export_enabled or s3_import_enabled or mlflow_config.get("enabled", False))
+
+        # Note: notification vault is handled separately as optional vault
+        # See caliper_export_list_optional_vaults() function
+
+        # STUB: Could add other export-related vaults here in the future
+        # e.g., for different cloud providers, artifact repositories, etc.
+
+    except Exception as e:
+        logger.warning(f"Failed to determine export vaults from config: {e}")
+        # Return empty list on error - export operations will handle missing vaults gracefully
+
+    logger.info(f"Export vault list: {export_vaults}")
+    return export_vaults
+
+
+def caliper_export_list_optional_vaults() -> list[str]:
+    """List optional vaults for Caliper export operations.
+
+    Returns:
+        List of optional vault names for export functionality (e.g., notifications)
+    """
+    optional_vaults = []
+
+    try:
+        from projects.core.library import config
+
+        # Check if notifications are enabled and any export backend is enabled
+        notification_config = config.project.get_config("caliper.export.notifications", {})
+
+        # Check if any export operations are enabled
+        s3_export_config = config.project.get_config("caliper.postprocess.s3.export", {})
+        s3_import_config = config.project.get_config("caliper.postprocess.s3.import", {})
+        mlflow_config = config.project.get_config("caliper.export.backend.mlflow", {})
+
+        any_export_enabled = (
+            s3_export_config.get("enabled", False)
+            or s3_import_config.get("enabled", False)
+            or mlflow_config.get("enabled", False)
+        )
+
+        if notification_config.get("enabled", False) and any_export_enabled:
+            # Add notification vault for export completion notifications
+            notification_vault = notification_config.get("vault")
+            if notification_vault:
+                optional_vaults.append(notification_vault)
+                logger.info(f"Added notification vault (export enabled): {notification_vault}")
+            else:
+                logger.warning(
+                    "Export notifications enabled but no vault specified in caliper.export.notifications.vault"
+                )
+
+    except Exception as e:
+        logger.warning(f"Failed to determine optional export vaults from config: {e}")
+
+    logger.info(f"Optional export vault list: {optional_vaults}")
+    return optional_vaults
+
+
+def caliper_agentic_list_vaults() -> list[str]:
+    """List vaults required for agentic operations (config review, on failure analysis).
+
+    Returns:
+        List of vault names needed for agentic functionality
+    """
+    agentic_vaults = []
+
+    try:
+        from projects.core.library import config
+
+        # Check if agentic features are enabled in the project configuration
+        agentic_config = config.project.get_config("agentic", {})
+
+        # Check if any agentic feature is enabled
+        any_agentic_enabled = (
+            agentic_config.get("enabled", False)
+            or agentic_config.get("on_failure", {}).get("enabled", False)
+            or agentic_config.get("config_review", {}).get("enabled", False)
+        )
+
+        if any_agentic_enabled:
+            # Add the models vault for agentic operations
+            models_vault = "psap-models-corp-rh"
+            agentic_vaults.append(models_vault)
+            logger.info(f"Added agentic models vault: {models_vault}")
+
+        # STUB: Could add other agentic-related vaults here in the future
+
+    except Exception as e:
+        logger.warning(f"Failed to determine agentic vaults from config: {e}")
+        # Return empty list on error - agentic operations will handle missing vaults gracefully
+
+    logger.info(f"Agentic vault list: {agentic_vaults}")
+    return agentic_vaults
