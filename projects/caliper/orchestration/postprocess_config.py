@@ -167,10 +167,6 @@ class CaliperOrchestrationS3ExportSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
-    prefix: str | None = Field(
-        default=None,
-        description="S3 key prefix/folder path (optional).",
-    )
     upload_id: str | None = Field(
         default=None,
         description="Custom upload identifier; uses timestamp (YY-MM-DD_HHMMSS) if null.",
@@ -224,10 +220,6 @@ class CaliperOrchestrationS3Section(BaseModel):
     directory: str | None = Field(
         default=None,
         description="Directory identifier for S3 organization (required when import or export is enabled).",
-    )
-    prefix: str | None = Field(
-        default=None,
-        description="S3 prefix for organizing uploads and imports.",
     )
     vault: CaliperOrchestrationS3VaultSection = Field(
         default_factory=CaliperOrchestrationS3VaultSection,

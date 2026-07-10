@@ -75,21 +75,20 @@ def s3_import_entrypoint(
         s3_parent_config = postprocess_config.s3
         s3_config = postprocess_config.s3.import_
 
-        # Build import prefix using instance + s3.prefix + directory
-        import_prefix_parts = []
-        if s3_parent_config.instance:
-            import_prefix_parts.append(s3_parent_config.instance)
-        if s3_parent_config.prefix:
-            import_prefix_parts.append(s3_parent_config.prefix.rstrip("/"))
-        if s3_parent_config.directory:
-            import_prefix_parts.append(s3_parent_config.directory)
+        # Build import prefix using instance + directory
+        from projects.caliper.cli.s3_export import build_s3_prefix
 
-        import_prefix = "/".join(import_prefix_parts) if import_prefix_parts else ""
+        import_prefix = build_s3_prefix(
+            instance=s3_parent_config.instance,
+            directory=s3_parent_config.directory,
+            trailing_slash=False,
+        )
         import_dir = output_dir / s3_config.output_dir
 
         log_s3_import_command(
             bucket=s3_parent_config.bucket,
-            prefix=import_prefix,
+            instance=s3_parent_config.instance,
+            directory=s3_parent_config.directory,
             output_dir=import_dir,
             include_kpis_json=s3_config.include_kpis_json,
             include_kpis_csv=s3_config.include_kpis_csv,
@@ -139,7 +138,6 @@ def s3_export_entrypoint(
         ai_data_dir=ai_data_dir,
         analysis_file=analysis_file,
         bucket=s3_parent_config.bucket,
-        prefix=s3_parent_config.prefix,
         instance=s3_parent_config.instance,
         directory=s3_parent_config.directory,
         upload_id=s3_config.upload_id,
@@ -176,4 +174,21 @@ def analyze_kpis_entrypoint(
         base_dir=base_dir,
         output_dir=output_dir,
         current_kpis_file=current_kpis_file,
+    )
+
+
+def export_kpis_to_csv_entrypoint(
+    plugin,
+    kpi_records: list[dict[str, Any]],
+    output_path: Path,
+    include_header_comments: bool = True,
+) -> str:
+    """Entrypoint for orchestration to export KPIs to CSV."""
+    from projects.caliper.engine.kpi.csv_export import export_kpis_to_csv
+
+    return export_kpis_to_csv(
+        plugin=plugin,
+        kpi_records=kpi_records,
+        output_path=output_path,
+        include_header_comments=include_header_comments,
     )

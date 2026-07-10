@@ -175,6 +175,27 @@ class GuideLLMPlugin(PostProcessingPlugin):
         """Compute KPI values from the unified model."""
         return self.kpi_handler.compute_kpis(model)
 
+    def export_kpis_to_csv(
+        self,
+        kpi_records: list[dict[str, Any]],
+        output_path: Path,
+        include_header_comments: bool = True,
+    ) -> str:
+        """Export KPI records to CSV format using GuideLLM's CSV exporter.
+
+        Args:
+            kpi_records: KPI records from compute_kpis()
+            output_path: Path where to write the CSV file
+            include_header_comments: Whether to include descriptive header comments
+
+        Returns:
+            Path to the generated CSV file
+        """
+        from .csv_export import KPICsvExporter
+
+        exporter = KPICsvExporter()
+        return exporter.export_kpis_to_csv(kpi_records, output_path, include_header_comments)
+
     def build_ai_data_payload(self, model: UnifiedRunModel) -> dict[str, Any]:
         """Build AI evaluation payload from the unified model."""
         return self.ai_evaluator.build_payload(model, self)
