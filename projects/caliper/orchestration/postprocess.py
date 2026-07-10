@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import subprocess
 import time
 import traceback
 from pathlib import Path
@@ -28,6 +29,7 @@ from projects.caliper.cli.orchestration_entrypoints import (
     s3_import_entrypoint,
 )
 from projects.caliper.orchestration.cli_builder import (
+    build_kpi_generate_command,
     build_parse_command,
     build_visualize_command,
     handle_caliper_output_and_completion,
@@ -45,7 +47,6 @@ from projects.caliper.orchestration.postprocess_outcome import (
 from projects.caliper.orchestration.step_logging import (
     cleanup_step_logging,
     log_ai_data_command,
-    log_artifacts_to_kpis_command,
     log_kpis_to_csv_command,
     log_s3_export_command,
     step_logging,
@@ -53,6 +54,42 @@ from projects.caliper.orchestration.step_logging import (
 from projects.core.library import env
 
 logger = logging.getLogger(__name__)
+
+
+def _execute_caliper_command(
+    command: list[str],
+    step_name: str,
+    script_file: Path,
+    log_file: Path,
+    status_file: Path,
+) -> tuple[subprocess.CompletedProcess, dict[str, Any]]:
+    """Execute a Caliper CLI command and return result and status data.
+
+    Args:
+        command: CLI command arguments list
+        step_name: Name for logging banners (e.g., "PARSE", "VISUALIZE")
+        script_file: Path to save debug script
+        log_file: Path to save command output
+        status_file: Path to read status YAML from
+
+    Returns:
+        Tuple of (subprocess result, parsed status data)
+    """
+    # Log start banner and save script
+    log_caliper_start_banner(command, script_file, step_name)
+
+    # Execute command with combined stdout/stderr
+    result = subprocess.run(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,  # Combine stderr into stdout
+        text=True,
+    )
+
+    # Handle output, status parsing, and log completion banner
+    status_data = handle_caliper_output_and_completion(result, log_file, status_file, step_name)
+
+    return result, status_data
 
 
 def _make_path_relative_to_base(file_path: str | Path, base_dir: Path) -> str:
@@ -273,8 +310,9 @@ def _run_artifacts_to_kpis(
     output_dir: Path,
     plugin_module: str,
     base_dir: Path,
+    manifest_path: Path | None,
 ) -> dict[str, Any]:
-    """Generate KPI JSON using the plugin's compute_kpis method."""
+    """Generate KPI JSON using fork/exec subprocess execution."""
 
     if not postprocess_config.kpi.enabled:
         return {"status": "disabled", "reason": "kpi disabled", "completed_at": time.time()}
@@ -286,36 +324,62 @@ def _run_artifacts_to_kpis(
         }
 
     try:
-        # Write KPI JSON
+        # Prepare paths
         output_file = output_dir / postprocess_config.kpi.artifacts_to_kpis.output
+        output_file.parent.mkdir(parents=True, exist_ok=True)
 
-        # Log command to reproduce this step
-        log_artifacts_to_kpis_command(
-            base_dir=base_dir,
-            plugin_module=plugin_module,
+        # Create temporary status file for subprocess communication
+        status_file = output_dir / "kpi_generate_status.yaml"
+
+        # Create log file
+        log_file = output_dir / "000__caliper_kpi_generate.log"
+
+        # Build CLI command
+        command = build_kpi_generate_command(
+            config=postprocess_config,
+            tree_root=base_dir,
+            manifest_path=manifest_path,
+            status_file=status_file,
             output_file=output_file,
         )
 
-        kpis = plugin.compute_kpis(model)
-        output_file.parent.mkdir(parents=True, exist_ok=True)
-
-        # Transform flat KPI list into hierarchical structure
-        hierarchical_data = _transform_kpis_to_hierarchical_format(kpis, model)
-
-        with open(output_file, "w") as f:
-            json.dump(hierarchical_data, f, indent=2)
-
-        logger.info(
-            f"Generated hierarchical KPI structure with {len(kpis)} total records in {output_file}"
+        # Execute command using generic function
+        script_file = env.ARTIFACT_DIR / "kpi_generate.sh"
+        result, status_data = _execute_caliper_command(
+            command=command,
+            step_name="KPI GENERATE",
+            script_file=script_file,
+            log_file=log_file,
+            status_file=status_file,
         )
-        return {
-            "status": "success",
-            "kpi_count": len(kpis),
-            "output_file": _make_path_relative_to_base(output_file, output_dir),
-            "completed_at": time.time(),
-        }
+
+        # Clean up temporary status file
+        try:
+            status_file.unlink()
+        except FileNotFoundError:
+            pass
+
+        # Convert to expected format
+        if status_data.get("success"):
+            return {
+                "status": "success",
+                "output_file": _make_path_relative_to_base(output_file, output_dir),
+                "completed_at": time.time(),
+            }
+        else:
+            return {
+                "status": "failed",
+                "error": status_data.get("error", "Unknown error"),
+                "completed_at": time.time(),
+            }
+
     except Exception as e:
+        # Log the full traceback to help with debugging
+        import traceback
+
+        full_traceback = traceback.format_exc()
         logger.error(f"KPI generation failed: {e}")
+        logger.error(f"Full traceback:\n{full_traceback}")
         return {"status": "failed", "error": str(e), "completed_at": time.time()}
 
 

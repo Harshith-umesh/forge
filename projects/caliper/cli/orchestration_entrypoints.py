@@ -177,6 +177,25 @@ def analyze_kpis_entrypoint(
     )
 
 
+def kpi_generate_entrypoint(
+    base_dir: Path,
+    plugin_module: str,
+    plugin: Any,
+    output: Path,
+) -> None:
+    """Entrypoint for orchestration to generate KPIs."""
+    from projects.caliper.engine.kpi.generate import run_kpi_generate
+
+    return run_kpi_generate(
+        base_dir=base_dir,
+        plugin_module=plugin_module,
+        plugin=plugin,
+        output=output,
+        use_cache=True,
+        cache_path=None,
+    )
+
+
 def export_kpis_to_csv_entrypoint(
     plugin,
     kpi_records: list[dict[str, Any]],

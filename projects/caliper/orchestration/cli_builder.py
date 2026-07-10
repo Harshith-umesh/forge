@@ -65,6 +65,51 @@ def build_parse_command(
     return cmd
 
 
+def build_kpi_generate_command(
+    config: CaliperOrchestrationPostprocessConfig,
+    tree_root: Path,
+    manifest_path: Path | None,
+    status_file: Path,
+    output_file: Path,
+) -> list[str]:
+    """Build CLI command for caliper kpi generate.
+
+    Args:
+        config: Orchestration configuration
+        tree_root: Base directory for artifacts
+        manifest_path: Optional manifest file path
+        status_file: Where to write status YAML
+        output_file: Output file for KPI data
+
+    Returns:
+        List of command arguments for subprocess
+    """
+    cmd = [
+        sys.executable,
+        "-m",
+        "projects.caliper.cli.main",
+        "kpi",
+        "generate",
+    ]
+
+    # Workspace options
+    cmd.extend(["--artifacts-dir", str(tree_root)])
+
+    if manifest_path:
+        cmd.extend(["--postprocess-config", str(manifest_path)])
+
+    if config.plugin_module:
+        cmd.extend(["--plugin", config.plugin_module])
+
+    # Generate-specific options
+    cmd.extend(["--output", str(output_file)])
+
+    # Status file for orchestration
+    cmd.extend(["--status-file", str(status_file)])
+
+    return cmd
+
+
 def build_visualize_command(
     config: CaliperOrchestrationPostprocessConfig,
     tree_root: Path,
