@@ -59,24 +59,33 @@ logger = logging.getLogger(__name__)
 def _execute_caliper_command(
     command: list[str],
     step_name: str,
-    script_file: Path,
-    log_file: Path,
     status_file: Path,
-) -> tuple[subprocess.CompletedProcess, dict[str, Any]]:
+    step_logs_dir: Path,
+) -> tuple[subprocess.CompletedProcess, dict[str, Any], Path]:
     """Execute a Caliper CLI command and return result and status data.
 
     Args:
         command: CLI command arguments list
-        step_name: Name for logging banners (e.g., "PARSE", "VISUALIZE")
-        script_file: Path to save debug script
-        log_file: Path to save command output
+        step_name: Name for logging banners (e.g., "caliper parse", "caliper visualize")
         status_file: Path to read status YAML from
+        step_logs_dir: Directory to create log file in
 
     Returns:
-        Tuple of (subprocess result, parsed status data)
+        Tuple of (subprocess result, parsed status data, log file path)
     """
+    # Create log file path with proper step index
+    from projects.caliper.orchestration.step_logging import _get_next_step_index
+
+    step_index = _get_next_step_index(step_logs_dir)
+    step_name_safe = step_name.replace(" ", "_")
+    log_file = step_logs_dir / f"{step_index:03d}__{step_name_safe}.log"
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Create script file for debugging
+    script_file = env.ARTIFACT_DIR / f"{step_name_safe}.sh"
+
     # Log start banner and save script
-    log_caliper_start_banner(command, script_file, step_name)
+    log_caliper_start_banner(command, script_file, step_name.upper())
 
     # Execute command with combined stdout/stderr
     result = subprocess.run(
@@ -87,9 +96,9 @@ def _execute_caliper_command(
     )
 
     # Handle output, status parsing, and log completion banner
-    status_data = handle_caliper_output_and_completion(result, log_file, status_file, step_name)
+    status_data = handle_caliper_output_and_completion(result, log_file, status_file, step_name.upper())
 
-    return result, status_data
+    return result, status_data, log_file
 
 
 def _make_path_relative_to_base(file_path: str | Path, base_dir: Path) -> str:
@@ -311,6 +320,7 @@ def _run_artifacts_to_kpis(
     plugin_module: str,
     base_dir: Path,
     manifest_path: Path | None,
+    step_logs_dir: Path,
 ) -> dict[str, Any]:
     """Generate KPI JSON using fork/exec subprocess execution."""
 
@@ -331,9 +341,6 @@ def _run_artifacts_to_kpis(
         # Create temporary status file for subprocess communication
         status_file = output_dir / "kpi_generate_status.yaml"
 
-        # Create log file
-        log_file = output_dir / "000__caliper_kpi_generate.log"
-
         # Build CLI command
         command = build_kpi_generate_command(
             config=postprocess_config,
@@ -344,13 +351,11 @@ def _run_artifacts_to_kpis(
         )
 
         # Execute command using generic function
-        script_file = env.ARTIFACT_DIR / "kpi_generate.sh"
-        result, status_data = _execute_caliper_command(
+        result, status_data, log_file = _execute_caliper_command(
             command=command,
-            step_name="KPI GENERATE",
-            script_file=script_file,
-            log_file=log_file,
+            step_name="caliper kpi generate",
             status_file=status_file,
+            step_logs_dir=step_logs_dir,
         )
 
         # Clean up temporary status file
@@ -721,6 +726,7 @@ class CaliperPostprocessOrchestrator:
         else:
             self._run_visualize_step()
             logger.info(f"After visualize step: visualize_failed={self.visualize_failed}")
+
             self._run_kpi_and_ai_data_steps()
             logger.info(
                 f"After KPI/AI steps: artifacts_to_kpis_failed={self.artifacts_to_kpis_failed}, ai_data_failed={self.ai_data_failed}"
@@ -854,7 +860,6 @@ class CaliperPostprocessOrchestrator:
         if not self.config.parse.enabled:
             return
 
-        import subprocess
         import tempfile
 
         # Create status file for CLI output
@@ -871,28 +876,12 @@ class CaliperPostprocessOrchestrator:
                 use_cache=not self.config.parse.no_cache,
             )
 
-            # Log start banner and save command script
-            script_path = env.ARTIFACT_DIR / "parse.sh"
-            log_caliper_start_banner(command, script_path, "parse")
-
-            # Create log file path for stdout/stderr capture with proper step index
-            from projects.caliper.orchestration.step_logging import _get_next_step_index
-
-            step_index = _get_next_step_index(self.step_logs_dir)
-            log_file = self.step_logs_dir / f"{step_index:03d}__caliper_parse.log"
-            log_file.parent.mkdir(parents=True, exist_ok=True)
-
-            # Execute CLI command with output capture
-            result = subprocess.run(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,  # Combine stderr into stdout
-                text=True,
-            )
-
-            # Handle output, status parsing, and log completion banner
-            status_data = handle_caliper_output_and_completion(
-                result, log_file, status_file, "parse"
+            # Execute command using generic function
+            result, status_data, log_file = _execute_caliper_command(
+                command=command,
+                step_name="caliper parse",
+                status_file=status_file,
+                step_logs_dir=self.step_logs_dir,
             )
 
             if result.returncode == 0 and status_data and status_data.get("success", False):
@@ -947,7 +936,6 @@ class CaliperPostprocessOrchestrator:
         if not self.config.visualize.enabled:
             return
 
-        import subprocess
         import tempfile
 
         # Create status file for CLI output
@@ -977,28 +965,12 @@ class CaliperPostprocessOrchestrator:
                 use_cache=not self.config.parse.no_cache,
             )
 
-            # Log start banner and save command script
-            script_path = env.ARTIFACT_DIR / "visualize.sh"
-            log_caliper_start_banner(command, script_path, "visualize")
-
-            # Create log file path for stdout/stderr capture with proper step index
-            from projects.caliper.orchestration.step_logging import _get_next_step_index
-
-            step_index = _get_next_step_index(self.step_logs_dir)
-            log_file = self.step_logs_dir / f"{step_index:03d}__caliper_visualize.log"
-            log_file.parent.mkdir(parents=True, exist_ok=True)
-
-            # Execute CLI command with output capture
-            result = subprocess.run(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,  # Combine stderr into stdout
-                text=True,
-            )
-
-            # Handle output, status parsing, and log completion banner
-            status_data = handle_caliper_output_and_completion(
-                result, log_file, status_file, "visualize"
+            # Execute command using generic function
+            result, status_data, log_file = _execute_caliper_command(
+                command=command,
+                step_name="caliper visualize",
+                status_file=status_file,
+                step_logs_dir=self.step_logs_dir,
             )
 
             if result.returncode == 0 and status_data and status_data.get("success", False):
@@ -1177,7 +1149,14 @@ class CaliperPostprocessOrchestrator:
         if self.config.kpi.artifacts_to_kpis.enabled:
             with step_logging("caliper_artifacts_to_kpis", self.step_logs_dir) as log_file:
                 result = _run_artifacts_to_kpis(
-                    self.config, plugin, model, output_dir, mod_str, self.tree_root
+                    self.config,
+                    plugin,
+                    model,
+                    output_dir,
+                    mod_str,
+                    self.tree_root,
+                    self.manifest_path,
+                    self.step_logs_dir,
                 )
                 self._add_step("artifacts_to_kpis", result, log_file)
                 self._check_step_result_and_set_failure("artifacts_to_kpis", result)
