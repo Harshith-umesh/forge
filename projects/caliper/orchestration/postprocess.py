@@ -20,13 +20,13 @@ from typing import Any
 from pydantic import ValidationError
 
 from projects.caliper.cli.orchestration_entrypoints import (
-    analyze_kpis_entrypoint,
     get_kpi_functions_entrypoint,
     load_plugin_entrypoint,
     parse_entrypoint,
 )
 from projects.caliper.orchestration.cli_builder import (
     build_ai_eval_export_command,
+    build_analyse_kpis_command,
     build_kpi_csv_export_command,
     build_kpi_generate_command,
     build_parse_command,
@@ -1349,6 +1349,71 @@ class CaliperPostprocessOrchestrator:
                 self._add_step("s3_import", step_result, log_file)
                 self._check_step_result_and_set_failure("s3_import", step_result)
 
+
+def _run_analyse_kpis(
+    postprocess_config: CaliperOrchestrationPostprocessConfig,
+    output_dir: Path,
+    plugin_module: str,
+    base_dir: Path,
+    manifest_path: Path | None,
+    current_kpis_file: Path,
+    step_logs_dir: Path,
+) -> dict[str, Any]:
+    """Analyze KPIs using fork/exec subprocess execution."""
+
+    if not postprocess_config.analyze.enabled:
+        return {"status": "disabled", "reason": "analyze disabled", "completed_at": time.time()}
+
+    try:
+        # Prepare paths
+        output_file = output_dir / postprocess_config.analyze.output
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Create temporary status file for subprocess communication
+        status_file = output_dir / "analyse_kpis_status.yaml"
+
+        # Build CLI command
+        command = build_analyse_kpis_command(
+            config=postprocess_config,
+            tree_root=base_dir,
+            manifest_path=manifest_path,
+            status_file=status_file,
+            output_file=output_file,
+            current_kpis_file=current_kpis_file,
+        )
+
+        # Execute command using generic function
+        result, status_data, log_file = _execute_caliper_command(
+            command=command,
+            step_name="caliper kpi analyse-kpis",
+            status_file=status_file,
+            step_logs_dir=step_logs_dir,
+        )
+
+        # Clean up temporary status file
+        try:
+            status_file.unlink()
+        except FileNotFoundError:
+            pass
+
+        # Convert to expected format
+        if status_data.get("success"):
+            return {
+                "status": "success",
+                "output_file": str(output_file),
+                "completed_at": time.time(),
+            }
+        else:
+            return {
+                "status": "failed",
+                "error": status_data.get("error", "Unknown error"),
+                "completed_at": time.time(),
+            }
+
+    except Exception as e:
+        logger.exception("KPI analysis failed in _run_analyse_kpis")
+        return {"status": "failed", "error": str(e), "completed_at": time.time()}
+
     def _run_analyse_kpis_step(self, output_dir: Path, plugin_module: str) -> None:
         """Execute the KPI analysis step."""
         if not self.config.analyze.enabled:
@@ -1390,32 +1455,25 @@ class CaliperPostprocessOrchestrator:
             return
 
         with step_logging("caliper_analyse_kpis", self.step_logs_dir) as log_file:
-            try:
-                # Convert relative path to absolute for analyze function
-                current_kpis_path = output_dir / current_kpis_file
+            # current_kpis_file is now an absolute path (updated from relative path fix)
+            current_kpis_path = Path(current_kpis_file)
 
-                result = analyze_kpis_entrypoint(
-                    self.config, plugin_module, self.tree_root, output_dir, current_kpis_path
-                )
+            result = _run_analyse_kpis(
+                postprocess_config=self.config,
+                output_dir=output_dir,
+                plugin_module=plugin_module,
+                base_dir=self.tree_root,
+                manifest_path=self.manifest_path,
+                current_kpis_file=current_kpis_path,
+                step_logs_dir=self.step_logs_dir,
+            )
 
-                # Make output_file path relative
-                if "output_file" in result:
-                    result["output_file"] = _make_path_relative_to_base(
-                        result["output_file"], output_dir
-                    )
+            self._add_step("analyse_kpis", result, log_file)
 
-                self._add_step("analyse_kpis", result, log_file)
+            logger.info("KPI analysis result:")
+            logger.info(json.dumps(result, indent=2, default=str))
 
-                logger.info("KPI analysis result:")
-                logger.info(json.dumps(result, indent=2, default=str))
-
-                self._check_step_result_and_set_failure("analyse_kpis", result)
-
-            except Exception as e:
-                logger.exception("KPI analysis failed")
-                step_result = {"status": "failed", "error": str(e)}
-                self._add_step("analyse_kpis", step_result, log_file)
-                self._check_step_result_and_set_failure("analyse_kpis", step_result)
+            self._check_step_result_and_set_failure("analyse_kpis", result)
 
     def _run_s3_export_step(self, output_dir: Path) -> None:
         """Execute the S3 export step."""

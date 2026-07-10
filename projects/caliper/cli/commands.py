@@ -660,6 +660,114 @@ def kpi_analyze(
         sys.exit(3)
 
 
+@click.command("analyse-kpis")
+@_workspace_cli_options
+@click.option(
+    "--output",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Output file for analysis results",
+)
+@click.option(
+    "--current-kpis-file",
+    type=click.Path(path_type=Path, exists=True),
+    required=True,
+    help="Path to current KPIs JSON file",
+)
+@click.option(
+    "--status-file", type=click.Path(path_type=Path), help="YAML file to write operation status"
+)
+@click.pass_context
+def analyse_kpis_cmd(
+    ctx: click.Context,
+    output: Path,
+    current_kpis_file: Path,
+    artifacts_dir: Path | None,
+    postprocess_config: Path | None,
+    plugin_module_override: str | None,
+    status_file: Path | None,
+) -> None:
+    """Analyze KPIs for orchestration (fork/exec)."""
+    import yaml
+
+    _apply_workspace_cli_overrides(
+        ctx,
+        artifacts_dir=artifacts_dir,
+        postprocess_config=postprocess_config,
+        plugin_module_override=plugin_module_override,
+    )
+    mod, plugin = _plugin_tuple(ctx)
+    base_dir: Path = _root_obj(ctx)["base_dir"]
+
+    status_data = {"success": False}
+
+    try:
+        # Load manifest to get postprocess configuration
+        from projects.caliper.engine.plugin_config import resolve_manifest_path
+        from projects.caliper.orchestration.postprocess_config import (
+            CaliperOrchestrationPostprocessConfig,
+        )
+
+        manifest_path, manifest_data = resolve_manifest_path(
+            base_dir=base_dir, postprocess_config=_root_obj(ctx).get("postprocess_config")
+        )
+
+        # Create postprocess config object from manifest data
+        postprocess_config_obj = CaliperOrchestrationPostprocessConfig.model_validate(
+            manifest_data.get("postprocess", {}) if manifest_data else {}
+        )
+
+        output_dir = output.parent
+
+        # Run analysis using the entrypoint
+        from projects.caliper.cli.orchestration_entrypoints import analyze_kpis_entrypoint
+
+        result = analyze_kpis_entrypoint(
+            postprocess_config=postprocess_config_obj,
+            plugin_module=mod,
+            base_dir=base_dir,
+            output_dir=output_dir,
+            current_kpis_file=current_kpis_file,
+        )
+
+        status_data = {
+            "success": result.get("status") == "success",
+            "output_file": result.get("output_file"),
+        }
+
+        if result.get("status") == "success":
+            click.echo(f"✅ KPI analysis completed: {result.get('output_file')}")
+        else:
+            error_msg = result.get("error", "Unknown error")
+            status_data["error"] = error_msg
+            click.echo(f"❌ KPI analysis failed: {error_msg}", err=True)
+            if not status_file:
+                sys.exit(1)
+
+    except Exception as e:  # noqa: BLE001
+        import traceback
+
+        full_traceback = traceback.format_exc()
+        status_data = {"success": False, "error": str(e), "traceback": full_traceback}
+        click.echo(f"❌ analyse-kpis failed: {e}", err=True)
+        click.echo(f"Full traceback:\n{full_traceback}", err=True)
+        if not status_file:
+            sys.exit(2)
+    finally:
+        # Write status file if requested
+        if status_file:
+            try:
+                with open(status_file, "w", encoding="utf-8") as f:
+                    yaml.dump(status_data, f, default_flow_style=False)
+            except Exception as status_err:
+                click.echo(f"Failed to write status file {status_file}: {status_err}", err=True)
+                sys.exit(4)
+
+    # Exit with error code if operation failed
+    if not status_data.get("success", False):
+        sys.exit(3)
+
+
 @click.command("s3-import")
 @click.option("--bucket", required=True, help="S3 bucket name")
 @click.option("--prefix", default="", help="S3 object prefix/path")

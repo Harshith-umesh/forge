@@ -346,6 +346,54 @@ def build_s3_import_command(
     return cmd
 
 
+def build_analyse_kpis_command(
+    config: CaliperOrchestrationPostprocessConfig,
+    tree_root: Path,
+    manifest_path: Path | None,
+    status_file: Path,
+    output_file: Path,
+    current_kpis_file: Path,
+) -> list[str]:
+    """Build CLI command for caliper kpi analyse-kpis.
+
+    Args:
+        config: Orchestration configuration
+        tree_root: Base directory for artifacts
+        manifest_path: Optional manifest file path
+        status_file: Where to write status YAML
+        output_file: Output file for analysis results
+        current_kpis_file: Current KPIs JSON file
+
+    Returns:
+        List of command arguments for subprocess
+    """
+    cmd = [
+        sys.executable,
+        "-m",
+        "projects.caliper.cli.main",
+        "kpi",
+        "analyse-kpis",
+    ]
+
+    # Workspace options
+    cmd.extend(["--artifacts-dir", str(tree_root)])
+
+    if manifest_path:
+        cmd.extend(["--postprocess-config", str(manifest_path)])
+
+    if config.plugin_module:
+        cmd.extend(["--plugin", config.plugin_module])
+
+    # Analyse-kpis specific options
+    cmd.extend(["--output", str(output_file)])
+    cmd.extend(["--current-kpis-file", str(current_kpis_file)])
+
+    # Status file for orchestration
+    cmd.extend(["--status-file", str(status_file)])
+
+    return cmd
+
+
 def build_s3_export_command(
     config: CaliperOrchestrationPostprocessConfig,
     status_file: Path,
