@@ -530,7 +530,9 @@ def _run_artifacts_to_kpis(
         # Convert to expected format
         if status_data.get("success"):
             relative_path = _make_path_relative_to_base(output_file, env.ARTIFACT_DIR)
-            logger.info(f"KPI generate: output_file={output_file}, env.ARTIFACT_DIR={env.ARTIFACT_DIR}, relative_path={relative_path}")
+            logger.info(
+                f"KPI generate: output_file={output_file}, env.ARTIFACT_DIR={env.ARTIFACT_DIR}, relative_path={relative_path}"
+            )
             return {
                 "status": "success",
                 "output_file": relative_path,
@@ -1699,7 +1701,9 @@ class CaliperPostprocessOrchestrator:
             ):
                 stored_output_file = artifacts_to_kpis_step["output_file"]
                 kpis_file = env.ARTIFACT_DIR / stored_output_file
-                logger.info(f"S3 export: env.ARTIFACT_DIR={env.ARTIFACT_DIR}, stored_output_file={stored_output_file}, kpis_file={kpis_file}")
+                logger.info(
+                    f"S3 export: env.ARTIFACT_DIR={env.ARTIFACT_DIR}, stored_output_file={stored_output_file}, kpis_file={kpis_file}"
+                )
 
             # Get CSV file from kpis_to_csv step
             kpis_to_csv_step = self._get_step("kpis_to_csv")
@@ -1712,7 +1716,8 @@ class CaliperPostprocessOrchestrator:
 
             # Get AI data directory from artifacts_to_ai_data step
             ai_data_step = self._get_step("artifacts_to_ai_data")
-            logger.info(f"AI data step found: {ai_data_step}")
+
+            logger.info(f"AI data step found:\n{json.dumps(ai_data_step, indent=2)}")
             if (
                 ai_data_step
                 and ai_data_step.get("status") == "success"
