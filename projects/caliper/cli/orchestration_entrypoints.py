@@ -69,14 +69,12 @@ def s3_import_entrypoint(
 
     try:
         from projects.caliper.cli.s3_import import run_s3_import_with_explicit_params
-        from projects.caliper.orchestration.step_logging import log_s3_import_command
-
-        # Log command to reproduce this step
-        s3_parent_config = postprocess_config.s3
-        s3_config = postprocess_config.s3.import_
 
         # Build import prefix using instance + directory
         from projects.caliper.cli.s3_export import build_s3_prefix
+
+        s3_parent_config = postprocess_config.s3
+        s3_config = postprocess_config.s3.import_
 
         import_prefix = build_s3_prefix(
             instance=s3_parent_config.instance,
@@ -84,17 +82,6 @@ def s3_import_entrypoint(
             trailing_slash=False,
         )
         import_dir = output_dir / s3_config.output_dir
-
-        log_s3_import_command(
-            bucket=s3_parent_config.bucket,
-            instance=s3_parent_config.instance,
-            directory=s3_parent_config.directory,
-            output_dir=import_dir,
-            include_kpis_json=s3_config.include_kpis_json,
-            include_kpis_csv=s3_config.include_kpis_csv,
-            include_ai_data=s3_config.include_ai_data,
-            max_downloads=s3_config.max_downloads,
-        )
 
         # Use explicit parameters instead of config dict
         result = run_s3_import_with_explicit_params(
@@ -168,13 +155,23 @@ def analyze_kpis_entrypoint(
     """Entrypoint for orchestration to call KPI analysis."""
     from projects.caliper.engine.kpi.analyze import analyze_kpis
 
-    return analyze_kpis(
-        postprocess_config=postprocess_config,
-        plugin_module=plugin_module,
-        base_dir=base_dir,
-        output_dir=output_dir,
-        current_kpis_file=current_kpis_file,
-    )
+    try:
+        result = analyze_kpis(
+            postprocess_config=postprocess_config,
+            plugin_module=plugin_module,
+            base_dir=base_dir,
+            output_dir=output_dir,
+            current_kpis_file=current_kpis_file,
+        )
+        return result
+    except Exception as e:
+        # Don't suppress the exception - let it bubble up with full traceback
+        import sys
+        import traceback
+
+        print(f"❌ Exception in analyze_kpis_entrypoint: {e}", file=sys.stderr)
+        print(f"Full traceback:\n{traceback.format_exc()}", file=sys.stderr)
+        raise
 
 
 def kpi_generate_entrypoint(

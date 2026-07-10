@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import logging
 import subprocess
-import sys
 from pathlib import Path
 
 from projects.caliper.orchestration.postprocess_config import (
@@ -15,6 +14,9 @@ from projects.caliper.orchestration.postprocess_config import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Base command for all Caliper CLI invocations
+_CALIPER_BASE_CMD = ["caliper"]
 
 
 def build_parse_command(
@@ -36,12 +38,7 @@ def build_parse_command(
     Returns:
         List of command arguments for subprocess
     """
-    cmd = [
-        sys.executable,
-        "-m",
-        "projects.caliper.cli.main",
-        "parse",
-    ]
+    cmd = _CALIPER_BASE_CMD + ["parse"]
 
     # Workspace options
     cmd.extend(["--artifacts-dir", str(tree_root)])
@@ -84,13 +81,7 @@ def build_kpi_generate_command(
     Returns:
         List of command arguments for subprocess
     """
-    cmd = [
-        sys.executable,
-        "-m",
-        "projects.caliper.cli.main",
-        "kpi",
-        "generate",
-    ]
+    cmd = _CALIPER_BASE_CMD + ["kpi", "generate"]
 
     # Workspace options
     cmd.extend(["--artifacts-dir", str(tree_root)])
@@ -131,12 +122,7 @@ def build_visualize_command(
     Returns:
         List of command arguments for subprocess
     """
-    cmd = [
-        sys.executable,
-        "-m",
-        "projects.caliper.cli.main",
-        "visualize",
-    ]
+    cmd = _CALIPER_BASE_CMD + ["visualize"]
 
     # Workspace options
     cmd.extend(["--artifacts-dir", str(tree_root)])
@@ -151,7 +137,7 @@ def build_visualize_command(
     cmd.extend(["--output-dir", str(output_dir)])
 
     if config.visualize.reports:
-        cmd.extend(["--reports", ",".join(config.visualize.reports)])
+        cmd.extend(["--reports", config.visualize.reports])
 
     if config.visualize.report_group:
         cmd.extend(["--report-group", config.visualize.report_group])
@@ -205,13 +191,7 @@ def build_kpi_csv_export_command(
     Returns:
         List of command arguments for subprocess
     """
-    cmd = [
-        sys.executable,
-        "-m",
-        "projects.caliper.cli.main",
-        "kpi",
-        "csv-export",
-    ]
+    cmd = _CALIPER_BASE_CMD + ["kpi", "csv-export"]
 
     # Workspace options
     cmd.extend(["--artifacts-dir", str(tree_root)])
@@ -255,12 +235,7 @@ def build_ai_eval_export_command(
     Returns:
         List of command arguments for subprocess
     """
-    cmd = [
-        sys.executable,
-        "-m",
-        "projects.caliper.cli.main",
-        "ai-eval-export",
-    ]
+    cmd = _CALIPER_BASE_CMD + ["ai-eval-export"]
 
     # Workspace options
     cmd.extend(["--artifacts-dir", str(tree_root)])
@@ -300,13 +275,7 @@ def build_s3_import_command(
     """
     s3_config = config.s3
 
-    cmd = [
-        sys.executable,
-        "-m",
-        "projects.caliper.cli.main",
-        "kpi",
-        "s3-import",
-    ]
+    cmd = _CALIPER_BASE_CMD + ["kpi", "s3-import"]
 
     # S3 configuration
     cmd.extend(["--bucket", s3_config.bucket])
@@ -353,40 +322,34 @@ def build_analyse_kpis_command(
     status_file: Path,
     output_file: Path,
     current_kpis_file: Path,
+    historical_kpis_dir: Path,
 ) -> list[str]:
     """Build CLI command for caliper kpi analyse-kpis.
 
     Args:
         config: Orchestration configuration
-        tree_root: Base directory for artifacts
-        manifest_path: Optional manifest file path
+        tree_root: Base directory for artifacts (unused, kept for compatibility)
+        manifest_path: Optional manifest file path (unused, kept for compatibility)
         status_file: Where to write status YAML
         output_file: Output file for analysis results
         current_kpis_file: Current KPIs JSON file
+        historical_kpis_dir: Directory containing historical KPI files
 
     Returns:
         List of command arguments for subprocess
     """
-    cmd = [
-        sys.executable,
-        "-m",
-        "projects.caliper.cli.main",
-        "kpi",
-        "analyse-kpis",
-    ]
-
-    # Workspace options
-    cmd.extend(["--artifacts-dir", str(tree_root)])
-
-    if manifest_path:
-        cmd.extend(["--postprocess-config", str(manifest_path)])
-
-    if config.plugin_module:
-        cmd.extend(["--plugin", config.plugin_module])
+    cmd = _CALIPER_BASE_CMD + ["kpi", "analyse-kpis"]
 
     # Analyse-kpis specific options
     cmd.extend(["--output", str(output_file)])
     cmd.extend(["--current-kpis-file", str(current_kpis_file)])
+    cmd.extend(["--historical-kpis-dir", str(historical_kpis_dir)])
+
+    # Plugin module is required
+    if config.plugin_module:
+        cmd.extend(["--plugin", config.plugin_module])
+    else:
+        raise ValueError("Plugin module is required for KPI analysis")
 
     # Status file for orchestration
     cmd.extend(["--status-file", str(status_file)])
@@ -417,13 +380,7 @@ def build_s3_export_command(
     """
     s3_config = config.s3
 
-    cmd = [
-        sys.executable,
-        "-m",
-        "projects.caliper.cli.main",
-        "kpi",
-        "s3-export",
-    ]
+    cmd = _CALIPER_BASE_CMD + ["kpi", "s3-export"]
 
     # S3 configuration
     cmd.extend(["--bucket", s3_config.bucket])

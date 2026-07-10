@@ -156,16 +156,6 @@ def analyze_kpis(
                 "completed_at": time.time(),
             }
 
-        # Log command to reproduce this step
-        from projects.caliper.orchestration.step_logging import log_analyze_command
-
-        log_analyze_command(
-            base_dir=base_dir,
-            plugin_module=plugin_module,
-            current_kpis_path=current_kpis_file,
-            historical_kpis_dir=historical_kpis_dir,
-            output_path=output_path,
-        )
 
         # Call the core analysis function
         exit_code = run_kpi_analysis(
@@ -237,12 +227,15 @@ def analyze_kpis(
     except Exception as e:
         error_msg = f"{type(e).__name__}: {str(e)}"
         logger.exception(f"Analysis step failed with {error_msg}")
-        return {
-            "status": "failed",
-            "error": error_msg,
-            "error_type": type(e).__name__,
-            "completed_at": time.time(),
-        }
+
+        # Don't suppress the exception - provide detailed error info and re-raise
+        import traceback
+
+        full_traceback = traceback.format_exc()
+        logger.error(f"Full traceback for analyze_kpis failure:\n{full_traceback}")
+
+        # Re-raise the original exception so the caller can see the full details
+        raise RuntimeError(f"KPI analysis failed: {error_msg}") from e
 
 
 def find_baseline_kpis(historical_dir: Path) -> dict[Path, dict[str, Any]]:
