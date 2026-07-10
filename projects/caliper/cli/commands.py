@@ -107,12 +107,19 @@ def _plugin_tuple(ctx: click.Context):
     default=True,
     help="Display parameter matrix summary after parsing (default: enabled).",
 )
+@click.option(
+    "--status-file",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Path to write status YAML for orchestration (absolute path required).",
+)
 @click.pass_context
 def parse_cmd(
     ctx: click.Context,
     no_cache: bool,
     cache_dir: Path | None,
     show_matrix: bool,
+    status_file: Path | None,
     artifacts_dir: Path | None,
     postprocess_config: Path | None,
     plugin_module_override: str | None,
@@ -126,6 +133,9 @@ def parse_cmd(
     )
     mod, plugin = _plugin_tuple(ctx)
     artifact_root: Path = _root_obj(ctx)["base_dir"]
+
+    status = {"success": False}
+
     try:
         model = run_parse(
             base_dir=artifact_root,
@@ -134,12 +144,43 @@ def parse_cmd(
             use_cache=not no_cache,
             show_parameter_matrix=show_matrix,
         )
+
+        status.update(
+            {
+                "success": True,
+                "plugin_module": mod,
+                "parsed_records": len(model.unified_result_records),
+                "cache_ref": str(model.parse_cache_ref) if model.parse_cache_ref else None,
+            }
+        )
+
+        click.echo(
+            f"Parsed {len(model.unified_result_records)} record(s); cache={model.parse_cache_ref}"
+        )
+
     except Exception as e:  # noqa: BLE001
+        status.update(
+            {
+                "success": False,
+                "error": str(e),
+            }
+        )
         click.echo(f"parse failed: {e}", err=True)
+
+    # Write status file if requested
+    if status_file:
+        import yaml
+
+        try:
+            status_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(status_file, "w", encoding="utf-8") as f:
+                yaml.dump(status, f, default_flow_style=False, sort_keys=False)
+        except Exception as e:
+            click.echo(f"Failed to write status file {status_file}: {e}", err=True)
+
+    # Exit with non-zero code on failure
+    if not status["success"]:
         sys.exit(2)
-    click.echo(
-        f"Parsed {len(model.unified_result_records)} record(s); cache={model.parse_cache_ref}"
-    )
 
 
 @click.command("visualize")
