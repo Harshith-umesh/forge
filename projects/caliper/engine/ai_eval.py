@@ -27,6 +27,12 @@ def run_ai_eval_export(
     )
 
     # Build base payload from plugin
+    if not hasattr(plugin, "build_ai_data_payload"):
+        raise AttributeError(
+            f"Plugin {plugin_module} does not support AI evaluation export. "
+            "Missing build_ai_data_payload method."
+        )
+
     build = plugin.build_ai_data_payload
     payload = build(model)
 
@@ -75,7 +81,11 @@ def _export_test_entries_with_artifacts_engine(
     exported_entries = []
 
     # Get the specific files we want to copy from the plugin
-    target_files = plugin.get_ai_eval_artifact_files(model)
+    if hasattr(plugin, "get_ai_eval_artifact_files"):
+        target_files = plugin.get_ai_eval_artifact_files(model)
+    else:
+        # Fallback: copy common test artifacts
+        target_files = ["*.log", "*.json", "*.yaml", "*.yml"]
 
     for idx, record in enumerate(model.unified_result_records):
         # Create directory for this test entry

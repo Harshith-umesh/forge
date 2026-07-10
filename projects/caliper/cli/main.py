@@ -14,6 +14,7 @@ from projects.caliper.cli.commands import (
     artifacts_export,
     artifacts_import,
     kpi_analyze,
+    kpi_csv_export,
     kpi_generate,
     kpi_import,
     kpi_s3_import,
@@ -207,6 +208,7 @@ main.add_command(ai_eval_export)
 
 # Register KPI commands
 kpi_group.add_command(kpi_generate)
+kpi_group.add_command(kpi_csv_export)
 kpi_group.add_command(kpi_import)
 kpi_group.add_command(kpi_analyze)
 kpi_group.add_command(kpi_s3_import)

@@ -8,6 +8,7 @@ from pathlib import Path
 import click
 import yaml
 
+from projects.caliper.cli.orchestration_entrypoints import export_kpis_to_csv_entrypoint
 from projects.caliper.cli.s3_import import run_s3_import_with_explicit_params
 from projects.caliper.engine.ai_eval import run_ai_eval_export
 from projects.caliper.engine.file_export.artifacts_export_run import run_artifacts_export
@@ -345,6 +346,10 @@ def list_reports_cmd(
 @click.command("ai-eval-export", hidden=True)
 @_workspace_cli_options
 @click.option("--output", type=click.Path(path_type=Path), required=True)
+@click.option("--no-cache", is_flag=True, help="Disable parse cache")
+@click.option(
+    "--status-file", type=click.Path(path_type=Path), help="YAML file to write operation status"
+)
 @click.pass_context
 def ai_eval_export(
     ctx: click.Context,
@@ -352,6 +357,8 @@ def ai_eval_export(
     artifacts_dir: Path | None,
     postprocess_config: Path | None,
     plugin_module_override: str | None,
+    no_cache: bool,
+    status_file: Path | None,
 ) -> None:
     _apply_workspace_cli_overrides(
         ctx,
@@ -361,12 +368,42 @@ def ai_eval_export(
     )
     mod, plugin = _plugin_tuple(ctx)
     artifact_root: Path = _root_obj(ctx)["base_dir"]
+
+    status_data = {"success": False}
+
     try:
-        run_ai_eval_export(base_dir=artifact_root, plugin_module=mod, plugin=plugin, output=output)
+        run_ai_eval_export(
+            base_dir=artifact_root,
+            plugin_module=mod,
+            plugin=plugin,
+            output=output,
+            use_cache=not no_cache,
+        )
+        status_data = {"success": True, "output_file": str(output)}
+        click.echo(f"Exported {output}")
     except Exception as e:  # noqa: BLE001
+        import traceback
+
+        full_traceback = traceback.format_exc()
+        status_data = {"success": False, "error": str(e), "traceback": full_traceback}
         click.echo(f"ai-eval-export failed: {e}", err=True)
+        click.echo(f"Full traceback:\n{full_traceback}", err=True)
+
+        if not status_file:
+            sys.exit(3)
+    finally:
+        # Write status file if requested
+        if status_file:
+            try:
+                with open(status_file, "w", encoding="utf-8") as f:
+                    yaml.dump(status_data, f, default_flow_style=False)
+            except Exception as status_err:
+                click.echo(f"Failed to write status file {status_file}: {status_err}", err=True)
+                sys.exit(4)
+
+    # Exit with error code if operation failed
+    if not status_data.get("success", False):
         sys.exit(3)
-    click.echo(f"Exported {output}")
 
 
 # KPI commands
@@ -413,6 +450,94 @@ def kpi_generate(
         full_traceback = traceback.format_exc()
         status_data = {"success": False, "error": str(e), "traceback": full_traceback}
         click.echo(f"kpi generate failed: {e}", err=True)
+        click.echo(f"Full traceback:\n{full_traceback}", err=True)
+
+        if not status_file:
+            sys.exit(3)
+    finally:
+        # Write status file if requested
+        if status_file:
+            try:
+                with open(status_file, "w", encoding="utf-8") as f:
+                    yaml.dump(status_data, f, default_flow_style=False)
+            except Exception as status_err:
+                click.echo(f"Failed to write status file {status_file}: {status_err}", err=True)
+                sys.exit(4)
+
+    # Exit with error code if operation failed
+    if not status_data.get("success", False):
+        sys.exit(3)
+
+
+@click.command("csv-export")
+@_workspace_cli_options
+@click.option(
+    "--input",
+    "input_file",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Input KPI JSON file",
+)
+@click.option("--output", type=click.Path(path_type=Path), required=True, help="Output CSV file")
+@click.option(
+    "--include-header-comments", is_flag=True, default=True, help="Include header comments in CSV"
+)
+@click.option(
+    "--status-file", type=click.Path(path_type=Path), help="YAML file to write operation status"
+)
+@click.pass_context
+def kpi_csv_export(
+    ctx: click.Context,
+    input_file: Path,
+    output: Path,
+    artifacts_dir: Path | None,
+    postprocess_config: Path | None,
+    plugin_module_override: str | None,
+    include_header_comments: bool,
+    status_file: Path | None,
+) -> None:
+    _apply_workspace_cli_overrides(
+        ctx,
+        artifacts_dir=artifacts_dir,
+        postprocess_config=postprocess_config,
+        plugin_module_override=plugin_module_override,
+    )
+    mod, plugin = _plugin_tuple(ctx)
+
+    status_data = {"success": False}
+
+    try:
+        # Read KPI JSON Lines file (one JSON object per line)
+        import json
+
+        kpi_records = []
+        with open(input_file, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:  # Skip empty lines
+                    kpi_record = json.loads(line)
+                    kpi_records.append(kpi_record)
+
+        # Export to CSV using the entrypoint
+        result_path = export_kpis_to_csv_entrypoint(
+            plugin=plugin,
+            kpi_records=kpi_records,
+            output_path=output,
+            include_header_comments=include_header_comments,
+        )
+
+        status_data = {
+            "success": True,
+            "output_file": str(result_path),
+            "kpi_count": len(kpi_records),
+        }
+        click.echo(f"Exported {len(kpi_records)} KPI records to CSV: {result_path}")
+    except Exception as e:  # noqa: BLE001
+        import traceback
+
+        full_traceback = traceback.format_exc()
+        status_data = {"success": False, "error": str(e), "traceback": full_traceback}
+        click.echo(f"kpi csv-export failed: {e}", err=True)
         click.echo(f"Full traceback:\n{full_traceback}", err=True)
 
         if not status_file:
@@ -552,6 +677,9 @@ def kpi_analyze(
     "--aws-credentials-file", default="aws.credentials", help="Credentials file name within vault"
 )
 @click.option("-v", "--verbose", is_flag=True, help="Show detailed progress information")
+@click.option(
+    "--status-file", type=click.Path(path_type=Path), help="YAML file to write operation status"
+)
 @click.pass_context
 def kpi_s3_import(
     ctx: click.Context,
@@ -565,9 +693,12 @@ def kpi_s3_import(
     vault: str,
     aws_credentials_file: str,
     verbose: bool,
+    status_file: Path | None,
 ) -> None:
     """Download historical KPI and analysis data from S3."""
     from projects.core.library import vault as vault_lib
+
+    status_data = {"success": False}
 
     try:
         # Ensure output directory exists
@@ -596,18 +727,54 @@ def kpi_s3_import(
         )
 
         if result["status"] == "success":
+            status_data = {
+                "success": True,
+                "output_dir": str(output_dir),
+                "downloaded_files": result.get("files", []),
+                "file_count": len(result.get("files", [])),
+            }
             click.echo("✅ S3 import completed successfully")
             downloaded_files = result.get("files", [])
             click.echo(f"📄 Downloaded {len(downloaded_files)} files to {output_dir}")
         elif result["status"] == "empty":
+            status_data = {
+                "success": True,
+                "output_dir": str(output_dir),
+                "downloaded_files": [],
+                "file_count": 0,
+                "warning": "No objects found matching filters",
+            }
             click.echo(f"⚠️  No objects found matching filters in s3://{bucket}/{prefix}")
         else:
-            click.echo(f"❌ S3 import failed: {result.get('error', 'unknown error')}", err=True)
-            sys.exit(1)
+            error_msg = result.get("error", "unknown error")
+            status_data = {"success": False, "error": error_msg}
+            click.echo(f"❌ S3 import failed: {error_msg}", err=True)
+            if not status_file:
+                sys.exit(1)
 
-    except Exception as e:
-        click.echo(f"❌ S3 import failed: {e}", err=True)
-        sys.exit(2)
+    except Exception as e:  # noqa: BLE001
+        import traceback
+
+        full_traceback = traceback.format_exc()
+        status_data = {"success": False, "error": str(e), "traceback": full_traceback}
+        click.echo(f"S3 import failed: {e}", err=True)
+        click.echo(f"Full traceback:\n{full_traceback}", err=True)
+
+        if not status_file:
+            sys.exit(3)
+    finally:
+        # Write status file if requested
+        if status_file:
+            try:
+                with open(status_file, "w", encoding="utf-8") as f:
+                    yaml.dump(status_data, f, default_flow_style=False)
+            except Exception as status_err:
+                click.echo(f"Failed to write status file {status_file}: {status_err}", err=True)
+                sys.exit(4)
+
+    # Exit with error code if operation failed
+    if not status_data.get("success", False):
+        sys.exit(3)
 
 
 # Artifacts commands

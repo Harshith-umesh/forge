@@ -184,6 +184,238 @@ def build_visualize_command(
     return cmd
 
 
+def build_kpi_csv_export_command(
+    config: CaliperOrchestrationPostprocessConfig,
+    tree_root: Path,
+    manifest_path: Path | None,
+    status_file: Path,
+    input_file: Path,
+    output_file: Path,
+) -> list[str]:
+    """Build CLI command for caliper kpi csv-export.
+
+    Args:
+        config: Orchestration configuration
+        tree_root: Base directory for artifacts
+        manifest_path: Optional manifest file path
+        status_file: Where to write status YAML
+        input_file: Input KPI JSON file
+        output_file: Output CSV file
+
+    Returns:
+        List of command arguments for subprocess
+    """
+    cmd = [
+        sys.executable,
+        "-m",
+        "projects.caliper.cli.main",
+        "kpi",
+        "csv-export",
+    ]
+
+    # Workspace options
+    cmd.extend(["--artifacts-dir", str(tree_root)])
+
+    if manifest_path:
+        cmd.extend(["--postprocess-config", str(manifest_path)])
+
+    if config.plugin_module:
+        cmd.extend(["--plugin", config.plugin_module])
+
+    # CSV export specific options
+    cmd.extend(["--input", str(input_file)])
+    cmd.extend(["--output", str(output_file)])
+
+    if config.kpi.kpis_to_csv.include_header_comments:
+        cmd.append("--include-header-comments")
+
+    # Status file for orchestration
+    cmd.extend(["--status-file", str(status_file)])
+
+    return cmd
+
+
+def build_ai_eval_export_command(
+    config: CaliperOrchestrationPostprocessConfig,
+    tree_root: Path,
+    manifest_path: Path | None,
+    status_file: Path,
+    output_file: Path,
+    use_cache: bool = True,
+) -> list[str]:
+    """Build CLI command for caliper ai-eval-export.
+
+    Args:
+        config: Orchestration configuration
+        tree_root: Base directory for artifacts
+        manifest_path: Optional manifest file path
+        status_file: Where to write status YAML
+        output_file: Output directory for AI eval data
+
+    Returns:
+        List of command arguments for subprocess
+    """
+    cmd = [
+        sys.executable,
+        "-m",
+        "projects.caliper.cli.main",
+        "ai-eval-export",
+    ]
+
+    # Workspace options
+    cmd.extend(["--artifacts-dir", str(tree_root)])
+
+    if manifest_path:
+        cmd.extend(["--postprocess-config", str(manifest_path)])
+
+    if config.plugin_module:
+        cmd.extend(["--plugin", config.plugin_module])
+
+    # AI eval export specific options
+    cmd.extend(["--output", str(output_file)])
+
+    if not use_cache:
+        cmd.append("--no-cache")
+
+    # Status file for orchestration
+    cmd.extend(["--status-file", str(status_file)])
+
+    return cmd
+
+
+def build_s3_import_command(
+    config: CaliperOrchestrationPostprocessConfig,
+    status_file: Path,
+    output_dir: Path,
+) -> list[str]:
+    """Build CLI command for caliper kpi s3-import.
+
+    Args:
+        config: Orchestration configuration
+        status_file: Where to write status YAML
+        output_dir: Local output directory for downloads
+
+    Returns:
+        List of command arguments for subprocess
+    """
+    s3_config = config.s3
+
+    cmd = [
+        sys.executable,
+        "-m",
+        "projects.caliper.cli.main",
+        "kpi",
+        "s3-import",
+    ]
+
+    # S3 configuration
+    cmd.extend(["--bucket", s3_config.bucket])
+
+    # Build prefix from instance and directory
+    from projects.caliper.cli.s3_export import build_s3_prefix
+
+    import_prefix = build_s3_prefix(
+        instance=s3_config.instance,
+        directory=s3_config.directory,
+    )
+    if import_prefix:
+        cmd.extend(["--prefix", import_prefix])
+
+    # Create subdirectory for historical data (matches original behavior)
+    import_dir = output_dir / s3_config.import_.output_dir
+    cmd.extend(["--output-dir", str(import_dir)])
+
+    # Import options
+    if s3_config.import_.include_kpis_json:
+        cmd.append("--include-kpis-json")
+    if s3_config.import_.include_kpis_csv:
+        cmd.append("--include-kpis-csv")
+    if s3_config.import_.include_ai_data:
+        cmd.append("--include-ai-data")
+
+    if s3_config.import_.max_downloads:
+        cmd.extend(["--max-downloads", str(s3_config.import_.max_downloads)])
+
+    # Vault configuration
+    cmd.extend(["--vault", s3_config.vault.name])
+    cmd.extend(["--aws-credentials-file", s3_config.vault.aws_credentials_file])
+
+    # Status file for orchestration
+    cmd.extend(["--status-file", str(status_file)])
+
+    return cmd
+
+
+def build_s3_export_command(
+    config: CaliperOrchestrationPostprocessConfig,
+    status_file: Path,
+    kpis_file: Path | None = None,
+    csv_file: Path | None = None,
+    ai_data_dir: Path | None = None,
+    analysis_file: Path | None = None,
+) -> list[str]:
+    """Build CLI command for caliper kpi s3-export.
+
+    Args:
+        config: Orchestration configuration
+        status_file: Where to write status YAML
+        kpis_file: Optional KPIs JSON file
+        csv_file: Optional CSV file
+        ai_data_dir: Optional AI data directory
+        analysis_file: Optional analysis file
+
+    Returns:
+        List of command arguments for subprocess
+    """
+    s3_config = config.s3
+
+    cmd = [
+        sys.executable,
+        "-m",
+        "projects.caliper.cli.main",
+        "kpi",
+        "s3-export",
+    ]
+
+    # S3 configuration
+    cmd.extend(["--bucket", s3_config.bucket])
+
+    # Build prefix from instance and directory if available
+    from projects.caliper.cli.s3_export import build_s3_prefix
+
+    export_prefix = build_s3_prefix(
+        instance=s3_config.instance,
+        directory=s3_config.directory,
+    )
+    if export_prefix:
+        cmd.extend(["--prefix", export_prefix])
+
+    if s3_config.instance:
+        cmd.extend(["--instance", s3_config.instance])
+
+    if s3_config.directory:
+        cmd.extend(["--directory", s3_config.directory])
+
+    # File options
+    if kpis_file:
+        cmd.extend(["--kpis-file", str(kpis_file)])
+    if csv_file:
+        cmd.extend(["--csv-file", str(csv_file)])
+    if ai_data_dir:
+        cmd.extend(["--ai-data-dir", str(ai_data_dir)])
+    if analysis_file:
+        cmd.extend(["--analysis-file", str(analysis_file)])
+
+    # Vault configuration
+    cmd.extend(["--vault", s3_config.vault.name])
+    cmd.extend(["--aws-credentials-file", s3_config.vault.aws_credentials_file])
+
+    # Status file for orchestration
+    cmd.extend(["--status-file", str(status_file)])
+
+    return cmd
+
+
 def save_command_script(command: list[str], script_path: Path) -> None:
     """Save executed command to a shell script for debugging.
 
