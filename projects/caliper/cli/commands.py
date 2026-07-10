@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import click
+import yaml
 
 from projects.caliper.cli.s3_import import run_s3_import_with_explicit_params
 from projects.caliper.engine.ai_eval import run_ai_eval_export
@@ -169,8 +170,6 @@ def parse_cmd(
 
     # Write status file if requested
     if status_file:
-        import yaml
-
         try:
             status_file.parent.mkdir(parents=True, exist_ok=True)
             with open(status_file, "w", encoding="utf-8") as f:
@@ -195,6 +194,12 @@ def parse_cmd(
     type=click.Path(path_type=Path),
     required=True,
 )
+@click.option(
+    "--status-file",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Path to write status YAML for orchestration (absolute path required).",
+)
 @click.pass_context
 def visualize_cmd(
     ctx: click.Context,
@@ -204,6 +209,7 @@ def visualize_cmd(
     include_label: tuple[str, ...],
     exclude_label: tuple[str, ...],
     output_dir: Path,
+    status_file: Path | None,
     artifacts_dir: Path | None,
     postprocess_config: Path | None,
     plugin_module_override: str | None,
@@ -217,6 +223,9 @@ def visualize_cmd(
     )
     mod, plugin = _plugin_tuple(ctx)
     artifact_root: Path = _root_obj(ctx)["base_dir"]
+
+    status = {"success": False}
+
     try:
         paths = run_visualize(
             base_dir=artifact_root,
@@ -231,11 +240,51 @@ def visualize_cmd(
             use_cache=True,
             cache_path=None,
         )
-    except Exception as e:  # noqa: BLE001
-        click.echo(f"visualize failed: {e}", err=True)
-        sys.exit(2)
 
-    click.echo("Wrote: " + ", ".join(paths))
+        status.update(
+            {
+                "success": True,
+                "plugin_module": mod,
+                "output_files": paths,
+                "output_dir": str(output_dir),
+                "generated_files": len(paths),
+            }
+        )
+
+        click.echo("Wrote: " + ", ".join(paths))
+
+    except Exception as e:  # noqa: BLE001
+        import traceback
+
+        error_details = {
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+        }
+
+        status.update(
+            {
+                "success": False,
+                **error_details,
+            }
+        )
+
+        # Print full traceback to stderr for visibility
+        click.echo(f"visualize failed: {e}", err=True)
+        click.echo("Full traceback:", err=True)
+        click.echo(traceback.format_exc(), err=True)
+
+    # Write status file if requested
+    if status_file:
+        try:
+            status_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(status_file, "w", encoding="utf-8") as f:
+                yaml.dump(status, f, default_flow_style=False, sort_keys=False)
+        except Exception as e:
+            click.echo(f"Failed to write status file {status_file}: {e}", err=True)
+
+    # Exit with non-zero code on failure
+    if not status["success"]:
+        sys.exit(2)
 
 
 @click.command("list-reports")
@@ -439,8 +488,6 @@ def kpi_analyze(
                     result_data = json.load(f)
 
                 # Convert to YAML for better readability
-                import yaml
-
                 yaml_output = yaml.dump(result_data, default_flow_style=False, indent=2)
                 click.echo("\n📊 Analysis Results:")
                 click.echo("=" * 50)
