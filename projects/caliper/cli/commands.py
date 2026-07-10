@@ -373,6 +373,9 @@ def ai_eval_export(
 @click.command("generate")
 @_workspace_cli_options
 @click.option("--output", type=click.Path(path_type=Path), required=True)
+@click.option(
+    "--status-file", type=click.Path(path_type=Path), help="YAML file to write operation status"
+)
 @click.pass_context
 def kpi_generate(
     ctx: click.Context,
@@ -380,6 +383,7 @@ def kpi_generate(
     artifacts_dir: Path | None,
     postprocess_config: Path | None,
     plugin_module_override: str | None,
+    status_file: Path | None,
 ) -> None:
     _apply_workspace_cli_overrides(
         ctx,
@@ -389,14 +393,43 @@ def kpi_generate(
     )
     mod, plugin = _plugin_tuple(ctx)
     artifact_root: Path = _root_obj(ctx)["base_dir"]
+
+    status_data = {"success": False}
+
     try:
         run_kpi_generate(
-            base_dir=artifact_root, plugin_module=mod, plugin=plugin, output_path=output
+            base_dir=artifact_root,
+            plugin_module=mod,
+            plugin=plugin,
+            output=output,
+            use_cache=True,
+            cache_path=None,
         )
+        status_data = {"success": True, "output_file": str(output)}
+        click.echo(f"Generated {output}")
     except Exception as e:  # noqa: BLE001
+        import traceback
+
+        full_traceback = traceback.format_exc()
+        status_data = {"success": False, "error": str(e), "traceback": full_traceback}
         click.echo(f"kpi generate failed: {e}", err=True)
+        click.echo(f"Full traceback:\n{full_traceback}", err=True)
+
+        if not status_file:
+            sys.exit(3)
+    finally:
+        # Write status file if requested
+        if status_file:
+            try:
+                with open(status_file, "w", encoding="utf-8") as f:
+                    yaml.dump(status_data, f, default_flow_style=False)
+            except Exception as status_err:
+                click.echo(f"Failed to write status file {status_file}: {status_err}", err=True)
+                sys.exit(4)
+
+    # Exit with error code if operation failed
+    if not status_data.get("success", False):
         sys.exit(3)
-    click.echo(f"Generated {output}")
 
 
 @click.command("import")
