@@ -2,13 +2,257 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import logging
+import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
+
+PROFILE_MAP = {
+    (1000, 1000): "profile1",
+    (512, 2048): "profile2",
+    (2048, 128): "profile3",
+    (8000, 1000): "profile4",
+}
+
+METRICS = {
+    "total_tok/sec": {"label": "Total Throughput", "higher_is_better": True, "threshold": 5},
+    "output_tok/sec": {"label": "Output Throughput", "higher_is_better": True, "threshold": 5},
+    "ttft_p95": {"label": "TTFT P95", "higher_is_better": False, "threshold": 10},
+    "itl_p95": {"label": "ITL P95", "higher_is_better": False, "threshold": 5},
+    "request_latency_median": {"label": "Median E2E Latency", "higher_is_better": False, "threshold": 5},
+}
+
+
+@dataclass
+class RegressionResult:
+    profile: str
+    metric_column: str
+    metric_label: str
+    current_value: float
+    baseline_value: float
+    pct_diff: float
+    is_regression: bool
+    is_improvement: bool = False
+
+
+def geometric_mean(values) -> Optional[float]:
+    positive = values[values > 0].values if hasattr(values, "values") else [v for v in values if v > 0]
+    if len(positive) == 0:
+        return None
+    return float(np.exp(np.mean(np.log(positive))))
+
+
+def compare_runs(
+    current_csv_path: str,
+    consolidated_csv_path: str,
+    compare_version: str,
+    current_version: str,
+    restrict_profiles: Optional[list[str]] = None,
+) -> tuple[list[RegressionResult], str]:
+    """Compare current run metrics against a baseline version.
+
+    Returns (results, skip_reason). If skip_reason is non-empty, comparison was skipped.
+    """
+    import pandas as pd
+
+    current_df = pd.read_csv(current_csv_path, on_bad_lines="warn")
+    baseline_df = pd.read_csv(consolidated_csv_path, on_bad_lines="warn")
+
+    for col in current_df.columns:
+        if current_df[col].dtype == object:
+            current_df[col] = current_df[col].str.strip()
+    for col in baseline_df.columns:
+        if baseline_df[col].dtype == object:
+            baseline_df[col] = baseline_df[col].str.strip()
+
+    if current_df.empty:
+        return [], "Current run produced no benchmark data"
+
+    model = current_df["model"].iloc[0]
+    accelerator = current_df["accelerator"].iloc[0]
+    tp = current_df["TP"].iloc[0]
+
+    logger.info("Comparing %s vs %s for model=%s, accelerator=%s, TP=%s",
+                current_version, compare_version, model, accelerator, tp)
+
+    def _assign_profile(row):
+        try:
+            isl = int(float(row["prompt toks"]))
+            osl = int(float(row["output toks"]))
+        except (ValueError, TypeError):
+            return None
+        return PROFILE_MAP.get((isl, osl))
+
+    current_df["_profile"] = current_df.apply(_assign_profile, axis=1)
+    baseline_df["_profile"] = baseline_df.apply(_assign_profile, axis=1)
+
+    baseline_filtered = baseline_df[
+        (baseline_df["version"] == compare_version)
+        & (baseline_df["model"] == model)
+        & (baseline_df["accelerator"] == accelerator)
+        & (pd.to_numeric(baseline_df["TP"], errors="coerce") == pd.to_numeric(tp, errors="coerce"))
+    ]
+
+    if baseline_filtered.empty:
+        return [], f"No baseline data for {compare_version} with model={model}, accelerator={accelerator}, TP={tp}"
+
+    current_profiles = set(current_df["_profile"].dropna().unique())
+    baseline_profiles = set(baseline_filtered["_profile"].dropna().unique())
+    common_profiles = sorted(current_profiles & baseline_profiles)
+
+    if restrict_profiles:
+        common_profiles = [p for p in common_profiles if p in restrict_profiles]
+
+    if not common_profiles:
+        return [], "No common ISL/OSL profiles between current and baseline"
+
+    results: list[RegressionResult] = []
+
+    for profile in common_profiles:
+        cur = current_df[current_df["_profile"] == profile].copy()
+        base = baseline_filtered[baseline_filtered["_profile"] == profile].copy()
+
+        cur["intended concurrency"] = pd.to_numeric(cur["intended concurrency"], errors="coerce")
+        base["intended concurrency"] = pd.to_numeric(base["intended concurrency"], errors="coerce")
+
+        common_conc = set(cur["intended concurrency"].dropna().unique()) & set(base["intended concurrency"].dropna().unique())
+        common_conc.discard(1)
+
+        if not common_conc:
+            continue
+
+        cur_common = cur[cur["intended concurrency"].isin(common_conc)]
+        base_common = base[base["intended concurrency"].isin(common_conc)]
+
+        for col, meta in METRICS.items():
+            if col not in cur_common.columns or col not in base_common.columns:
+                continue
+
+            cur_vals = pd.to_numeric(cur_common[col], errors="coerce").dropna()
+            base_vals = pd.to_numeric(base_common[col], errors="coerce").dropna()
+
+            cur_gm = geometric_mean(cur_vals)
+            base_gm = geometric_mean(base_vals)
+
+            if cur_gm is None or base_gm is None:
+                continue
+
+            pct_diff = ((cur_gm - base_gm) / base_gm) * 100
+            threshold = meta["threshold"]
+
+            if meta["higher_is_better"]:
+                is_regression = pct_diff < -threshold
+                is_improvement = pct_diff > threshold
+            else:
+                is_regression = pct_diff > threshold
+                is_improvement = pct_diff < -threshold
+
+            results.append(RegressionResult(
+                profile=profile,
+                metric_column=col,
+                metric_label=meta["label"],
+                current_value=cur_gm,
+                baseline_value=base_gm,
+                pct_diff=pct_diff,
+                is_regression=is_regression,
+                is_improvement=is_improvement,
+            ))
+
+    regressions = [r for r in results if r.is_regression]
+    logger.info("Comparison complete: %d metric comparisons, %d regressions",
+                len(results), len(regressions))
+    return results, ""
+
+
+def run_regression_analysis(
+    current_csv_path: Path,
+    consolidated_csv_path: Path,
+    compare_version: str,
+    current_version: str,
+    output_file: Path,
+) -> dict[str, Any]:
+    """Run regression analysis comparing current run against baseline.
+
+    Returns dict with status, regressions, improvements, and skip_reason.
+    """
+    try:
+        results, skip_reason = compare_runs(
+            str(current_csv_path),
+            str(consolidated_csv_path),
+            compare_version,
+            current_version,
+        )
+
+        if skip_reason:
+            analysis = {
+                "status": "skipped",
+                "reason": skip_reason,
+                "current_version": current_version,
+                "compare_version": compare_version,
+            }
+        else:
+            regressions = [r for r in results if r.is_regression]
+            improvements = [r for r in results if r.is_improvement]
+
+            analysis = {
+                "status": "completed",
+                "current_version": current_version,
+                "compare_version": compare_version,
+                "total_comparisons": len(results),
+                "regression_count": len(regressions),
+                "improvement_count": len(improvements),
+                "regressions": [
+                    {
+                        "profile": r.profile,
+                        "metric": r.metric_label,
+                        "current": round(r.current_value, 2),
+                        "baseline": round(r.baseline_value, 2),
+                        "pct_diff": round(r.pct_diff, 1),
+                    }
+                    for r in regressions
+                ],
+                "improvements": [
+                    {
+                        "profile": r.profile,
+                        "metric": r.metric_label,
+                        "current": round(r.current_value, 2),
+                        "baseline": round(r.baseline_value, 2),
+                        "pct_diff": round(r.pct_diff, 1),
+                    }
+                    for r in improvements
+                ],
+                "all_results": [
+                    {
+                        "profile": r.profile,
+                        "metric": r.metric_label,
+                        "metric_column": r.metric_column,
+                        "current": round(r.current_value, 2),
+                        "baseline": round(r.baseline_value, 2),
+                        "pct_diff": round(r.pct_diff, 1),
+                        "is_regression": r.is_regression,
+                        "is_improvement": r.is_improvement,
+                    }
+                    for r in results
+                ],
+            }
+
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_file, "w") as f:
+            json.dump(analysis, f, indent=2)
+
+        return analysis
+
+    except Exception as e:
+        logger.exception("Regression analysis failed")
+        return {"status": "failed", "error": str(e)}
 
 
 def run_kpi_analysis(

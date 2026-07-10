@@ -1,6 +1,9 @@
 vaults:
 - psap-forge-notifications
 - psap-forge-mlflow-export
+- psap-forge-aws-s3-export
+- psap-forge-dashboard-s3
+- psap-forge-rhaiis-slack
 
 benchmarks:
   guidellm:
@@ -19,6 +22,11 @@ tests:
   rhaiis:
     model_key: qwen3-0_6b
     workload_key: profile1
+    run_benchmark: true
+    warmup: true
+    version: ""
+    compare_version: ""
+    slack_user: ""
 
 caliper:
   postprocess:
@@ -34,6 +42,15 @@ caliper:
       artifacts_to_kpis:
         enabled: true
         output: kpis.json
+    csv_dashboard:
+      enabled: false
+      s3_bucket: psap-dashboard-data
+      s3_key: staging/rhaiis-dashboard/consolidated_dashboard.csv
+      vault: psap-forge-dashboard-s3
+    analyze:
+      enabled: false
+      historical_kpis: historical_kpis
+      output: regression_analysis.json
 
   export:
     from: null

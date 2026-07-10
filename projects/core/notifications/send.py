@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 GITHUB_APP_PEM_FILE = "topsail-bot.2024-09-18.private-key.pem"
 GITHUB_APP_CLIENT_ID_FILE = "topsail-bot.clientid"
 SLACK_TOKEN_FILE = "topsail-bot.slack-token"
+SLACK_WEBHOOK_URL_FILE = "slack-webhook-url"
 
 DEFAULT_REPO_OWNER = "openshift-psap"
 DEFAULT_REPO_NAME = "forge"
@@ -712,6 +713,156 @@ def send_cpt_notification_to_slack(secret_dir, secret_env_key, title, summary, d
         _, ok = slack_api.send_message(client, message=thread_message, main_ts=channel_msg_ts)
 
     return not ok
+
+
+def _send_via_webhook(webhook_url: str, blocks: list[dict]) -> bool:
+    """Post a Slack message via Incoming Webhook URL."""
+    from urllib.error import URLError
+    from urllib.request import Request, urlopen
+
+    body = json.dumps({"blocks": blocks})
+    try:
+        req = Request(
+            webhook_url,
+            data=body.encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        urlopen(req, timeout=15)  # noqa: S310
+        return True
+    except (URLError, OSError) as e:
+        logger.warning("Slack webhook POST failed: %s", e)
+        return False
+
+
+def _get_webhook_url(vault_name: str) -> str | None:
+    """Read the webhook URL from a vault file."""
+    from projects.core.library import vault as vault_lib
+
+    path = vault_lib.get_vault_content_path(vault_name, SLACK_WEBHOOK_URL_FILE)
+    if path is None or not path.exists():
+        logger.warning("Webhook URL file not found in vault %s", vault_name)
+        return None
+    return path.read_text().strip()
+
+
+def send_regression_notification(
+    analysis_result: dict,
+    *,
+    model: str = "",
+    accelerator: str = "",
+    job_id: str = "",
+    slack_user: str = "",
+    webhook_vault: str | None = None,
+    notification_vault: str | None = None,
+    dry_run: bool = False,
+) -> bool:
+    """Send regression/improvement Slack notification from analysis results.
+
+    Uses a webhook URL (from *webhook_vault*) when available, falling
+    back to the Bot-Token path (from *notification_vault*).
+
+    Args:
+        analysis_result: Output from run_regression_analysis()
+        model: Model name for display
+        accelerator: Accelerator name for display
+        job_id: Job identifier
+        slack_user: Slack user ID (e.g. U01ABC123) to @-mention, or display name
+        webhook_vault: Vault containing slack-webhook-url file
+        notification_vault: Fallback vault for Bot-Token Slack credentials
+        dry_run: Log only, don't send
+
+    Returns:
+        True if notification sent successfully
+    """
+    status = analysis_result.get("status")
+    if status == "skipped":
+        reason = analysis_result.get("reason", "unknown")
+        logger.info("Regression analysis skipped: %s", reason)
+        return True
+
+    if status != "completed":
+        return True
+
+    regressions = analysis_result.get("regressions", [])
+    improvements = analysis_result.get("improvements", [])
+
+    if not regressions and not improvements:
+        logger.info("No regressions or improvements to report")
+        return True
+
+    current_version = analysis_result.get("current_version", "")
+    compare_version = analysis_result.get("compare_version", "")
+
+    if regressions and improvements:
+        icon = ":warning:"
+        headline = "Performance regressions and improvements detected"
+    elif regressions:
+        icon = ":warning:"
+        headline = "Performance regressions detected"
+    else:
+        icon = ":large_green_circle:"
+        headline = "Performance improvements detected"
+
+    detail_lines = []
+    all_results = analysis_result.get("all_results", [])
+    profiles = sorted({r["profile"] for r in all_results if r.get("is_regression") or r.get("is_improvement")})
+
+    for profile in profiles:
+        profile_results = [r for r in all_results if r["profile"] == profile and (r.get("is_regression") or r.get("is_improvement"))]
+        detail_lines.append(f"\n*{profile}:*")
+        for r in profile_results:
+            if r.get("is_regression"):
+                direction = "dropped" if r["pct_diff"] < 0 else "increased"
+                detail_lines.append(
+                    f"  :red_circle: *{r['metric']}*: {direction} {abs(r['pct_diff']):.1f}% "
+                    f"({r['baseline']:.2f} \u2192 {r['current']:.2f})"
+                )
+            else:
+                detail_lines.append(
+                    f"  :large_green_circle: *{r['metric']}*: improved {abs(r['pct_diff']):.1f}% "
+                    f"({r['baseline']:.2f} \u2192 {r['current']:.2f})"
+                )
+
+    details = "\n".join(detail_lines)
+
+    import re as _re
+
+    if slack_user and _re.match(r"^[UW][A-Z0-9]+$", slack_user):
+        user_line = f"*Triggered by:* <@{slack_user}>\n"
+    elif slack_user:
+        user_line = f"*Triggered by:* {slack_user}\n"
+    else:
+        user_line = ""
+
+    message = (
+        f"{icon} *{headline}*\n"
+        f"{user_line}"
+        f"*Job:* `{job_id}`\n"
+        f"*Model:* {model}\n"
+        f"*Accelerator:* {accelerator}\n"
+        f"*Versions:* {current_version} vs {compare_version} (baseline)\n"
+        f"*Changes:*\n{details}"
+    )
+
+    if dry_run:
+        logger.info("DRY RUN regression notification:\n%s", message)
+        return True
+
+    webhook_url = None
+    if webhook_vault:
+        webhook_url = _get_webhook_url(webhook_vault)
+
+    if webhook_url:
+        blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": message}}]
+        return _send_via_webhook(webhook_url, blocks)
+
+    return send_notification(
+        message,
+        github=False,
+        slack=True,
+        dry_run=dry_run,
+        notification_vault=notification_vault,
+    )
 
 
 def get_slack_cpt_message(summary):

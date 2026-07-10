@@ -1,0 +1,10 @@
+env_key: PSAP_FORGE_RHAIIS_SLACK_SECRET_PATH
+description: |
+  Slack Incoming Webhook for rhaiis regression/comparison alerts.
+  Ported from model-furnace's slack.conf.
+
+content:
+  slack-webhook-url:
+    description: |
+      Plain-text file containing a single Slack Incoming Webhook URL.
+      Example: https://hooks.slack.com/services/T.../B.../...

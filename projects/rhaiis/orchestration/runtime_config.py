@@ -67,6 +67,10 @@ def get_test_workload_key() -> str:
     return config.project.get_config("tests.rhaiis.workload_key")
 
 
+def get_profiler_config() -> dict:
+    return dict(config.project.get_config("rhaiis.profiler", {}) or {})
+
+
 def merge_vllm_args(
     defaults: dict,
     model: dict,
