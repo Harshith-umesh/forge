@@ -60,6 +60,7 @@ class SkeletonDefaultPlugin(PostProcessingPlugin):
         output_dir.mkdir(parents=True, exist_ok=True)
         paths: list[str] = []
         wanted = frozenset(report_ids or ())
+        invalid_plots: list[str] = []
 
         logger.info(f"Will generate plots for: {sorted(wanted)}")
 
@@ -72,6 +73,15 @@ class SkeletonDefaultPlugin(PostProcessingPlugin):
                 paths.append(path)
             else:
                 logger.warning(f"Requested plot type '{report_id}' not available in this plugin")
+                invalid_plots.append(report_id)
+
+        # Check for invalid plot types and raise error if found
+        if invalid_plots:
+            available_types = list(self.plots.keys())
+            raise ValueError(
+                f"Invalid plot types requested: {sorted(invalid_plots)}. "
+                f"Available types in this plugin: {sorted(available_types)}"
+            )
 
         logger.info(
             f"Skeleton plugin visualization completed. Generated {len(paths)} files: {paths}"
