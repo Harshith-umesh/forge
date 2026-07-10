@@ -28,6 +28,11 @@ from projects.caliper.cli.orchestration_entrypoints import (
     s3_export_entrypoint,
     s3_import_entrypoint,
 )
+from projects.caliper.orchestration.cli_builder import (
+    build_parse_command,
+    handle_caliper_output_and_completion,
+    log_caliper_start_banner,
+)
 from projects.caliper.orchestration.postprocess_config import (
     CaliperOrchestrationPostprocessConfig,
 )
@@ -787,47 +792,93 @@ class CaliperPostprocessOrchestrator:
         if not self.config.parse.enabled:
             return
 
-        with step_logging("caliper_parse", self.step_logs_dir) as log_file:
-            try:
-                model, mod_str = parse_entrypoint(
-                    self.config,
-                    self.tree_root,
-                    self.manifest_path,
-                    use_cache=not self.config.parse.no_cache,
-                )
+        import subprocess
+        import tempfile
 
-                # Log command to reproduce this step
-                log_parse_command(
-                    base_dir=self.tree_root,
-                    plugin_module=mod_str,
-                    use_cache=not self.config.parse.no_cache,
-                    manifest_path=self.manifest_path,
-                )
+        import yaml
 
+        # Create status file for CLI output
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as status_f:
+            status_file = Path(status_f.name)
+
+        try:
+            # Build CLI command
+            command = build_parse_command(
+                config=self.config,
+                tree_root=self.tree_root,
+                manifest_path=self.manifest_path,
+                status_file=status_file,
+                use_cache=not self.config.parse.no_cache,
+            )
+
+            # Log start banner and save command script
+            script_path = env.ARTIFACT_DIR / "parse.sh"
+            log_caliper_start_banner(command, script_path, "parse")
+
+            # Create log file path for stdout/stderr capture with proper step index
+            from projects.caliper.orchestration.step_logging import _get_next_step_index
+
+            step_index = _get_next_step_index(self.step_logs_dir)
+            log_file = self.step_logs_dir / f"{step_index:03d}__caliper_parse.log"
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+
+            # Execute CLI command with output capture
+            result = subprocess.run(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,  # Combine stderr into stdout
+                text=True,
+            )
+
+            # Handle output, status parsing, and log completion banner
+            status_data = handle_caliper_output_and_completion(result, log_file, status_file, "parse")
+
+            if result.returncode == 0 and status_data and status_data.get("success", False):
                 self._add_step(
                     "parse",
                     {
                         "status": "success",
-                        "plugin_module": mod_str,
-                        "record_count": len(model.unified_result_records),
-                        "parse_cache_ref": model.parse_cache_ref,
+                        "plugin_module": status_data.get("plugin_module", "unknown"),
+                        "record_count": status_data.get("parsed_records", 0),
+                        "parse_cache_ref": status_data.get("cache_ref"),
                         "completed_at": time.time(),
                     },
                     log_file,
                 )
-            except Exception as e:  # noqa: BLE001
+            else:
                 self.parse_failed = True
-                logger.exception("Caliper parse failed")
+                error_msg = (status_data or {}).get(
+                    "error", f"Command failed with exit code {result.returncode}"
+                )
+                logger.error("Caliper parse failed: %s", error_msg)
                 self._add_step(
                     "parse",
                     {
                         "status": "failure",
-                        "detail": str(e),
-                        "traceback": traceback.format_exc(),
+                        "detail": error_msg,
+                        "exit_code": result.returncode,
                         "completed_at": time.time(),
                     },
                     log_file,
                 )
+
+        except Exception as e:  # noqa: BLE001
+            self.parse_failed = True
+            logger.exception("Parse step execution failed")
+            self._add_step(
+                "parse",
+                {
+                    "status": "failure",
+                    "detail": str(e),
+                    "traceback": traceback.format_exc(),
+                    "completed_at": time.time(),
+                },
+                None,  # No log file if we couldn't even start
+            )
+        finally:
+            # Clean up temporary status file
+            if status_file.exists():
+                status_file.unlink()
 
     def _run_visualize_step(self) -> None:
         """Execute the visualize step if enabled."""

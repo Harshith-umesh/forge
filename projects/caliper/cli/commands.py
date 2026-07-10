@@ -77,10 +77,10 @@ def _plugin_tuple(ctx: click.Context):
 
     root = _root_obj(ctx)
     try:
-        mod = resolve_plugin_module_string(
-            root.get("plugin_cli"),
-            root.get("postprocess_config"),
-            root.get("base_dir"),
+        mod, _manifest_path = resolve_plugin_module_string(
+            base_dir=root.get("base_dir"),
+            postprocess_config=root.get("postprocess_config"),
+            cli_plugin=root.get("plugin_cli"),
         )
         if not mod:
             raise RuntimeError("Plugin module not found")
