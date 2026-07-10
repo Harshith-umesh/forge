@@ -1279,7 +1279,7 @@ class CaliperPostprocessOrchestrator:
                 error_msg = f"S3 export step failed with exception: {type(e).__name__}: {str(e)}"
 
                 # Log programming errors more prominently
-                if isinstance(e, (AttributeError, NameError, TypeError)):
+                if isinstance(e, AttributeError | NameError | TypeError):
                     logger.error(f"CRITICAL PROGRAMMING ERROR in S3 export: {error_msg}")
                     logger.exception("Full traceback for programming error:")
                 else:

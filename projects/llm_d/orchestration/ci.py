@@ -36,6 +36,7 @@ def init():
     run.init()
     config.init(Path(__file__).parent)
 
+
 def list_vaults() -> list[str]:
     """List all vaults (includes both mandatory and optional)."""
     all_vaults = vault.phase_vault_list_all()
