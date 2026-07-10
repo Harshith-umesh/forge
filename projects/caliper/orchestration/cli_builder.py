@@ -112,7 +112,16 @@ def build_visualize_command(
         cmd.extend(["--report-group", config.visualize.report_group])
 
     if config.visualize.visualize_config:
-        cmd.extend(["--visualize-config", str(config.visualize.visualize_config)])
+        # Resolve the visualize config path properly (same logic as _resolve_visualize_config_path)
+        viz_config_path = config.visualize.visualize_config
+        if viz_config_path:
+            from projects.core.library import env
+
+            viz_path = Path(viz_config_path).expanduser()
+            if not viz_path.is_absolute():
+                # If relative, resolve relative to FORGE_HOME like the original does
+                viz_path = env.FORGE_HOME / viz_path
+            cmd.extend(["--visualize-config", str(viz_path.resolve())])
 
     # Include/exclude labels
     for label in config.visualize.include_labels:

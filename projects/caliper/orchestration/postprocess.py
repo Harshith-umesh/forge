@@ -24,12 +24,12 @@ from projects.caliper.cli.orchestration_entrypoints import (
     get_kpi_functions_entrypoint,
     load_plugin_entrypoint,
     parse_entrypoint,
-    run_visualize_entrypoint,
     s3_export_entrypoint,
     s3_import_entrypoint,
 )
 from projects.caliper.orchestration.cli_builder import (
     build_parse_command,
+    build_visualize_command,
     handle_caliper_output_and_completion,
     log_caliper_start_banner,
 )
@@ -47,9 +47,7 @@ from projects.caliper.orchestration.step_logging import (
     log_ai_data_command,
     log_artifacts_to_kpis_command,
     log_kpis_to_csv_command,
-    log_parse_command,
     log_s3_export_command,
-    log_visualize_command,
     step_logging,
 )
 from projects.core.library import env
@@ -795,8 +793,6 @@ class CaliperPostprocessOrchestrator:
         import subprocess
         import tempfile
 
-        import yaml
-
         # Create status file for CLI output
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as status_f:
             status_file = Path(status_f.name)
@@ -831,7 +827,9 @@ class CaliperPostprocessOrchestrator:
             )
 
             # Handle output, status parsing, and log completion banner
-            status_data = handle_caliper_output_and_completion(result, log_file, status_file, "parse")
+            status_data = handle_caliper_output_and_completion(
+                result, log_file, status_file, "parse"
+            )
 
             if result.returncode == 0 and status_data and status_data.get("success", False):
                 self._add_step(
@@ -885,62 +883,74 @@ class CaliperPostprocessOrchestrator:
         if not self.config.visualize.enabled:
             return
 
-        with step_logging("caliper_visualize", self.step_logs_dir) as log_file:
-            try:
-                mod_str, plugin = load_plugin_entrypoint(
-                    self.config, tree_root=self.tree_root, manifest_path=self.manifest_path
+        import subprocess
+        import tempfile
+
+        # Create status file for CLI output
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as status_f:
+            status_file = Path(status_f.name)
+
+        try:
+            # Resolve visualize output directory
+            if self.visualize_output_dir is not None:
+                output_dir = self.visualize_output_dir.expanduser().resolve()
+                logger.info(f"Using explicit visualize output directory: {output_dir}")
+            else:
+                output_dir = _resolve_visualize_output_dir(
+                    self.config.visualize.output_dir,
+                )
+                logger.info(
+                    f"Resolved visualize output directory from config '{self.config.visualize.output_dir}': {output_dir}"
                 )
 
-                viz_cfg_path = _resolve_visualize_config_path(
-                    self.config.visualize.visualize_config,
-                    artifact_tree=self.tree_root,
-                )
+            # Build CLI command
+            command = build_visualize_command(
+                config=self.config,
+                tree_root=self.tree_root,
+                manifest_path=self.manifest_path,
+                status_file=status_file,
+                output_dir=output_dir,
+                use_cache=not self.config.parse.no_cache,
+            )
 
-                if self.visualize_output_dir is not None:
-                    output_dir = self.visualize_output_dir.expanduser().resolve()
-                    logger.info(f"Using explicit visualize output directory: {output_dir}")
-                else:
-                    output_dir = _resolve_visualize_output_dir(
-                        self.config.visualize.output_dir,
-                    )
-                    logger.info(
-                        f"Resolved visualize output directory from config '{self.config.visualize.output_dir}': {output_dir}"
-                    )
+            # Log start banner and save command script
+            script_path = env.ARTIFACT_DIR / "visualize.sh"
+            log_caliper_start_banner(command, script_path, "visualize")
 
-                # Log command to reproduce this step
-                log_visualize_command(
-                    base_dir=self.tree_root,
-                    plugin_module=mod_str,
-                    output_dir=output_dir,
-                    reports_csv=self.config.visualize.reports,
-                    report_group=self.config.visualize.report_group,
-                    visualize_config_path=viz_cfg_path,
-                    include_pairs=tuple(self.config.visualize.include_labels),
-                    exclude_pairs=tuple(self.config.visualize.exclude_labels),
-                    use_cache=not self.config.parse.no_cache,
-                )
+            # Create log file path for stdout/stderr capture with proper step index
+            from projects.caliper.orchestration.step_logging import _get_next_step_index
 
-                paths = run_visualize_entrypoint(
-                    base_dir=self.tree_root,
-                    plugin_module=mod_str,
-                    plugin=plugin,
-                    output_dir=output_dir,
-                    reports_csv=self.config.visualize.reports,
-                    report_group=self.config.visualize.report_group,
-                    visualize_config_path=viz_cfg_path,
-                    include_pairs=tuple(self.config.visualize.include_labels),
-                    exclude_pairs=tuple(self.config.visualize.exclude_labels),
-                    use_cache=not self.config.parse.no_cache,
-                    cache_path=self.cache_path,
-                )
+            step_index = _get_next_step_index(self.step_logs_dir)
+            log_file = self.step_logs_dir / f"{step_index:03d}__caliper_visualize.log"
+            log_file.parent.mkdir(parents=True, exist_ok=True)
 
-                # Convert paths to relative paths from output_dir
+            # Execute CLI command with output capture
+            result = subprocess.run(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,  # Combine stderr into stdout
+                text=True,
+            )
+
+            # Handle output, status parsing, and log completion banner
+            status_data = handle_caliper_output_and_completion(
+                result, log_file, status_file, "visualize"
+            )
+
+            if result.returncode == 0 and status_data and status_data.get("success", False):
+                # Get output files and paths from status
+                output_files = status_data.get("output_files", [])
+
+                # Convert absolute paths to relative paths from output_dir if needed
                 relative_paths = []
-                for path in paths:
+                for path in output_files:
                     try:
                         path_obj = Path(path)
-                        relative_path = path_obj.relative_to(output_dir)
-                        relative_paths.append(str(relative_path))
+                        if path_obj.is_absolute():
+                            relative_path = path_obj.relative_to(output_dir)
+                            relative_paths.append(str(relative_path))
+                        else:
+                            relative_paths.append(str(path))
                     except ValueError:
                         # If path is not under output_dir, keep as-is
                         relative_paths.append(str(path))
@@ -956,27 +966,48 @@ class CaliperPostprocessOrchestrator:
                     "visualize",
                     {
                         "status": "success",
-                        "plugin_module": mod_str,
+                        "plugin_module": status_data.get("plugin_module", "unknown"),
                         "output_files": relative_paths,
                         "output_dir": relative_output_dir,
+                        "generated_files": status_data.get("generated_files", len(relative_paths)),
+                        "completed_at": time.time(),
+                    },
+                    log_file,
+                )
+            else:
+                self.visualize_failed = True
+                error_msg = (status_data or {}).get(
+                    "error", f"Command failed with exit code {result.returncode}"
+                )
+                logger.error("Caliper visualize failed: %s", error_msg)
+                self._add_step(
+                    "visualize",
+                    {
+                        "status": "failure",
+                        "detail": error_msg,
+                        "exit_code": result.returncode,
                         "completed_at": time.time(),
                     },
                     log_file,
                 )
 
-            except Exception as e:  # noqa: BLE001
-                self.visualize_failed = True
-                logger.exception("Caliper visualize failed")
-                self._add_step(
-                    "visualize",
-                    {
-                        "status": "failure",
-                        "detail": str(e),
-                        "traceback": traceback.format_exc(),
-                        "completed_at": time.time(),
-                    },
-                    log_file,
-                )
+        except Exception as e:  # noqa: BLE001
+            self.visualize_failed = True
+            logger.exception("Visualize step execution failed")
+            self._add_step(
+                "visualize",
+                {
+                    "status": "failure",
+                    "detail": str(e),
+                    "traceback": traceback.format_exc(),
+                    "completed_at": time.time(),
+                },
+                None,  # No log file if we couldn't even start
+            )
+        finally:
+            # Clean up temporary status file
+            if status_file.exists():
+                status_file.unlink()
 
     def _run_kpi_and_ai_data_steps(self) -> None:
         """Execute KPI generation, CSV export, KPI export, and AI evaluation steps."""
