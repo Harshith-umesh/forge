@@ -8,7 +8,6 @@ from pathlib import Path
 import click
 import yaml
 
-from projects.caliper.cli.orchestration_entrypoints import export_kpis_to_csv_entrypoint
 from projects.caliper.cli.s3_import import run_s3_import_with_explicit_params
 from projects.caliper.engine.ai_eval import run_ai_eval_export
 from projects.caliper.engine.file_export.artifacts_export_run import run_artifacts_export
@@ -531,8 +530,10 @@ def kpi_csv_export(
                     kpi_record = json.loads(line)
                     kpi_records.append(kpi_record)
 
-        # Export to CSV using the entrypoint
-        result_path = export_kpis_to_csv_entrypoint(
+        # Export to CSV
+        from projects.caliper.engine.kpi.csv_export import export_kpis_to_csv
+
+        result_path = export_kpis_to_csv(
             plugin=plugin,
             kpi_records=kpi_records,
             output_path=output,
@@ -735,20 +736,29 @@ def analyse_kpis_cmd(
 
         output_dir = output.parent
 
-        # Run analysis using the entrypoint (without base_dir since we have direct paths)
-        from projects.caliper.cli.orchestration_entrypoints import analyze_kpis_entrypoint
+        # Run analysis
+        from projects.caliper.engine.kpi.analyze import analyze_kpis
 
-        result = analyze_kpis_entrypoint(
-            postprocess_config=postprocess_config_obj,
-            plugin_module=plugin_module,
-            base_dir=output_dir,  # Use output dir as base since we have absolute paths
-            output_dir=output_dir,
-            current_kpis_file=current_kpis_file,
-        )
+        try:
+            result = analyze_kpis(
+                postprocess_config=postprocess_config_obj,
+                plugin_module=plugin_module,
+                base_dir=output_dir,  # Use output dir as base since we have absolute paths
+                output_dir=output_dir,
+                current_kpis_file=current_kpis_file,
+            )
+        except Exception as e:
+            # Don't suppress the exception - let it bubble up with full traceback
+            import sys
+            import traceback
+
+            print(f"❌ Exception in analyze_kpis: {e}", file=sys.stderr)
+            print(f"Full traceback:\n{traceback.format_exc()}", file=sys.stderr)
+            raise
 
         # Check if the analysis function returned a proper result
         if not isinstance(result, dict) or "status" not in result:
-            raise ValueError(f"Invalid result from analyze_kpis_entrypoint: {result}")
+            raise ValueError(f"Invalid result from analyze_kpis: {result}")
 
         status_data = {
             "success": result.get("status") == "success",

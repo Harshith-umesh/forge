@@ -19,11 +19,6 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from projects.caliper.cli.orchestration_entrypoints import (
-    get_kpi_functions_entrypoint,
-    load_plugin_entrypoint,
-    parse_entrypoint,
-)
 from projects.caliper.orchestration.cli_builder import (
     build_ai_eval_export_command,
     build_analyse_kpis_command,
@@ -329,9 +324,6 @@ def _resolve_visualize_config_path(
     return (env.FORGE_HOME / p).resolve()
 
 
-# _load_plugin function removed - now using load_plugin_entrypoint
-
-
 def _transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
     """
     Transform flat KPI list into hierarchical JSON structure.
@@ -355,7 +347,13 @@ def _transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
     tests_data = defaultdict(lambda: {"kpis": [], "labels": {}, "metadata": {}})
 
     # Get KPI function metadata from the plugin module
-    kpi_functions = get_kpi_functions_entrypoint(model.plugin_module)
+    from projects.caliper.engine.kpi.decorators import get_kpi_functions
+
+    try:
+        plugin_module_obj = __import__(model.plugin_module, fromlist=[""])
+        kpi_functions = get_kpi_functions(plugin_module_obj)
+    except (ImportError, AttributeError):
+        kpi_functions = {}
 
     for kpi in kpis:
         run_id = kpi.get("run_id", "unknown")
@@ -1352,14 +1350,24 @@ class CaliperPostprocessOrchestrator:
             output_dir.mkdir(parents=True, exist_ok=True)
 
             # Load plugin and model
-            model, mod_str = parse_entrypoint(
-                self.config,
-                self.tree_root,
-                self.manifest_path,
-                use_cache=not self.config.parse.no_cache,
+            from projects.caliper.engine.load_plugin import load_plugin
+            from projects.caliper.engine.parse import run_parse
+            from projects.caliper.engine.plugin_config import resolve_plugin_module_string
+
+            # Load plugin
+            mod_str, _manifest = resolve_plugin_module_string(
+                base_dir=self.tree_root,
+                postprocess_config=self.manifest_path,
+                cli_plugin=self.config.plugin_module,
             )
-            mod_str, plugin = load_plugin_entrypoint(
-                self.config, tree_root=self.tree_root, manifest_path=self.manifest_path
+            plugin = load_plugin(mod_str)
+
+            # Parse model
+            model = run_parse(
+                base_dir=self.tree_root,
+                plugin_module=mod_str,
+                plugin=plugin,
+                use_cache=not self.config.parse.no_cache,
             )
 
             # KPI JSON generation

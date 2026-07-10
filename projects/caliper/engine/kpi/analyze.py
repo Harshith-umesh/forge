@@ -156,7 +156,6 @@ def analyze_kpis(
                 "completed_at": time.time(),
             }
 
-
         # Call the core analysis function
         exit_code = run_kpi_analysis(
             current_kpi_file=current_kpis_file,

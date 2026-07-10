@@ -11,7 +11,6 @@ import threading
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
 
 # Thread-local storage for step-specific handlers
 _step_local_handlers = threading.local()
@@ -235,9 +234,3 @@ def cleanup_step_logging():
     if hasattr(_step_local_handlers, "file_handler"):
         _step_local_handlers.file_handler.close()
         del _step_local_handlers.file_handler
-
-
-
-
-
-
