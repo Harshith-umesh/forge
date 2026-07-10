@@ -7,7 +7,7 @@ from pathlib import Path
 
 import click
 
-from projects.caliper.cli.s3_import import run_s3_import
+from projects.caliper.cli.s3_import import run_s3_import_with_explicit_params
 from projects.caliper.engine.ai_eval import run_ai_eval_export
 from projects.caliper.engine.file_export.artifacts_export_run import run_artifacts_export
 from projects.caliper.engine.file_export.artifacts_import_run import run_artifacts_import
@@ -446,11 +446,6 @@ def kpi_s3_import(
     verbose: bool,
 ) -> None:
     """Download historical KPI and analysis data from S3."""
-    from projects.caliper.orchestration.postprocess_config import (
-        CaliperOrchestrationPostprocessConfig,
-        CaliperOrchestrationS3ImportSection,
-        CaliperOrchestrationS3Section,
-    )
     from projects.core.library import vault as vault_lib
 
     try:
@@ -466,33 +461,18 @@ def kpi_s3_import(
         # Initialize vault system
         vault_lib.init(vaults=[vault] if vault else [])
 
-        # Parse bucket/prefix to extract instance and directory
-        prefix_parts = prefix.strip("/").split("/")
-        instance = prefix_parts[0] if len(prefix_parts) > 0 and prefix_parts[0] else None
-        directory = prefix_parts[1] if len(prefix_parts) > 1 else None
-
-        s3_import_config = CaliperOrchestrationS3ImportSection(
-            enabled=True,
-            output_dir=output_dir.name,
+        # Run S3 import
+        result = run_s3_import_with_explicit_params(
+            bucket=bucket,
+            prefix=prefix,
+            output_dir=output_dir,
+            vault=vault,
+            aws_credentials_file=aws_credentials_file,
             include_kpis_json=include_kpis_json,
             include_kpis_csv=include_kpis_csv,
             include_ai_data=include_ai_data,
             max_downloads=max_downloads,
         )
-
-        s3_config = CaliperOrchestrationS3Section(
-            bucket=bucket,
-            instance=instance,
-            directory=directory,
-            vault=vault,
-            aws_credentials_file=aws_credentials_file,
-            **{"import": s3_import_config},
-        )
-
-        config = CaliperOrchestrationPostprocessConfig(s3=s3_config)
-
-        # Run S3 import
-        result = run_s3_import(config, output_dir.parent)
 
         if result["status"] == "success":
             click.echo("✅ S3 import completed successfully")
