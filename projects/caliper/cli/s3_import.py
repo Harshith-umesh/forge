@@ -221,7 +221,7 @@ def run_s3_import_with_explicit_params(
 
     Args:
         bucket: S3 bucket name
-        prefix: S3 prefix path (full path including s3.prefix/instance/directory)
+        prefix: S3 prefix path (full path including instance/directory)
         output_dir: Path to output directory for downloaded files
         vault: Vault name containing AWS credentials
         aws_credentials_file: AWS credentials file within vault
@@ -276,12 +276,6 @@ def run_s3_import_with_explicit_params(
         objects = list_s3_objects(s3_client, bucket, import_s3_prefix, max_downloads)
 
         logger.info(f"Found {len(objects)} total objects in s3://{bucket}/{import_s3_prefix}")
-        if objects:
-            logger.info("Sample object keys:")
-            for i, obj in enumerate(objects[:5]):  # Show first 5 objects
-                logger.info(f"  {i + 1}: {obj['key']}")
-            if len(objects) > 5:
-                logger.info(f"  ... and {len(objects) - 5} more objects")
 
         # Filter objects based on parameters
         logger.info(

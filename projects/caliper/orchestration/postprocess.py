@@ -9,6 +9,7 @@ Computes ``final_status`` from the FORGE test phase outcome plus all enabled ste
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 import traceback
@@ -19,6 +20,7 @@ from pydantic import ValidationError
 
 from projects.caliper.cli.orchestration_entrypoints import (
     analyze_kpis_entrypoint,
+    export_kpis_to_csv_entrypoint,
     get_kpi_functions_entrypoint,
     load_plugin_entrypoint,
     parse_entrypoint,
@@ -93,13 +95,16 @@ def _resolve_visualize_output_dir(
     raw: str | None,
 ) -> Path:
     if raw is None or not str(raw).strip():
-        raise ValueError(
-            "caliper.postprocess.visualize.output_dir is required when no explicit visualize_output_directory is provided"
-        )
+        # If empty, use env.ARTIFACT_DIR
+        return env.ARTIFACT_DIR
+
     p = Path(raw).expanduser()
     if p.is_absolute():
+        # If absolute, don't touch
         return p.resolve()
-    raise ValueError("caliper.postprocess.visualize.output_dir must be an absolute path")
+    else:
+        # If relative, use env.ARTIFACT_DIR / output_dir
+        return (env.ARTIFACT_DIR / p).resolve()
 
 
 def _resolve_visualize_config_path(
@@ -291,8 +296,6 @@ def _run_artifacts_to_kpis(
         kpis = plugin.compute_kpis(model)
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
-        import json
-
         # Transform flat KPI list into hierarchical structure
         hierarchical_data = _transform_kpis_to_hierarchical_format(kpis, model)
 
@@ -356,8 +359,6 @@ def _run_artifacts_to_ai_data(
 
         # Write main AI eval payload
         output_file.parent.mkdir(parents=True, exist_ok=True)
-
-        import json
 
         with open(output_file, "w") as f:
             json.dump(payload, f, indent=2)
@@ -478,7 +479,6 @@ def _export_test_entries_with_artifacts(
 
         # Write entry metadata
         entry_metadata_file = test_entry_dir / "entry_metadata.json"
-        import json
 
         with open(entry_metadata_file, "w") as f:
             json.dump(entry_info, f, indent=2)
@@ -520,11 +520,10 @@ def _run_kpis_to_csv(
             output_path=output_file,
         )
 
-        # Import and use the CSV exporter
-        from projects.guidellm.postprocess.guidellm.csv_export import quick_export_kpis_to_csv
-
-        result_path = quick_export_kpis_to_csv(
-            records=kpi_records,
+        # Use Caliper entrypoint for CSV export
+        result_path = export_kpis_to_csv_entrypoint(
+            plugin=plugin,
+            kpi_records=kpi_records,
             output_path=output_file,
             include_header_comments=postprocess_config.kpi.kpis_to_csv.include_header_comments,
         )
@@ -677,8 +676,20 @@ class CaliperPostprocessOrchestrator:
         self.step_logs_dir = Path(env.ARTIFACT_DIR)
         self.step_logs_dir.mkdir(parents=True, exist_ok=True)
 
-    def _add_step(self, step_name: str, step_data: dict[str, Any]) -> None:
+    def _add_step(
+        self, step_name: str, step_data: dict[str, Any], log_file: Path | None = None
+    ) -> None:
         """Add a step result to the steps list."""
+        if log_file:
+            # Make log file path relative to artifact root where logs are actually stored
+            try:
+                artifact_root = Path(env.ARTIFACT_DIR)
+                relative_log_path = log_file.relative_to(artifact_root)
+                step_data["log_file"] = str(relative_log_path)
+            except ValueError:
+                # If log file is not under artifact root, use absolute path
+                step_data["log_file"] = str(log_file)
+
         self.steps.append({step_name: step_data})
 
     def _check_step_result_and_set_failure(self, step_name: str, result: dict[str, Any]) -> bool:
@@ -760,7 +771,7 @@ class CaliperPostprocessOrchestrator:
         return {
             "final_status": final_status,
             "success": success_value,
-            "base_directory": str(self.visualize_output_dir) if self.visualize_output_dir else None,
+            "base_directory": str(Path(env.ARTIFACT_DIR)),
             "test_phase": test_block,
             "steps": self.steps,
         }
@@ -770,7 +781,7 @@ class CaliperPostprocessOrchestrator:
         if not self.config.parse.enabled:
             return
 
-        with step_logging("caliper_parse", self.step_logs_dir):
+        with step_logging("caliper_parse", self.step_logs_dir) as log_file:
             try:
                 model, mod_str = parse_entrypoint(
                     self.config,
@@ -796,6 +807,7 @@ class CaliperPostprocessOrchestrator:
                         "parse_cache_ref": model.parse_cache_ref,
                         "completed_at": time.time(),
                     },
+                    log_file,
                 )
             except Exception as e:  # noqa: BLE001
                 self.parse_failed = True
@@ -808,6 +820,7 @@ class CaliperPostprocessOrchestrator:
                         "traceback": traceback.format_exc(),
                         "completed_at": time.time(),
                     },
+                    log_file,
                 )
 
     def _run_visualize_step(self) -> None:
@@ -815,7 +828,7 @@ class CaliperPostprocessOrchestrator:
         if not self.config.visualize.enabled:
             return
 
-        with step_logging("caliper_visualize", self.step_logs_dir):
+        with step_logging("caliper_visualize", self.step_logs_dir) as log_file:
             try:
                 mod_str, plugin = load_plugin_entrypoint(
                     self.config, tree_root=self.tree_root, manifest_path=self.manifest_path
@@ -828,9 +841,13 @@ class CaliperPostprocessOrchestrator:
 
                 if self.visualize_output_dir is not None:
                     output_dir = self.visualize_output_dir.expanduser().resolve()
+                    logger.info(f"Using explicit visualize output directory: {output_dir}")
                 else:
                     output_dir = _resolve_visualize_output_dir(
                         self.config.visualize.output_dir,
+                    )
+                    logger.info(
+                        f"Resolved visualize output directory from config '{self.config.visualize.output_dir}': {output_dir}"
                     )
 
                 # Log command to reproduce this step
@@ -871,14 +888,23 @@ class CaliperPostprocessOrchestrator:
                         # If path is not under output_dir, keep as-is
                         relative_paths.append(str(path))
 
+                # Calculate relative output_dir path from base_directory
+                try:
+                    relative_output_dir = str(output_dir.relative_to(env.ARTIFACT_DIR))
+                except ValueError:
+                    # If output_dir is not under ARTIFACT_DIR, use absolute path
+                    relative_output_dir = str(output_dir)
+
                 self._add_step(
                     "visualize",
                     {
                         "status": "success",
                         "plugin_module": mod_str,
                         "output_files": relative_paths,
+                        "output_dir": relative_output_dir,
                         "completed_at": time.time(),
                     },
+                    log_file,
                 )
 
             except Exception as e:  # noqa: BLE001
@@ -892,6 +918,7 @@ class CaliperPostprocessOrchestrator:
                         "traceback": traceback.format_exc(),
                         "completed_at": time.time(),
                     },
+                    log_file,
                 )
 
     def _run_kpi_and_ai_data_steps(self) -> None:
@@ -900,12 +927,10 @@ class CaliperPostprocessOrchestrator:
             return
 
         try:
-            # Determine output directory
-            if self.config.visualize.enabled and self.visualize_output_dir:
-                output_dir = Path(self.visualize_output_dir)
-            else:
-                output_dir = Path(self.artifacts_dir) / "postprocess_output"
-                output_dir.mkdir(parents=True, exist_ok=True)
+            # Determine output directory for KPI/AI data steps - use base artifact directory
+            output_dir = env.ARTIFACT_DIR
+            logger.info(f"KPI steps using base artifact directory: {output_dir}")
+            output_dir.mkdir(parents=True, exist_ok=True)
 
             # Load plugin and model
             model, mod_str = parse_entrypoint(
@@ -998,11 +1023,11 @@ class CaliperPostprocessOrchestrator:
     ) -> None:
         """Execute the KPI generation step."""
         if self.config.kpi.artifacts_to_kpis.enabled:
-            with step_logging("caliper_artifacts_to_kpis", self.step_logs_dir):
+            with step_logging("caliper_artifacts_to_kpis", self.step_logs_dir) as log_file:
                 result = _run_artifacts_to_kpis(
                     self.config, plugin, model, output_dir, mod_str, self.tree_root
                 )
-                self._add_step("artifacts_to_kpis", result)
+                self._add_step("artifacts_to_kpis", result, log_file)
                 self._check_step_result_and_set_failure("artifacts_to_kpis", result)
         else:
             self._add_step(
@@ -1027,11 +1052,11 @@ class CaliperPostprocessOrchestrator:
             )
             return
 
-        with step_logging("caliper_kpis_to_csv", self.step_logs_dir):
+        with step_logging("caliper_kpis_to_csv", self.step_logs_dir) as log_file:
             # Path to the JSON file for reference in command logging
             kpi_json_path = output_dir / self.config.kpi.artifacts_to_kpis.output
             result = _run_kpis_to_csv(self.config, plugin, model, output_dir, kpi_json_path)
-            self._add_step("kpis_to_csv", result)
+            self._add_step("kpis_to_csv", result, log_file)
             if result.get("status") == "failed":
                 # CSV export failure doesn't affect overall status - it's supplementary
                 logger.warning("KPI CSV export failed but continuing execution")
@@ -1051,13 +1076,15 @@ class CaliperPostprocessOrchestrator:
             )
             return
 
-        with step_logging("caliper_artifacts_to_ai_data", self.step_logs_dir):
+        with step_logging("caliper_artifacts_to_ai_data", self.step_logs_dir) as log_file:
             try:
                 result = _run_artifacts_to_ai_data(
                     self.config, plugin, model, output_dir, mod_str, self.tree_root
                 )
-                self._add_step("artifacts_to_ai_data", result)
-                logger.info(f"AI eval export result: {result}")
+                self._add_step("artifacts_to_ai_data", result, log_file)
+
+                logger.info("AI eval export result:")
+                logger.info(json.dumps(result, indent=2, default=str))
 
                 # Check if the result indicates failure or warning
                 self._check_step_result_and_set_failure("artifacts_to_ai_data", result)
@@ -1065,7 +1092,7 @@ class CaliperPostprocessOrchestrator:
             except Exception as e:
                 logger.exception("AI eval export failed")
                 step_result = {"status": "failed", "error": str(e)}
-                self._add_step("artifacts_to_ai_data", step_result)
+                self._add_step("artifacts_to_ai_data", step_result, log_file)
                 self._check_step_result_and_set_failure("artifacts_to_ai_data", step_result)
 
     def _run_s3_import_step(self, output_dir: Path) -> None:
@@ -1081,7 +1108,7 @@ class CaliperPostprocessOrchestrator:
             )
             return
 
-        with step_logging("caliper_s3_import", self.step_logs_dir):
+        with step_logging("caliper_s3_import", self.step_logs_dir) as log_file:
             try:
                 result = s3_import_entrypoint(self.config, output_dir)
 
@@ -1092,15 +1119,17 @@ class CaliperPostprocessOrchestrator:
                         result.pop("import_dir"), output_dir
                     )
 
-                self._add_step("s3_import", result)
-                logger.info(f"S3 import result: {result}")
+                self._add_step("s3_import", result, log_file)
+
+                logger.info("S3 import result:")
+                logger.info(json.dumps(result, indent=2, default=str))
 
                 self._check_step_result_and_set_failure("s3_import", result)
 
             except Exception as e:
                 logger.exception("S3 import failed")
                 step_result = {"status": "failed", "error": str(e)}
-                self._add_step("s3_import", step_result)
+                self._add_step("s3_import", step_result, log_file)
                 self._check_step_result_and_set_failure("s3_import", step_result)
 
     def _run_analyse_kpis_step(self, output_dir: Path, plugin_module: str) -> None:
@@ -1143,7 +1172,7 @@ class CaliperPostprocessOrchestrator:
             self.analyze_failed = True
             return
 
-        with step_logging("caliper_analyse_kpis", self.step_logs_dir):
+        with step_logging("caliper_analyse_kpis", self.step_logs_dir) as log_file:
             try:
                 # Convert relative path to absolute for analyze function
                 current_kpis_path = output_dir / current_kpis_file
@@ -1158,15 +1187,17 @@ class CaliperPostprocessOrchestrator:
                         result["output_file"], output_dir
                     )
 
-                self._add_step("analyse_kpis", result)
-                logger.info(f"KPI analysis result: {result}")
+                self._add_step("analyse_kpis", result, log_file)
+
+                logger.info("KPI analysis result:")
+                logger.info(json.dumps(result, indent=2, default=str))
 
                 self._check_step_result_and_set_failure("analyse_kpis", result)
 
             except Exception as e:
                 logger.exception("KPI analysis failed")
                 step_result = {"status": "failed", "error": str(e)}
-                self._add_step("analyse_kpis", step_result)
+                self._add_step("analyse_kpis", step_result, log_file)
                 self._check_step_result_and_set_failure("analyse_kpis", step_result)
 
     def _run_s3_export_step(self, output_dir: Path) -> None:
@@ -1182,7 +1213,7 @@ class CaliperPostprocessOrchestrator:
             )
             return
 
-        with step_logging("caliper_s3_export", self.step_logs_dir):
+        with step_logging("caliper_s3_export", self.step_logs_dir) as log_file:
             try:
                 # Collect file paths from previous steps
                 kpis_file = None
@@ -1234,10 +1265,7 @@ class CaliperPostprocessOrchestrator:
 
                 # Log the CLI command to reproduce this step
                 s3_parent_config = self.config.s3
-                export_config = s3_parent_config.export
                 export_path = f"{s3_parent_config.instance}/{s3_parent_config.directory}"
-                if export_config.prefix:
-                    export_path += f"/{export_config.prefix}"
 
                 log_s3_export_command(
                     bucket=s3_parent_config.bucket,
@@ -1256,7 +1284,7 @@ class CaliperPostprocessOrchestrator:
                     ai_data_dir=ai_data_dir,
                     analysis_file=analysis_file,
                 )
-                self._add_step("s3_export", result)
+                self._add_step("s3_export", result, log_file)
 
                 if result.get("status") == "success":
                     # Format status for better readability
@@ -1292,7 +1320,7 @@ class CaliperPostprocessOrchestrator:
                     "exception_type": type(e).__name__,
                     "completed_at": time.time(),
                 }
-                self._add_step("s3_export", step_result)
+                self._add_step("s3_export", step_result, log_file)
                 self._check_step_result_and_set_failure("s3_export", step_result)
 
     def _compute_final_status(self) -> str:
