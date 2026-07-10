@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -159,6 +160,13 @@ def artifacts_group(ctx: click.Context) -> None:
 
 def run_cli() -> None:
     """Invoke CLI; on missing required options, print subcommand help."""
+    # Configure logging to capture INFO level messages for detailed output
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(message)s",
+        force=True,  # Override any existing configuration
+    )
+
     try:
         # standalone_mode=False returns exit codes instead of calling sys.exit;
         # propagate them so failures are non-zero (e.g. ctx.exit(1) from _exit_with_help).
