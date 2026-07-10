@@ -78,8 +78,10 @@ def _execute_caliper_command(
     log_file = step_logs_dir / f"{step_index:03d}__{step_name_safe}.log"
     log_file.parent.mkdir(parents=True, exist_ok=True)
 
-    # Create script file for debugging
-    script_file = env.ARTIFACT_DIR / f"{step_name_safe}.sh"
+    # Create script file for debugging in step_scripts directory with index prefix
+    step_scripts_dir = env.ARTIFACT_DIR / "step_scripts"
+    step_scripts_dir.mkdir(parents=True, exist_ok=True)
+    script_file = step_scripts_dir / f"{step_index:03d}__{step_name_safe}.sh"
 
     # Log start banner and save script
     log_caliper_start_banner(command, script_file, step_name.upper())
