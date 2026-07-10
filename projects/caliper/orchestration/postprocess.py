@@ -646,13 +646,19 @@ class CaliperPostprocessOrchestrator:
         logger.info("Starting postprocessing steps")
         self._run_parse_step()
         logger.info(f"After parse step: parse_failed={self.parse_failed}")
-        self._run_visualize_step()
-        logger.info(f"After visualize step: visualize_failed={self.visualize_failed}")
-        self._run_kpi_and_ai_data_steps()
-        logger.info(
-            f"After KPI/AI steps: artifacts_to_kpis_failed={self.artifacts_to_kpis_failed}, ai_data_failed={self.ai_data_failed}"
-        )
-        logger.info("All postprocessing steps completed")
+
+        # Abort pipeline if parse failed - no point in running other steps without data
+        if self.parse_failed:
+            logger.error("Parse step failed - aborting remaining postprocessing steps")
+            logger.info("Pipeline aborted due to parse failure")
+        else:
+            self._run_visualize_step()
+            logger.info(f"After visualize step: visualize_failed={self.visualize_failed}")
+            self._run_kpi_and_ai_data_steps()
+            logger.info(
+                f"After KPI/AI steps: artifacts_to_kpis_failed={self.artifacts_to_kpis_failed}, ai_data_failed={self.ai_data_failed}"
+            )
+            logger.info("All postprocessing steps completed")
 
         # Compute final status and build result
         final_status = self._compute_final_status()
