@@ -373,9 +373,11 @@ def _run_artifacts_to_kpis(
 
         # Convert to expected format
         if status_data.get("success"):
+            relative_path = _make_path_relative_to_base(output_file, env.ARTIFACT_DIR)
+            logger.info(f"KPI generate: output_file={output_file}, env.ARTIFACT_DIR={env.ARTIFACT_DIR}, relative_path={relative_path}")
             return {
                 "status": "success",
-                "output_file": str(output_file),
+                "output_file": relative_path,
                 "completed_at": time.time(),
                 "log_file": log_file,
             }
@@ -449,7 +451,7 @@ def _run_artifacts_to_ai_data(
             return {
                 "status": "success",
                 "output_file": status_data.get("output_file", str(ai_data_dir)),
-                "ai_data_dir": _make_path_relative_to_base(ai_data_dir, output_dir),
+                "ai_data_dir": _make_path_relative_to_base(ai_data_dir, env.ARTIFACT_DIR),
                 "completed_at": time.time(),
                 "log_file": log_file,
             }
@@ -645,7 +647,7 @@ def _run_kpis_to_csv(
             return {
                 "status": "success",
                 "kpi_count": status_data.get("kpi_count", 0),
-                "output_file": str(output_file),
+                "output_file": _make_path_relative_to_base(output_file, env.ARTIFACT_DIR),
                 "completed_at": time.time(),
                 "log_file": log_file,
             }
@@ -728,7 +730,7 @@ def _run_analyse_kpis(
         if status_data.get("success"):
             return {
                 "status": "success",
-                "output_file": str(output_file),
+                "output_file": _make_path_relative_to_base(output_file, env.ARTIFACT_DIR),
                 "completed_at": time.time(),
                 "log_file": log_file,
             }
@@ -1421,7 +1423,7 @@ class CaliperPostprocessOrchestrator:
                 import_dir = output_dir / self.config.s3.import_.output_dir
                 step_result = {
                     "status": "success",
-                    "output_dir": str(import_dir),
+                    "output_dir": _make_path_relative_to_base(import_dir, env.ARTIFACT_DIR),
                     "file_count": status_data.get("file_count", 0),
                     "completed_at": time.time(),
                 }
@@ -1491,8 +1493,8 @@ class CaliperPostprocessOrchestrator:
             self.analyze_failed = True
             return
 
-        # current_kpis_file is now an absolute path (updated from relative path fix)
-        current_kpis_path = Path(current_kpis_file)
+        # Convert relative path back to absolute path
+        current_kpis_path = env.ARTIFACT_DIR / current_kpis_file
 
         result = _run_analyse_kpis(
             postprocess_config=self.config,
@@ -1539,7 +1541,9 @@ class CaliperPostprocessOrchestrator:
                 and artifacts_to_kpis_step.get("status") == "success"
                 and artifacts_to_kpis_step.get("output_file")
             ):
-                kpis_file = output_dir / artifacts_to_kpis_step["output_file"]
+                stored_output_file = artifacts_to_kpis_step["output_file"]
+                kpis_file = env.ARTIFACT_DIR / stored_output_file
+                logger.info(f"S3 export: env.ARTIFACT_DIR={env.ARTIFACT_DIR}, stored_output_file={stored_output_file}, kpis_file={kpis_file}")
 
             # Get CSV file from kpis_to_csv step
             kpis_to_csv_step = self._get_step("kpis_to_csv")
@@ -1548,7 +1552,7 @@ class CaliperPostprocessOrchestrator:
                 and kpis_to_csv_step.get("status") == "success"
                 and kpis_to_csv_step.get("output_file")
             ):
-                csv_file = output_dir / kpis_to_csv_step["output_file"]
+                csv_file = env.ARTIFACT_DIR / kpis_to_csv_step["output_file"]
 
             # Get AI data directory from artifacts_to_ai_data step
             ai_data_step = self._get_step("artifacts_to_ai_data")
@@ -1558,7 +1562,7 @@ class CaliperPostprocessOrchestrator:
                 and ai_data_step.get("status") == "success"
                 and ai_data_step.get("ai_data_dir")
             ):
-                ai_data_dir = output_dir / ai_data_step["ai_data_dir"]
+                ai_data_dir = env.ARTIFACT_DIR / ai_data_step["ai_data_dir"]
                 logger.info(f"AI data directory set to: {ai_data_dir}")
             else:
                 logger.warning(
@@ -1572,7 +1576,7 @@ class CaliperPostprocessOrchestrator:
                 and analyze_step.get("status") in ("success", "warning")
                 and analyze_step.get("output_file")
             ):
-                analysis_file = output_dir / analyze_step["output_file"]
+                analysis_file = env.ARTIFACT_DIR / analyze_step["output_file"]
 
             # Create temporary status file for subprocess communication
             status_file = output_dir / "s3_export_status.yaml"
