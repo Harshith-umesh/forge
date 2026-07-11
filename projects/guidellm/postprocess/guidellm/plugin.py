@@ -145,9 +145,12 @@ class GuideLLMPlugin(PostProcessingPlugin):
             return paths
 
         # Generate reports using the registry
+        invalid_reports: list[str] = []
+
         for report_name in wanted:
             if report_name not in PLOT_REGISTRY:
                 logger.warning("Unknown report '%s' requested", report_name)
+                invalid_reports.append(report_name)
                 continue
 
             plot_config = PLOT_REGISTRY[report_name]
@@ -164,6 +167,14 @@ class GuideLLMPlugin(PostProcessingPlugin):
                     logger.warning("Failed to generate %s", report_name)
             except Exception as e:
                 logger.error("Error generating %s: %s", report_name, e)
+
+        # Check for invalid report names and raise error if found
+        if invalid_reports:
+            available_reports = list(PLOT_REGISTRY.keys())
+            raise ValueError(
+                f"Invalid report types requested: {sorted(invalid_reports)}. "
+                f"Available types in this plugin: {sorted(available_reports)}"
+            )
 
         return paths
 
