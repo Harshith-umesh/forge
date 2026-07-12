@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import uuid as _uuid_mod
 
 from projects.core.library import env
 from projects.core.library.postprocess import run_and_postprocess, write_test_labels
@@ -48,6 +49,9 @@ def _run_test(
     namespace: str,
     deployment_name: str | None = None,
 ) -> int:
+    run_uuid = str(_uuid_mod.uuid4())
+    logger.info("Run UUID: %s", run_uuid)
+
     model_cfg = runtime_config.get_model(model_key)
     workload = runtime_config.get_workload(workload_key)
     accelerator = runtime_config.get_accelerator()
@@ -170,14 +174,19 @@ def _run_test(
         _capture_and_cleanup(deployment_name, namespace)
 
     try:
-        _generate_psap_payload(model_cfg, accelerator, vllm_image, vllm_args, workload_key)
+        _generate_psap_payload(model_cfg, accelerator, vllm_image, vllm_args, workload_key, run_uuid=run_uuid)
     except Exception:
         logger.warning("PSAP payload generation failed; continuing", exc_info=True)
 
     try:
-        _generate_and_sync_dashboard_csv(model_cfg, accelerator, workload_key, vllm_args)
+        _generate_and_sync_dashboard_csv(model_cfg, accelerator, workload_key, vllm_args, run_uuid=run_uuid)
     except Exception:
         logger.warning("Dashboard CSV generation/sync failed; continuing", exc_info=True)
+
+    try:
+        _upload_predictor_log(run_uuid)
+    except Exception:
+        logger.warning("Predictor log upload failed; continuing", exc_info=True)
 
     profiler_cfg = runtime_config.get_profiler_config()
     if profiler_cfg.get("enabled", False):
@@ -266,6 +275,8 @@ def _generate_psap_payload(
     vllm_image: str,
     vllm_args: dict,
     workload_key: str,
+    *,
+    run_uuid: str = "",
 ) -> None:
     from pathlib import Path
 
@@ -288,6 +299,7 @@ def _generate_psap_payload(
         vllm_args=vllm_args,
         accelerator=accelerator,
         workload_key=workload_key,
+        run_uuid=run_uuid,
     )
     output_dir = Path(env.ARTIFACT_DIR) / "artifacts" / "results"
     write_psap_payload(
@@ -304,6 +316,8 @@ def _generate_and_sync_dashboard_csv(
     accelerator: str,
     workload_key: str,
     vllm_args: dict,
+    *,
+    run_uuid: str = "",
 ) -> None:
     from pathlib import Path
 
@@ -323,7 +337,7 @@ def _generate_and_sync_dashboard_csv(
     csv_path = None
     for psap_file in psap_files:
         output_path = psap_file.parent / f"dashboard_{psap_file.stem}.csv"
-        csv_path = generate_dashboard_csv(psap_file, version=version, output_path=output_path)
+        csv_path = generate_dashboard_csv(psap_file, version=version, output_path=output_path, run_uuid=run_uuid)
         logger.info("Generated dashboard CSV: %s", csv_path)
 
     if not csv_path:
@@ -349,7 +363,7 @@ def _generate_and_sync_dashboard_csv(
     if not compare_version:
         return
 
-    _run_regression_check(csv_path, compare_version, version, model_cfg, accelerator)
+    _run_regression_check(csv_path, compare_version, version, model_cfg, accelerator, run_uuid=run_uuid)
 
 
 def _run_regression_check(
@@ -358,6 +372,8 @@ def _run_regression_check(
     current_version: str,
     model_cfg: dict,
     accelerator: str,
+    *,
+    run_uuid: str = "",
 ) -> None:
     import tempfile
     from pathlib import Path
@@ -403,7 +419,7 @@ def _run_regression_check(
                 analysis,
                 model=model_cfg.get("hf_model_id", ""),
                 accelerator=accelerator,
-                job_id=env.ARTIFACT_DIR.rsplit("/", 1)[-1] if env.ARTIFACT_DIR else "",
+                job_id=run_uuid,
                 slack_user=config.project.get_config("tests.rhaiis.slack_user", ""),
                 webhook_vault="psap-forge-rhaiis-slack",
                 notification_vault="psap-forge-notifications",
@@ -414,6 +430,30 @@ def _run_regression_check(
         import os
         if consolidated_path and os.path.exists(consolidated_path):
             os.unlink(consolidated_path)
+
+
+def _upload_predictor_log(run_uuid: str) -> None:
+    """Upload the captured predictor pod log to S3 as ``logs/{run_uuid}.log``."""
+    from pathlib import Path
+
+    from projects.core.library import config
+    from projects.rhaiis.postprocess.s3_dashboard import upload_predictor_log_to_s3
+
+    log_path = Path(env.ARTIFACT_DIR) / "artifacts" / "inferenceservice.pods.logs"
+    if not log_path.exists():
+        logger.info("No predictor pod log found at %s, skipping upload", log_path)
+        return
+
+    csv_dashboard_cfg = config.project.get_config("caliper.postprocess.csv_dashboard", {})
+    vault_name = csv_dashboard_cfg.get("vault", "psap-forge-dashboard-s3")
+
+    result = upload_predictor_log_to_s3(
+        log_path,
+        run_uuid=run_uuid,
+        vault_name=vault_name,
+        dry_run=config.project.get_config("caliper.export.dry_run", False),
+    )
+    logger.info("Predictor log upload result: %s", result)
 
 
 def _run_warmup_step(

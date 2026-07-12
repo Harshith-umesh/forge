@@ -164,6 +164,41 @@ def upload_profiler_traces_to_s3(
         return {"status": "failed", "error": str(e), "uploaded": uploaded}
 
 
+def upload_predictor_log_to_s3(
+    log_path: Path,
+    *,
+    run_uuid: str,
+    s3_bucket: str = "psap-model-furnace",
+    vault_name: str = "psap-forge-dashboard-s3",
+    credentials_file: str = "aws.credentials",
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Upload the vLLM predictor pod log to S3 as ``logs/{run_uuid}.log``."""
+    if not log_path.exists():
+        return {"status": "skipped", "reason": f"log not found: {log_path}"}
+
+    s3_key = f"logs/{run_uuid}.log"
+
+    if dry_run:
+        logger.info("DRY RUN: Would upload %s to s3://%s/%s", log_path, s3_bucket, s3_key)
+        return {"status": "success", "dry_run": True}
+
+    from projects.caliper.cli.s3_export import create_s3_client, get_aws_credentials
+
+    credentials_path = get_aws_credentials(vault_name, credentials_file)
+    if not credentials_path:
+        return {"status": "failed", "error": f"AWS credentials not found in vault {vault_name}"}
+
+    try:
+        s3 = create_s3_client(credentials_path)
+        s3.upload_file(str(log_path), s3_bucket, s3_key)
+        logger.info("Uploaded predictor log to s3://%s/%s", s3_bucket, s3_key)
+        return {"status": "success", "s3_key": s3_key}
+    except Exception as e:
+        logger.error("Predictor log upload failed: %s", e)
+        return {"status": "failed", "error": str(e)}
+
+
 def _accelerator_s3_folder(accelerator: str) -> str:
     upper = accelerator.upper()
     if upper.startswith("H200"):

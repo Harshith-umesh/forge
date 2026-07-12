@@ -117,6 +117,7 @@ def generate_psap_payload(
     vllm_args: dict[str, Any],
     accelerator: str,
     workload_key: str,
+    run_uuid: str = "",
 ) -> dict[str, Any]:
     report = json.loads(benchmarks_json_path.read_text(encoding="utf-8"))
 
@@ -135,7 +136,7 @@ def generate_psap_payload(
             guidellm_end = int(max(ends) * 1000)
 
     return {
-        "experiment_id": str(uuid.uuid4()).upper(),
+        "experiment_id": run_uuid or str(uuid.uuid4()).upper(),
         "experiment_type": "perf",
         "model": model_id,
         "inference_server": "vllm",
