@@ -491,18 +491,21 @@ def _run_warmup_step(
         run as run_guidellm_benchmark,
     )
 
-    warmup_rates = [200]
-    warmup_max_seconds = 60
+    from projects.core.library import config
+
+    warmup_cfg = config.project.get_config("rhaiis.warmup", {})
+    warmup_rate = warmup_cfg.get("rate", 200)
+    warmup_max_seconds = warmup_cfg.get("max_seconds", 60)
 
     guidellm_args = runtime_config.build_guidellm_args(
         benchmark_cfg=benchmark_cfg,
         model_id=model_cfg["hf_model_id"],
         data=workload["data"],
-        rates=warmup_rates,
+        rates=[warmup_rate],
         max_seconds=warmup_max_seconds,
     )
 
-    logger.info("Running warmup (concurrency=200, duration=60s)")
+    logger.info("Running warmup (concurrency=%d, duration=%ds)", warmup_rate, warmup_max_seconds)
     try:
         run_guidellm_benchmark(
             endpoint_url=f"{endpoint_url}/v1",
