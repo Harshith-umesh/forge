@@ -72,13 +72,13 @@ def get_profiler_config() -> dict:
 
 
 def merge_vllm_args(
-    defaults: dict,
+    overrides: dict,
     model: dict,
     workload: dict,
 ) -> dict:
-    merged = dict(defaults)
-    merged.update(model.get("vllm_args", {}))
+    merged = dict(model.get("vllm_args", {}))
     merged.update(workload.get("vllm_args", {}))
+    merged.update(overrides)
     return merged
 
 

@@ -1,4 +1,4 @@
-namespace: forge-rhaiis
+namespace: kserve-e2e-perf
 accelerator: nvidia
 cluster_tag: ""
 
@@ -16,8 +16,8 @@ deploy:
   cpu_request: "4"
   memory_request: "16Gi"
   storage_source: hf
-  storage_pvc: model-pvc-2
-  image_pull_secret: ""
+  storage_pvc: model-pvc
+  image_pull_secret: npalaska-image-pull
   service_account_name: ""
   ready_timeout: 3600
   health_check_timeout: 120
@@ -28,8 +28,6 @@ vllm_args:
   no-enable-log-requests: true
   no-enable-prefix-caching: true
   uvicorn-log-level: debug
-  max-model-len: 8192
-  tensor-parallel-size: 1
 
 env_vars: {}
 

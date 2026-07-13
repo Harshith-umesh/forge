@@ -168,7 +168,7 @@ def upload_predictor_log_to_s3(
     log_path: Path,
     *,
     run_uuid: str,
-    s3_bucket: str = "psap-model-furnace",
+    s3_bucket: str = "psap-dashboard-data",
     vault_name: str = "psap-forge-dashboard-s3",
     credentials_file: str = "aws.credentials",
     dry_run: bool = False,
