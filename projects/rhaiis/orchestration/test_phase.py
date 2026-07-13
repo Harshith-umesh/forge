@@ -13,14 +13,14 @@ logger = logging.getLogger(__name__)
 def run(
     *,
     model_key: str,
-    workload_key: str,
+    workload_keys: list[str],
     namespace: str,
     deployment_name: str | None = None,
 ) -> int:
     return run_and_postprocess(
         do_test,
         model_key=model_key,
-        workload_key=workload_key,
+        workload_keys=workload_keys,
         namespace=namespace,
         deployment_name=deployment_name,
     )
@@ -29,14 +29,14 @@ def run(
 def do_test(
     *,
     model_key: str,
-    workload_key: str,
+    workload_keys: list[str],
     namespace: str,
     deployment_name: str | None = None,
 ) -> int:
     with env.NextArtifactDir("testing"):
         return _run_test(
             model_key=model_key,
-            workload_key=workload_key,
+            workload_keys=workload_keys,
             namespace=namespace,
             deployment_name=deployment_name,
         )
@@ -45,15 +45,11 @@ def do_test(
 def _run_test(
     *,
     model_key: str,
-    workload_key: str,
+    workload_keys: list[str],
     namespace: str,
     deployment_name: str | None = None,
 ) -> int:
-    run_uuid = str(_uuid_mod.uuid4())
-    logger.info("Run UUID: %s", run_uuid)
-
     model_cfg = runtime_config.get_model(model_key)
-    workload = runtime_config.get_workload(workload_key)
     accelerator = runtime_config.get_accelerator()
     gpu_type = runtime_config.get_gpu_type(accelerator) or accelerator
     from projects.core.library import config as _cfg
@@ -67,21 +63,12 @@ def _run_test(
 
     vllm_image = runtime_config.get_vllm_image(accelerator)
     vllm_defaults = runtime_config.get_vllm_defaults()
-    vllm_args = runtime_config.merge_vllm_args(vllm_defaults, model_cfg, workload)
+    first_workload = runtime_config.get_workload(workload_keys[0])
+    vllm_args = runtime_config.merge_vllm_args(vllm_defaults, model_cfg, first_workload)
     env_vars = runtime_config.merge_env_vars(accelerator, model_cfg)
 
-    rates = workload.get("rates", [1])
-    max_seconds = workload.get("max_seconds", 180)
+    _create_test_labels(model_key, workload_keys[0], accelerator, vllm_args)
 
-    _create_test_labels(model_key, workload_key, accelerator, vllm_args)
-
-    logger.info(
-        "Testing model=%s workload=%s accelerator=%s", model_cfg["name"], workload_key, accelerator
-    )
-
-    from projects.guidellm.toolbox.run_guidellm_benchmark.main import (
-        run as run_guidellm_benchmark,
-    )
     from projects.guidellm.toolbox.run_guidellm_benchmark.main import (
         wait_guidellm_benchmark_task,
     )
@@ -120,68 +107,118 @@ def _run_test(
 
         endpoint_url = f"http://{deployment_name}-predictor.{namespace}.svc.cluster.local:8080"
 
-        from projects.core.library import config
-
-        profiler_cfg = runtime_config.get_profiler_config()
-        profiler_enabled = profiler_cfg.get("enabled", False)
-        run_benchmark = config.project.get_config("tests.rhaiis.run_benchmark", True)
-        warmup_enabled = config.project.get_config("tests.rhaiis.warmup", True)
-
-        if profiler_enabled:
-            logger.info("Skipping warmup -- profiler step provides its own warmup")
-            _run_profiler_step(
+        logger.info(
+            "Running %d workload(s): %s", len(workload_keys), workload_keys,
+        )
+        for wl_key in workload_keys:
+            _run_workload(
+                model_key=model_key,
+                workload_key=wl_key,
+                model_cfg=model_cfg,
+                accelerator=accelerator,
+                accelerator_key=accelerator_key,
+                gpu_type=gpu_type,
+                vllm_image=vllm_image,
+                vllm_args=vllm_args,
+                benchmark_cfg=benchmark_cfg,
                 deployment_name=deployment_name,
                 namespace=namespace,
                 endpoint_url=endpoint_url,
-                benchmark_cfg=benchmark_cfg,
-                model_cfg=model_cfg,
-                workload=workload,
-                workload_key=workload_key,
                 benchmark_timeout=benchmark_timeout,
             )
-        elif warmup_enabled:
-            _run_warmup_step(
-                deployment_name=deployment_name,
-                namespace=namespace,
-                endpoint_url=endpoint_url,
-                benchmark_cfg=benchmark_cfg,
-                model_cfg=model_cfg,
-                workload=workload,
-                benchmark_timeout=benchmark_timeout,
-            )
-
-        main_benchmark_dir = None
-        if not run_benchmark:
-            logger.info("run_benchmark=false, skipping main benchmark")
-        else:
-            logger.info("Running benchmark at rates=%s", rates)
-
-            benchmark_image = benchmark_cfg.get("image", "ghcr.io/vllm-project/guidellm:v0.6.0")
-
-            guidellm_args = runtime_config.build_guidellm_args(
-                benchmark_cfg=benchmark_cfg,
-                model_id=model_cfg["hf_model_id"],
-                data=workload["data"],
-                rates=rates,
-                max_seconds=max_seconds,
-            )
-
-            pre_index = env.next_artifact_index()
-            run_guidellm_benchmark(
-                endpoint_url=f"{endpoint_url}/v1",
-                name=f"guidellm-{deployment_name}",
-                namespace=namespace,
-                image=benchmark_image,
-                timeout=benchmark_timeout,
-                pvc_size=benchmark_cfg.get("pvc_size", "5Gi"),
-                guidellm_args=guidellm_args,
-            )
-            from pathlib import Path
-            candidates = sorted(Path(env.ARTIFACT_DIR).glob(f"{pre_index:03d}__*"))
-            if candidates:
-                main_benchmark_dir = candidates[0]
     finally:
         _capture_and_cleanup(deployment_name, namespace)
+
+    return 0
+
+
+def _run_workload(
+    *,
+    model_key: str,
+    workload_key: str,
+    model_cfg: dict,
+    accelerator: str,
+    accelerator_key: str,
+    gpu_type: str,
+    vllm_image: str,
+    vllm_args: dict,
+    benchmark_cfg: dict,
+    deployment_name: str,
+    namespace: str,
+    endpoint_url: str,
+    benchmark_timeout: int,
+) -> None:
+    """Run a single workload: warmup/profiler, benchmark, PSAP/CSV, uploads."""
+    run_uuid = str(_uuid_mod.uuid4())
+    logger.info("=== Workload %s (UUID: %s) ===", workload_key, run_uuid)
+
+    workload = runtime_config.get_workload(workload_key)
+    rates = workload.get("rates", [1])
+    max_seconds = workload.get("max_seconds", 180)
+
+    from projects.core.library import config
+    from projects.guidellm.toolbox.run_guidellm_benchmark.main import (
+        run as run_guidellm_benchmark,
+    )
+
+    profiler_cfg = runtime_config.get_profiler_config()
+    profiler_enabled = profiler_cfg.get("enabled", False)
+    run_benchmark = config.project.get_config("tests.rhaiis.run_benchmark", True)
+    warmup_enabled = config.project.get_config("tests.rhaiis.warmup", True)
+
+    if profiler_enabled:
+        logger.info("Skipping warmup -- profiler step provides its own warmup")
+        _run_profiler_step(
+            deployment_name=deployment_name,
+            namespace=namespace,
+            endpoint_url=endpoint_url,
+            benchmark_cfg=benchmark_cfg,
+            model_cfg=model_cfg,
+            workload=workload,
+            workload_key=workload_key,
+            benchmark_timeout=benchmark_timeout,
+        )
+    elif warmup_enabled:
+        _run_warmup_step(
+            deployment_name=deployment_name,
+            namespace=namespace,
+            endpoint_url=endpoint_url,
+            benchmark_cfg=benchmark_cfg,
+            model_cfg=model_cfg,
+            workload=workload,
+            benchmark_timeout=benchmark_timeout,
+        )
+
+    main_benchmark_dir = None
+    if not run_benchmark:
+        logger.info("run_benchmark=false, skipping main benchmark")
+    else:
+        logger.info("Running benchmark at rates=%s for workload=%s", rates, workload_key)
+
+        benchmark_image = benchmark_cfg.get("image", "ghcr.io/vllm-project/guidellm:v0.6.0")
+
+        guidellm_args = runtime_config.build_guidellm_args(
+            benchmark_cfg=benchmark_cfg,
+            model_id=model_cfg["hf_model_id"],
+            data=workload["data"],
+            rates=rates,
+            max_seconds=max_seconds,
+        )
+
+        pre_index = env.next_artifact_index()
+        run_guidellm_benchmark(
+            endpoint_url=f"{endpoint_url}/v1",
+            name=f"guidellm-{deployment_name}-{workload_key}",
+            namespace=namespace,
+            image=benchmark_image,
+            timeout=benchmark_timeout,
+            pvc_size=benchmark_cfg.get("pvc_size", "5Gi"),
+            guidellm_args=guidellm_args,
+        )
+        from pathlib import Path
+        candidates = sorted(Path(env.ARTIFACT_DIR).glob(f"{pre_index:03d}__*"))
+        if candidates:
+            main_benchmark_dir = candidates[0]
 
     if main_benchmark_dir:
         try:
@@ -202,8 +239,7 @@ def _run_test(
     except Exception:
         logger.warning("Predictor log upload failed; continuing", exc_info=True)
 
-    profiler_cfg = runtime_config.get_profiler_config()
-    if profiler_cfg.get("enabled", False):
+    if profiler_enabled:
         try:
             _upload_profiler_traces(model_cfg, gpu_type, vllm_args, profiler_cfg)
         except Exception:
@@ -225,8 +261,6 @@ def _run_test(
         )
     except Exception:
         logger.warning("Setting MLflow metadata failed; continuing", exc_info=True)
-
-    return 0
 
 
 def _create_test_labels(

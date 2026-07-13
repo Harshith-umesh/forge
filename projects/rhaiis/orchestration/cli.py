@@ -113,7 +113,7 @@ def test(
     try:
         test_phase.run(
             model_key=model_key,
-            workload_key=workload_key,
+            workload_keys=[workload_key],
             namespace=namespace,
             deployment_name=deployment_name,
         )

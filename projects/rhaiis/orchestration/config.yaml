@@ -22,6 +22,7 @@ tests:
   rhaiis:
     model_key: qwen3-0_6b
     workload_key: profile1
+    workload_keys: []
     run_benchmark: true
     warmup: true
     version: ""
