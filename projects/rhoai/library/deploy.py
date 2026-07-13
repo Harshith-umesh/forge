@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import tempfile
 import time
@@ -20,7 +21,11 @@ logger = logging.getLogger(__name__)
 
 RHOAI_PULL_SECRET_NAMESPACE = "openshift-config"
 RHOAI_PULL_SECRET_NAME = "pull-secret"
-RHOAI_REGISTRY = "quay.io/rhoai"
+RHOAI_CATALOG_REGISTRIES = ("quay.io/rhoai",)
+RHOAI_REGISTRIES = (
+    "registry.stage.redhat.io/rhaii",
+    "registry.stage.redhat.io/rhaii-early-access",
+)
 
 
 class _RhoaiCustomCatalogPullSecretVaultConfig(BaseModel):
@@ -52,6 +57,7 @@ class RhoaiCustomCatalogConfig(BaseModel):
     display_name: str | None = None
     publisher: str | None = None
     pull_secret: _RhoaiCustomCatalogPullSecretConfig
+    staging_pull_secret: _RhoaiCustomCatalogPullSecretConfig | None = None
 
 
 class RhoaiOperatorConfig(BaseModel):
@@ -149,6 +155,77 @@ def _decode_pull_secret(secret_data: dict[str, Any]) -> str:
     return base64.b64decode(encoded).decode("utf-8")
 
 
+def _read_vault_pull_secret(pull_secret_path: Path) -> str | dict[str, Any]:
+    raw_content = pull_secret_path.read_text(encoding="utf-8").strip()
+    if not raw_content:
+        raise RuntimeError(f"RHOAI pull secret file is empty: {pull_secret_path}")
+
+    try:
+        parsed = json.loads(raw_content)
+    except json.JSONDecodeError:
+        return raw_content
+
+    if isinstance(parsed, dict) and "auths" in parsed:
+        return parsed
+
+    return raw_content
+
+
+def _apply_vault_pull_secret(
+    *,
+    current_secret: dict[str, Any],
+    pull_secret_path: Path,
+    registries: tuple[str, ...],
+    temp_path: Path,
+) -> dict[str, Any]:
+    pull_secret_payload = _read_vault_pull_secret(pull_secret_path)
+
+    if isinstance(pull_secret_payload, dict):
+        merged_secret = _merge_pull_secret_auths(current_secret, pull_secret_payload)
+        temp_path.write_text(json.dumps(merged_secret, indent=2, sort_keys=True), encoding="utf-8")
+        return merged_secret
+
+    for registry in registries:
+        oc(
+            "registry",
+            "login",
+            f"--registry={registry}",
+            f"--auth-basic={pull_secret_payload}",
+            "--to",
+            str(temp_path),
+        )
+    return json.loads(temp_path.read_text(encoding="utf-8"))
+
+
+def _current_pull_secret_json() -> dict[str, Any]:
+    current_secret = oc_get_json(
+        "secret",
+        name=RHOAI_PULL_SECRET_NAME,
+        namespace=RHOAI_PULL_SECRET_NAMESPACE,
+    )
+    decoded_secret = _decode_pull_secret(current_secret)
+    try:
+        return json.loads(decoded_secret)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("openshift-config/pull-secret is not valid dockerconfigjson") from exc
+
+
+def _registries_present(
+    decoded_secret: str, registries: tuple[str, ...] = RHOAI_REGISTRIES
+) -> bool:
+    return all(registry in decoded_secret for registry in registries)
+
+
+def _merge_pull_secret_auths(
+    current_secret: dict[str, Any], pull_secret_payload: dict[str, Any]
+) -> dict[str, Any]:
+    merged_secret = dict(current_secret)
+    merged_auths = dict(current_secret.get("auths", {}))
+    merged_auths.update(pull_secret_payload.get("auths", {}))
+    merged_secret["auths"] = merged_auths
+    return merged_secret
+
+
 def wait_for_rhoai_pull_secret_ready(
     *, timeout_seconds: int = 600, poll_interval_seconds: int = 15
 ) -> None:
@@ -163,8 +240,8 @@ def wait_for_rhoai_pull_secret_ready(
                 namespace=RHOAI_PULL_SECRET_NAMESPACE,
             )
             decoded = _decode_pull_secret(secret)
-            if RHOAI_REGISTRY not in decoded:
-                raise RuntimeError(f"{RHOAI_REGISTRY} not yet present in pull secret")
+            if not _registries_present(decoded, (*RHOAI_CATALOG_REGISTRIES, *RHOAI_REGISTRIES)):
+                raise RuntimeError("required RHOAI registries are not yet present in pull secret")
 
             mcp_status = oc(
                 "get",
@@ -180,7 +257,7 @@ def wait_for_rhoai_pull_secret_ready(
 
             logger.info(
                 "RHOAI pull secret now contains %s and machine config pools are updated",
-                RHOAI_REGISTRY,
+                ", ".join(RHOAI_REGISTRIES),
             )
             return
         except RuntimeError as exc:
@@ -189,7 +266,7 @@ def wait_for_rhoai_pull_secret_ready(
             time.sleep(poll_interval_seconds)
 
     raise RuntimeError(
-        f"Timed out waiting for {RHOAI_REGISTRY} pull secret propagation: {last_error}"
+        f"Timed out waiting for RHOAI registries pull secret propagation: {last_error}"
     )
 
 
@@ -204,35 +281,54 @@ def prepare_rhoai_pull_secret(custom_catalog: RhoaiCustomCatalogConfig) -> None:
             f"'{custom_catalog.pull_secret.vault.content}' was not found in vault "
             f"'{custom_catalog.pull_secret.vault.name}'"
         )
-    auth_basic = pull_secret_path.read_text(encoding="utf-8").strip()
-    if not auth_basic:
-        raise RuntimeError(f"RHOAI pull secret file is empty: {pull_secret_path}")
 
-    current_secret = oc_get_json(
-        "secret",
-        name=RHOAI_PULL_SECRET_NAME,
-        namespace=RHOAI_PULL_SECRET_NAMESPACE,
-    )
-    decoded_secret = _decode_pull_secret(current_secret)
+    current_secret = _current_pull_secret_json()
+    current_secret_text = json.dumps(current_secret, sort_keys=True)
 
-    if RHOAI_REGISTRY in decoded_secret:
-        logger.info("RHOAI registry %s already present in cluster pull secret", RHOAI_REGISTRY)
+    required_registries = (*RHOAI_CATALOG_REGISTRIES, *RHOAI_REGISTRIES)
+
+    if _registries_present(current_secret_text, required_registries):
+        logger.info(
+            "RHOAI registries already present in cluster pull secret: %s",
+            ", ".join(required_registries),
+        )
         return
 
-    logger.info("Adding %s to cluster pull secret from %s", RHOAI_REGISTRY, pull_secret_path)
+    logger.info(
+        "Adding %s to cluster pull secret from %s",
+        ", ".join(required_registries),
+        pull_secret_path,
+    )
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as temp_file:
-        temp_file.write(decoded_secret)
+        temp_file.write(json.dumps(current_secret, indent=2, sort_keys=True))
         temp_path = Path(temp_file.name)
 
     try:
-        oc(
-            "registry",
-            "login",
-            f"--registry={RHOAI_REGISTRY}",
-            f"--auth-basic={auth_basic}",
-            "--to",
-            str(temp_path),
+        current_secret = _apply_vault_pull_secret(
+            current_secret=current_secret,
+            pull_secret_path=pull_secret_path,
+            registries=RHOAI_CATALOG_REGISTRIES,
+            temp_path=temp_path,
         )
+
+        if custom_catalog.staging_pull_secret is not None:
+            staging_pull_secret_path = vault.get_vault_content_path(
+                custom_catalog.staging_pull_secret.vault.name,
+                custom_catalog.staging_pull_secret.vault.content,
+            )
+            if staging_pull_secret_path is None:
+                raise RuntimeError(
+                    "RHOAI staging pull secret content "
+                    f"'{custom_catalog.staging_pull_secret.vault.content}' was not found in vault "
+                    f"'{custom_catalog.staging_pull_secret.vault.name}'"
+                )
+
+            current_secret = _apply_vault_pull_secret(
+                current_secret=current_secret,
+                pull_secret_path=staging_pull_secret_path,
+                registries=RHOAI_REGISTRIES,
+                temp_path=temp_path,
+            )
         oc(
             "set",
             "data",

@@ -40,7 +40,7 @@ from projects.rhoai.toolbox.wait_datasciencecluster_ready import (
 )
 
 logger = logging.getLogger(__name__)
-RHOAI_ICSP_MANIFEST = Path(__file__).resolve().parent / "manifests" / "quay-registry-icsp.yaml"
+RHOAI_ICSP_MANIFEST = Path(__file__).resolve().parent / "manifests" / "rhoai-registry-icsp.yaml"
 
 
 def verify_oc_access() -> None:

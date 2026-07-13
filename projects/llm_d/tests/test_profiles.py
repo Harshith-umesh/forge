@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import json
 from pathlib import Path
 
 import pytest
@@ -259,7 +261,18 @@ def test_prepare_rhoai_operator_runs_registry_setup_before_custom_catalog_deploy
                 "image": "quay.io/rhoai/rhoai-fbc-fragment@sha256:test",
                 "display_name": "Red Hat OpenShift AI",
                 "publisher": "RHOAI Development Catalog",
-                "pull_secret": {"vault": {"name": "psap-rhoai-rc", "content": "rhoai_rc.secret"}},
+                "pull_secret": {
+                    "vault": {
+                        "name": "psap-rhoai-rc",
+                        "content": "rhoai_rc.secret",
+                    }
+                },
+                "staging_pull_secret": {
+                    "vault": {
+                        "name": "psap-forge-staging-image-pull",
+                        "content": ".dockerconfigjson",
+                    }
+                },
             },
             "namespace": "redhat-ods-applications",
             "datasciencecluster_name": "default-dsc",
@@ -325,12 +338,20 @@ def test_custom_catalog_pull_secret_path_uses_explicit_vault_content(
 
     path = rhoai_deploy.custom_catalog_pull_secret_path(
         {
-            "pull_secret": {"vault": {"name": "psap-rhoai-rc", "content": "rhoai_rc.secret"}},
+            "pull_secret": {
+                "vault": {
+                    "name": "psap-rhoai-rc",
+                    "content": "rhoai_rc.secret",
+                }
+            },
         }
     )
 
     assert path == Path("/tmp/rhoai_rc.secret")
-    assert captured == {"vault_name": "psap-rhoai-rc", "content_name": "rhoai_rc.secret"}
+    assert captured == {
+        "vault_name": "psap-rhoai-rc",
+        "content_name": "rhoai_rc.secret",
+    }
 
 
 def test_wait_for_rhoai_pull_secret_ready_treats_empty_mcp_status_as_not_ready(
@@ -357,11 +378,122 @@ def test_wait_for_rhoai_pull_secret_ready_treats_empty_mcp_status_as_not_ready(
 
     monkeypatch.setattr(rhoai_deploy, "oc_get_json", _fake_oc_get_json)
     monkeypatch.setattr(rhoai_deploy, "oc", _fake_oc)
-    monkeypatch.setattr(rhoai_deploy, "_decode_pull_secret", lambda _secret: "quay.io/rhoai")
+    monkeypatch.setattr(
+        rhoai_deploy,
+        "_decode_pull_secret",
+        lambda _secret: (
+            "quay.io/rhoai registry.stage.redhat.io/rhaii "
+            "registry.stage.redhat.io/rhaii-early-access"
+        ),
+    )
     monkeypatch.setattr(rhoai_deploy.time, "monotonic", _fake_monotonic)
     monkeypatch.setattr(rhoai_deploy.time, "sleep", _fake_sleep)
 
     rhoai_deploy.wait_for_rhoai_pull_secret_ready(timeout_seconds=1, poll_interval_seconds=0)
+
+
+def test_prepare_rhoai_pull_secret_merges_dockerconfigjson_registry_auths(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _init_project_config()
+
+    rc_pull_secret_path = tmp_path / "rhoai_rc.secret"
+    rc_pull_secret_path.write_text(
+        "rhoai+rhoai_external_readonly_bot:token-c",
+        encoding="utf-8",
+    )
+
+    staging_pull_secret_path = tmp_path / ".dockerconfigjson"
+    staging_pull_secret_path.write_text(
+        json.dumps(
+            {
+                "auths": {
+                    "registry.stage.redhat.io/rhaii": {"auth": "token-a"},
+                    "registry.stage.redhat.io/rhaii-early-access": {"auth": "token-b"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    current_secret = {
+        "data": {
+            ".dockerconfigjson": base64.b64encode(json.dumps({"auths": {}}).encode("utf-8")).decode(
+                "utf-8"
+            )
+        }
+    }
+    merged_payload: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        rhoai_deploy.vault,
+        "get_vault_content_path",
+        lambda vault_name, content_name: (
+            rc_pull_secret_path
+            if (vault_name, content_name) == ("psap-rhoai-rc", "rhoai_rc.secret")
+            else staging_pull_secret_path
+        ),
+    )
+    monkeypatch.setattr(rhoai_deploy, "oc_get_json", lambda *args, **kwargs: current_secret)
+
+    def _fake_oc(*args, **kwargs):
+        if args[:2] == ("set", "data"):
+            from_file = next((arg for arg in args if str(arg).startswith("--from-file=")), "")
+            payload_path = Path(from_file.rsplit("=", 1)[1])
+            merged_payload.update(json.loads(payload_path.read_text(encoding="utf-8")))
+            return type("Result", (), {"stdout": "", "returncode": 0})()
+        if args[:2] == ("registry", "login"):
+            registry = next(
+                arg.split("=", 1)[1] for arg in args if str(arg).startswith("--registry=")
+            )
+            auth_basic = next(
+                arg.split("=", 1)[1] for arg in args if str(arg).startswith("--auth-basic=")
+            )
+            temp_path = Path(
+                next(
+                    arg
+                    for arg in args
+                    if not str(arg).startswith("--") and arg != "registry" and arg != "login"
+                )
+            )
+            current = json.loads(temp_path.read_text(encoding="utf-8"))
+            current.setdefault("auths", {})[registry] = {"auth": auth_basic}
+            temp_path.write_text(json.dumps(current, indent=2, sort_keys=True), encoding="utf-8")
+            return type("Result", (), {"stdout": "", "returncode": 0})()
+        raise AssertionError(f"Unexpected oc call: {args}")
+
+    monkeypatch.setattr(rhoai_deploy, "oc", _fake_oc)
+    monkeypatch.setattr(rhoai_deploy, "wait_for_rhoai_pull_secret_ready", lambda **kwargs: None)
+
+    rhoai_deploy.prepare_rhoai_pull_secret(
+        rhoai_deploy.RhoaiCustomCatalogConfig.model_validate(
+            {
+                "enabled": True,
+                "name": "rhoai-catalog-dev",
+                "namespace": "openshift-marketplace",
+                "image": "quay.io/rhoai/rhoai-fbc-fragment@sha256:test",
+                "display_name": "Red Hat OpenShift AI",
+                "publisher": "RHOAI Development Catalog",
+                "pull_secret": {"vault": {"name": "psap-rhoai-rc", "content": "rhoai_rc.secret"}},
+                "staging_pull_secret": {
+                    "vault": {
+                        "name": "psap-forge-staging-image-pull",
+                        "content": ".dockerconfigjson",
+                    }
+                },
+            }
+        )
+    )
+
+    assert (
+        merged_payload["auths"]["quay.io/rhoai"]["auth"]
+        == "rhoai+rhoai_external_readonly_bot:token-c"
+    )
+    assert merged_payload["auths"]["registry.stage.redhat.io/rhaii"]["auth"] == "token-a"
+    assert (
+        merged_payload["auths"]["registry.stage.redhat.io/rhaii-early-access"]["auth"] == "token-b"
+    )
 
 
 def test_model_and_deployment_profile_accept_yaml_list_strings() -> None:

@@ -59,6 +59,10 @@ rhoai:
       vault:
         name: psap-rhoai-rc
         content: rhoai_rc.secret
+    staging_pull_secret:
+      vault:
+        name: psap-forge-staging-image-pull
+        content: .dockerconfigjson
   namespace: redhat-ods-applications
   datasciencecluster_name: default-dsc
   components:
