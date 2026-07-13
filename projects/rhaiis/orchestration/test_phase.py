@@ -546,8 +546,8 @@ def _run_profiler_step(
     profiler_cfg = runtime_config.get_profiler_config()
     labels = profiler_cfg.get("labels", [])
     if not labels:
-        logger.info("No profiler labels configured, skipping profiler step")
-        return
+        labels = [_derive_profiler_label(workload)]
+        logger.info("Auto-generated profiler label from workload: %s", labels[0])
 
     profiler_max_seconds = profiler_cfg.get("max_seconds", 60)
 
@@ -592,6 +592,15 @@ def _run_profiler_step(
         copy_profiler_traces(name=deployment_name, namespace=namespace)
     except Exception:
         logger.warning("Failed to copy profiler traces", exc_info=True)
+
+
+def _derive_profiler_label(workload: dict) -> str:
+    """Auto-generate a profiler label like 'isl1000_osl1000' from the workload data string."""
+    data = workload.get("data", "")
+    params = dict(item.split("=", 1) for item in data.split(",") if "=" in item)
+    isl = params.get("prompt_tokens", "0")
+    osl = params.get("output_tokens", "0")
+    return f"isl{isl}_osl{osl}"
 
 
 def _upload_profiler_traces(
