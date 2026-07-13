@@ -1,5 +1,6 @@
 namespace: forge-rhaiis
 accelerator: nvidia
+cluster_tag: ""
 
 gpu_types:
   nvidia: h200

@@ -56,6 +56,9 @@ def _run_test(
     workload = runtime_config.get_workload(workload_key)
     accelerator = runtime_config.get_accelerator()
     gpu_type = runtime_config.get_gpu_type(accelerator) or accelerator
+    from projects.core.library import config as _cfg
+    cluster_tag = _cfg.project.get_config("rhaiis.cluster_tag", "")
+    accelerator_key = f"{gpu_type}_{cluster_tag}".upper() if cluster_tag else gpu_type.upper()
     deploy_cfg = runtime_config.get_deploy_config()
     benchmark_cfg = runtime_config.get_benchmark_config()
 
@@ -183,14 +186,14 @@ def _run_test(
     if main_benchmark_dir:
         try:
             _generate_psap_payload(
-                model_cfg, gpu_type, vllm_image, vllm_args, workload_key,
+                model_cfg, accelerator_key, vllm_image, vllm_args, workload_key,
                 run_uuid=run_uuid, benchmark_dir=main_benchmark_dir,
             )
         except Exception:
             logger.warning("PSAP payload generation failed; continuing", exc_info=True)
 
         try:
-            _generate_and_sync_dashboard_csv(model_cfg, gpu_type, workload_key, vllm_args, run_uuid=run_uuid)
+            _generate_and_sync_dashboard_csv(model_cfg, accelerator_key, workload_key, vllm_args, run_uuid=run_uuid)
         except Exception:
             logger.warning("Dashboard CSV generation/sync failed; continuing", exc_info=True)
 
