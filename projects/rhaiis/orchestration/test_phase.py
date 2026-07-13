@@ -141,6 +141,7 @@ def _run_test(
                     benchmark_cfg=benchmark_cfg,
                     model_cfg=model_cfg,
                     workload=workload,
+                    workload_key=wl_key,
                     benchmark_timeout=benchmark_timeout,
                 )
 
@@ -530,6 +531,7 @@ def _run_warmup_step(
     benchmark_cfg: dict,
     model_cfg: dict,
     workload: dict,
+    workload_key: str,
     benchmark_timeout: int,
 ) -> None:
     """Run a short warmup benchmark to prime KV cache and CUDA kernels."""
@@ -555,7 +557,7 @@ def _run_warmup_step(
     try:
         run_guidellm_benchmark(
             endpoint_url=f"{endpoint_url}/v1",
-            name=f"guidellm-warmup-{deployment_name}",
+            name=f"guidellm-warmup-{deployment_name}-{workload_key}",
             namespace=namespace,
             image=benchmark_cfg.get("image", "ghcr.io/vllm-project/guidellm:v0.6.0"),
             timeout=benchmark_timeout,
@@ -619,7 +621,7 @@ def _run_profiler_step(
         try:
             run_guidellm_benchmark(
                 endpoint_url=f"{endpoint_url}/v1",
-                name=f"guidellm-profiler-{deployment_name}-{gate_value}",
+                name=f"guidellm-profiler-{deployment_name}-{workload_key}-{gate_value}",
                 namespace=namespace,
                 image=benchmark_cfg.get("image", "ghcr.io/vllm-project/guidellm:v0.6.0"),
                 timeout=benchmark_timeout,
