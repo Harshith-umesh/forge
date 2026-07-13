@@ -147,6 +147,7 @@ def _run_test(
                 benchmark_timeout=benchmark_timeout,
             )
 
+        main_benchmark_dir = None
         if not run_benchmark:
             logger.info("run_benchmark=false, skipping main benchmark")
         else:
@@ -162,6 +163,7 @@ def _run_test(
                 max_seconds=max_seconds,
             )
 
+            pre_index = env.next_artifact_index()
             run_guidellm_benchmark(
                 endpoint_url=f"{endpoint_url}/v1",
                 name=f"guidellm-{deployment_name}",
@@ -171,18 +173,26 @@ def _run_test(
                 pvc_size=benchmark_cfg.get("pvc_size", "5Gi"),
                 guidellm_args=guidellm_args,
             )
+            from pathlib import Path
+            candidates = sorted(Path(env.ARTIFACT_DIR).glob(f"{pre_index:03d}__*"))
+            if candidates:
+                main_benchmark_dir = candidates[0]
     finally:
         _capture_and_cleanup(deployment_name, namespace)
 
-    try:
-        _generate_psap_payload(model_cfg, gpu_type, vllm_image, vllm_args, workload_key, run_uuid=run_uuid)
-    except Exception:
-        logger.warning("PSAP payload generation failed; continuing", exc_info=True)
+    if main_benchmark_dir:
+        try:
+            _generate_psap_payload(
+                model_cfg, gpu_type, vllm_image, vllm_args, workload_key,
+                run_uuid=run_uuid, benchmark_dir=main_benchmark_dir,
+            )
+        except Exception:
+            logger.warning("PSAP payload generation failed; continuing", exc_info=True)
 
-    try:
-        _generate_and_sync_dashboard_csv(model_cfg, gpu_type, workload_key, vllm_args, run_uuid=run_uuid)
-    except Exception:
-        logger.warning("Dashboard CSV generation/sync failed; continuing", exc_info=True)
+        try:
+            _generate_and_sync_dashboard_csv(model_cfg, gpu_type, workload_key, vllm_args, run_uuid=run_uuid)
+        except Exception:
+            logger.warning("Dashboard CSV generation/sync failed; continuing", exc_info=True)
 
     try:
         _upload_predictor_log(run_uuid)
@@ -278,21 +288,25 @@ def _generate_psap_payload(
     workload_key: str,
     *,
     run_uuid: str = "",
+    benchmark_dir: Path | None = None,
 ) -> None:
     from pathlib import Path
 
     from projects.rhaiis.postprocess.parser import generate_psap_payload, write_psap_payload
 
-    all_matches = list(
-        Path(env.ARTIFACT_DIR).glob("*__run_guidellm_benchmark/artifacts/results/benchmarks.json")
-    )
-    matches = [m for m in all_matches if "warmup" not in str(m)]
-    if not matches:
+    if benchmark_dir:
+        benchmarks_json = benchmark_dir / "artifacts" / "results" / "benchmarks.json"
+    else:
+        matches = list(
+            Path(env.ARTIFACT_DIR).glob("*__run_guidellm_benchmark/artifacts/results/benchmarks.json")
+        )
+        benchmarks_json = matches[-1] if matches else None
+
+    if not benchmarks_json or not benchmarks_json.exists():
         logger.warning(
-            "benchmarks.json not found under %s, skipping PSAP payload", env.ARTIFACT_DIR
+            "benchmarks.json not found, skipping PSAP payload"
         )
         return
-    benchmarks_json = matches[-1]
 
     payload = generate_psap_payload(
         benchmarks_json_path=benchmarks_json,
