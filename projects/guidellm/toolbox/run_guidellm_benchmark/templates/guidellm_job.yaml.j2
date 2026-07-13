@@ -26,6 +26,12 @@ spec:
           env:
             - name: USER
               value: guidellm
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: storage-config
+                  key: HF_TOKEN
+                  optional: true
           volumeMounts:
             - name: home
               mountPath: /home/guidellm
