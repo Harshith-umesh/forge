@@ -107,11 +107,52 @@ def _run_test(
 
         endpoint_url = f"http://{deployment_name}-predictor.{namespace}.svc.cluster.local:8080"
 
+        from projects.core.library import config
+
+        profiler_cfg = runtime_config.get_profiler_config()
+        profiler_enabled = profiler_cfg.get("enabled", False)
+        warmup_enabled = config.project.get_config("tests.rhaiis.warmup", True)
+
         logger.info(
             "Running %d workload(s): %s", len(workload_keys), workload_keys,
         )
+
+        # Phase 1: warmup or profiler for ALL workloads first
         for wl_key in workload_keys:
-            _run_workload(
+            workload = runtime_config.get_workload(wl_key)
+            if profiler_enabled:
+                logger.info("Running profiler for workload=%s", wl_key)
+                _run_profiler_step(
+                    deployment_name=deployment_name,
+                    namespace=namespace,
+                    endpoint_url=endpoint_url,
+                    benchmark_cfg=benchmark_cfg,
+                    model_cfg=model_cfg,
+                    workload=workload,
+                    workload_key=wl_key,
+                    benchmark_timeout=benchmark_timeout,
+                )
+            elif warmup_enabled:
+                logger.info("Running warmup for workload=%s", wl_key)
+                _run_warmup_step(
+                    deployment_name=deployment_name,
+                    namespace=namespace,
+                    endpoint_url=endpoint_url,
+                    benchmark_cfg=benchmark_cfg,
+                    model_cfg=model_cfg,
+                    workload=workload,
+                    benchmark_timeout=benchmark_timeout,
+                )
+
+        if profiler_enabled:
+            try:
+                _upload_profiler_traces(model_cfg, gpu_type, vllm_args, profiler_cfg)
+            except Exception:
+                logger.warning("Profiler trace upload failed; continuing", exc_info=True)
+
+        # Phase 2: benchmark + post-processing for ALL workloads
+        for wl_key in workload_keys:
+            _run_workload_benchmark(
                 model_key=model_key,
                 workload_key=wl_key,
                 model_cfg=model_cfg,
@@ -126,13 +167,33 @@ def _run_test(
                 endpoint_url=endpoint_url,
                 benchmark_timeout=benchmark_timeout,
             )
+
+        try:
+            first_workload = runtime_config.get_workload(workload_keys[0])
+            first_rates = first_workload.get("rates", [1])
+            first_max_seconds = first_workload.get("max_seconds", 180)
+            _set_mlflow_metadata(
+                model_key,
+                ",".join(workload_keys),
+                model_cfg,
+                accelerator,
+                vllm_image,
+                vllm_args,
+                benchmark_cfg,
+                first_rates,
+                first_max_seconds,
+                namespace,
+                deployment_name,
+            )
+        except Exception:
+            logger.warning("Setting MLflow metadata failed; continuing", exc_info=True)
     finally:
         _capture_and_cleanup(deployment_name, namespace)
 
     return 0
 
 
-def _run_workload(
+def _run_workload_benchmark(
     *,
     model_key: str,
     workload_key: str,
@@ -148,9 +209,9 @@ def _run_workload(
     endpoint_url: str,
     benchmark_timeout: int,
 ) -> None:
-    """Run a single workload: warmup/profiler, benchmark, PSAP/CSV, uploads."""
+    """Run benchmark and post-processing for a single workload."""
     run_uuid = str(_uuid_mod.uuid4())
-    logger.info("=== Workload %s (UUID: %s) ===", workload_key, run_uuid)
+    logger.info("=== Benchmark %s (UUID: %s) ===", workload_key, run_uuid)
 
     workload = runtime_config.get_workload(workload_key)
     rates = workload.get("rates", [1])
@@ -161,33 +222,7 @@ def _run_workload(
         run as run_guidellm_benchmark,
     )
 
-    profiler_cfg = runtime_config.get_profiler_config()
-    profiler_enabled = profiler_cfg.get("enabled", False)
     run_benchmark = config.project.get_config("tests.rhaiis.run_benchmark", True)
-    warmup_enabled = config.project.get_config("tests.rhaiis.warmup", True)
-
-    if profiler_enabled:
-        logger.info("Skipping warmup -- profiler step provides its own warmup")
-        _run_profiler_step(
-            deployment_name=deployment_name,
-            namespace=namespace,
-            endpoint_url=endpoint_url,
-            benchmark_cfg=benchmark_cfg,
-            model_cfg=model_cfg,
-            workload=workload,
-            workload_key=workload_key,
-            benchmark_timeout=benchmark_timeout,
-        )
-    elif warmup_enabled:
-        _run_warmup_step(
-            deployment_name=deployment_name,
-            namespace=namespace,
-            endpoint_url=endpoint_url,
-            benchmark_cfg=benchmark_cfg,
-            model_cfg=model_cfg,
-            workload=workload,
-            benchmark_timeout=benchmark_timeout,
-        )
 
     main_benchmark_dir = None
     if not run_benchmark:
@@ -238,29 +273,6 @@ def _run_workload(
         _upload_predictor_log(run_uuid)
     except Exception:
         logger.warning("Predictor log upload failed; continuing", exc_info=True)
-
-    if profiler_enabled:
-        try:
-            _upload_profiler_traces(model_cfg, gpu_type, vllm_args, profiler_cfg)
-        except Exception:
-            logger.warning("Profiler trace upload failed; continuing", exc_info=True)
-
-    try:
-        _set_mlflow_metadata(
-            model_key,
-            workload_key,
-            model_cfg,
-            accelerator,
-            vllm_image,
-            vllm_args,
-            benchmark_cfg,
-            rates,
-            max_seconds,
-            namespace,
-            deployment_name,
-        )
-    except Exception:
-        logger.warning("Setting MLflow metadata failed; continuing", exc_info=True)
 
 
 def _create_test_labels(
