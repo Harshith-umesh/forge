@@ -55,6 +55,7 @@ def _run_test(
     model_cfg = runtime_config.get_model(model_key)
     workload = runtime_config.get_workload(workload_key)
     accelerator = runtime_config.get_accelerator()
+    gpu_type = runtime_config.get_gpu_type(accelerator) or accelerator
     deploy_cfg = runtime_config.get_deploy_config()
     benchmark_cfg = runtime_config.get_benchmark_config()
 
@@ -174,12 +175,12 @@ def _run_test(
         _capture_and_cleanup(deployment_name, namespace)
 
     try:
-        _generate_psap_payload(model_cfg, accelerator, vllm_image, vllm_args, workload_key, run_uuid=run_uuid)
+        _generate_psap_payload(model_cfg, gpu_type, vllm_image, vllm_args, workload_key, run_uuid=run_uuid)
     except Exception:
         logger.warning("PSAP payload generation failed; continuing", exc_info=True)
 
     try:
-        _generate_and_sync_dashboard_csv(model_cfg, accelerator, workload_key, vllm_args, run_uuid=run_uuid)
+        _generate_and_sync_dashboard_csv(model_cfg, gpu_type, workload_key, vllm_args, run_uuid=run_uuid)
     except Exception:
         logger.warning("Dashboard CSV generation/sync failed; continuing", exc_info=True)
 
@@ -191,7 +192,7 @@ def _run_test(
     profiler_cfg = runtime_config.get_profiler_config()
     if profiler_cfg.get("enabled", False):
         try:
-            _upload_profiler_traces(model_cfg, accelerator, vllm_args, profiler_cfg)
+            _upload_profiler_traces(model_cfg, gpu_type, vllm_args, profiler_cfg)
         except Exception:
             logger.warning("Profiler trace upload failed; continuing", exc_info=True)
 
@@ -282,15 +283,16 @@ def _generate_psap_payload(
 
     from projects.rhaiis.postprocess.parser import generate_psap_payload, write_psap_payload
 
-    matches = list(
+    all_matches = list(
         Path(env.ARTIFACT_DIR).glob("*__run_guidellm_benchmark/artifacts/results/benchmarks.json")
     )
+    matches = [m for m in all_matches if "warmup" not in str(m)]
     if not matches:
         logger.warning(
             "benchmarks.json not found under %s, skipping PSAP payload", env.ARTIFACT_DIR
         )
         return
-    benchmarks_json = matches[0]
+    benchmarks_json = matches[-1]
 
     payload = generate_psap_payload(
         benchmarks_json_path=benchmarks_json,
