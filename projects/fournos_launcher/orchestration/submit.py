@@ -258,9 +258,11 @@ def submit_job():
 
         # Validate required configuration before job submission
         cluster_name = config.project.get_config("cluster.name")
-        if not cluster_name:
+        clusterless_mode = config.project.get_config("fournos.job.clusterless")
+
+        if not cluster_name and not clusterless_mode:
             raise ValueError(
-                "/cluster (cluster.name) must be set - cannot submit job without target cluster"
+                "/cluster (cluster.name) must be set - cannot submit job without target cluster (unless /clusterless is used)"
             )
 
         # Get GPU hardware configuration
