@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -10,9 +11,11 @@ import click
 
 from projects.caliper.cli.commands import (
     ai_eval_export,
+    analyse_kpis_cmd,
     artifacts_export,
     artifacts_import,
     kpi_analyze,
+    kpi_csv_export,
     kpi_generate,
     kpi_import,
     kpi_s3_import,
@@ -159,6 +162,13 @@ def artifacts_group(ctx: click.Context) -> None:
 
 def run_cli() -> None:
     """Invoke CLI; on missing required options, print subcommand help."""
+    # Configure logging to capture INFO level messages for detailed output
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(message)s",
+        force=True,  # Override any existing configuration
+    )
+
     try:
         # standalone_mode=False returns exit codes instead of calling sys.exit;
         # propagate them so failures are non-zero (e.g. ctx.exit(1) from _exit_with_help).
@@ -199,8 +209,10 @@ main.add_command(ai_eval_export)
 
 # Register KPI commands
 kpi_group.add_command(kpi_generate)
+kpi_group.add_command(kpi_csv_export)
 kpi_group.add_command(kpi_import)
 kpi_group.add_command(kpi_analyze)
+kpi_group.add_command(analyse_kpis_cmd)
 kpi_group.add_command(kpi_s3_import)
 
 # Register s3-export command under kpi group

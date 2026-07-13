@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import subprocess
 import time
 import traceback
 from pathlib import Path
@@ -18,15 +19,16 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from projects.caliper.cli.orchestration_entrypoints import (
-    analyze_kpis_entrypoint,
-    export_kpis_to_csv_entrypoint,
-    get_kpi_functions_entrypoint,
-    load_plugin_entrypoint,
-    parse_entrypoint,
-    run_visualize_entrypoint,
-    s3_export_entrypoint,
-    s3_import_entrypoint,
+from projects.caliper.orchestration.cli_builder import (
+    build_ai_eval_export_command,
+    build_analyse_kpis_command,
+    build_kpi_csv_export_command,
+    build_kpi_generate_command,
+    build_parse_command,
+    build_s3_export_command,
+    build_s3_import_command,
+    build_visualize_command,
+    log_caliper_start_banner,
 )
 from projects.caliper.orchestration.postprocess_config import (
     CaliperOrchestrationPostprocessConfig,
@@ -39,17 +41,216 @@ from projects.caliper.orchestration.postprocess_outcome import (
 )
 from projects.caliper.orchestration.step_logging import (
     cleanup_step_logging,
-    log_ai_data_command,
-    log_artifacts_to_kpis_command,
-    log_kpis_to_csv_command,
-    log_parse_command,
-    log_s3_export_command,
-    log_visualize_command,
-    step_logging,
 )
 from projects.core.library import env
 
 logger = logging.getLogger(__name__)
+
+
+def _format_command_for_log(command: list[str]) -> str:
+    """Format command for log file display with only --arguments on new lines.
+
+    Args:
+        command: Command arguments list
+
+    Returns:
+        Formatted command string for log file
+    """
+    if not command:
+        return ""
+
+    # Start with base command parts until we hit options
+    lines = []
+    base_parts = []
+    i = 0
+
+    # Collect all non-flag arguments into base_parts
+    while i < len(command) and not command[i].startswith("--"):
+        base_parts.append(command[i])
+        i += 1
+
+    if base_parts:
+        lines.append(" ".join(base_parts))
+
+    # Handle --flag arguments on separate lines
+    while i < len(command):
+        if command[i].startswith("--"):
+            if i + 1 < len(command) and not command[i + 1].startswith("--"):
+                # Flag with value
+                lines.append(f"{command[i]} {command[i + 1]}")
+                i += 2
+            else:
+                # Boolean flag
+                lines.append(command[i])
+                i += 1
+        else:
+            # Standalone argument
+            lines.append(command[i])
+            i += 1
+
+    return " \\\n  ".join(lines)
+
+
+def _write_step_header_to_log_file(log_file: Path, command: list[str], step_name: str) -> None:
+    """Write step header to log file.
+
+    Args:
+        log_file: Path to log file
+        command: Command that will be executed
+        step_name: Name of the step (e.g., "CALIPER PARSE")
+    """
+    formatted_command = _format_command_for_log(command)
+    header = f"""{"=" * 60}
+🚀 STARTING {step_name} (fork/exec)
+📄 Command:
+  {formatted_command}
+{"=" * 60}
+
+"""
+    with open(log_file, "w", encoding="utf-8") as f:
+        f.write(header)
+
+
+def _write_step_footer_to_log_file(
+    log_file: Path, result: subprocess.CompletedProcess, step_name: str
+) -> None:
+    """Write step footer to log file.
+
+    Args:
+        log_file: Path to log file
+        result: Subprocess result
+        step_name: Name of the step (e.g., "CALIPER PARSE")
+    """
+    footer = f"""
+
+{"=" * 60}
+🏁 {step_name} COMPLETED
+📊 Exit code: {result.returncode}
+📄 Log file: {log_file}
+{"=" * 60}
+"""
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(footer)
+
+
+def _handle_caliper_output_and_completion_with_header(
+    result: subprocess.CompletedProcess,
+    log_file: Path,
+    status_file: Path,
+    step_name: str,
+) -> dict:
+    """Handle Caliper output writing, status parsing, and log completion banner.
+
+    This version appends to the log file instead of overwriting it, since we've
+    already written a header.
+
+    Args:
+        result: Subprocess result from caliper execution
+        log_file: Path to write the step log file
+        status_file: Path to the status file to read and parse
+        step_name: Name of the Caliper step (e.g., "PARSE", "VISUALIZE")
+
+    Returns:
+        Parsed status data dictionary
+    """
+    import yaml
+
+    # Append output to log file (don't overwrite since we've written header)
+    with open(log_file, "a", encoding="utf-8") as log_f:
+        if result.stdout:
+            log_f.write(result.stdout)
+
+    # Also display output in main orchestration logs
+    if result.stdout:
+        prefix = step_name.upper()
+        for line in result.stdout.splitlines():
+            logger.info("%s: %s", prefix, line)
+
+    # Log banner indicating Caliper execution completed
+    logger.info("=" * 60)
+    logger.info("🏁 CALIPER %s COMPLETED", step_name.upper())
+    logger.info("📊 Exit code: %s", result.returncode)
+    logger.info("📄 Log file: %s", log_file)
+
+    # Read and parse status file
+    try:
+        with open(status_file, encoding="utf-8") as f:
+            status_data = yaml.safe_load(f)
+        # Handle case where YAML file is empty or invalid
+        if status_data is None:
+            status_data = {
+                "success": False,
+                "error": "Status file is empty or contains no valid YAML data",
+            }
+    except Exception as e:
+        status_data = {"success": False, "error": f"Failed to read status file: {e}"}
+
+    # Log status file content for visibility
+    logger.info("📄 Status file content:")
+    if isinstance(status_data, dict):
+        for key, value in status_data.items():
+            logger.info("   %s: %s", key, value)
+    else:
+        logger.info("   %s", status_data)
+
+    logger.info("=" * 60)
+
+    return status_data
+
+
+def _execute_caliper_command(
+    command: list[str],
+    step_name: str,
+    status_file: Path,
+    step_logs_dir: Path,
+) -> tuple[subprocess.CompletedProcess, dict[str, Any], Path]:
+    """Execute a Caliper CLI command and return result and status data.
+
+    Args:
+        command: CLI command arguments list
+        step_name: Name for logging banners (e.g., "caliper parse", "caliper visualize")
+        status_file: Path to read status YAML from
+        step_logs_dir: Directory to create log file in
+
+    Returns:
+        Tuple of (subprocess result, parsed status data, log file path)
+    """
+    # Create log file path with proper step index
+    from projects.caliper.orchestration.step_logging import _get_next_step_index
+
+    step_index = _get_next_step_index(step_logs_dir)
+    step_name_safe = step_name.replace(" ", "_")
+    log_file = step_logs_dir / f"{step_index:03d}__{step_name_safe}.log"
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Create script file for debugging in step_scripts directory with index prefix
+    step_scripts_dir = env.ARTIFACT_DIR / "step_scripts"
+    step_scripts_dir.mkdir(parents=True, exist_ok=True)
+    script_file = step_scripts_dir / f"{step_index:03d}__{step_name_safe}.sh"
+
+    # Log start banner and save script
+    log_caliper_start_banner(command, script_file, step_name.upper())
+
+    # Write header to log file
+    _write_step_header_to_log_file(log_file, command, step_name.upper())
+
+    # Execute command with combined stdout/stderr
+    result = subprocess.run(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,  # Combine stderr into stdout
+        text=True,
+    )
+
+    # Handle output, status parsing, and log completion banner
+    status_data = _handle_caliper_output_and_completion_with_header(
+        result, log_file, status_file, step_name.upper()
+    )
+
+    # Write footer to log file
+    _write_step_footer_to_log_file(log_file, result, step_name.upper())
+
+    return result, status_data, log_file
 
 
 def _make_path_relative_to_base(file_path: str | Path, base_dir: Path) -> str:
@@ -123,9 +324,6 @@ def _resolve_visualize_config_path(
     return (env.FORGE_HOME / p).resolve()
 
 
-# _load_plugin function removed - now using load_plugin_entrypoint
-
-
 def _transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
     """
     Transform flat KPI list into hierarchical JSON structure.
@@ -149,7 +347,13 @@ def _transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
     tests_data = defaultdict(lambda: {"kpis": [], "labels": {}, "metadata": {}})
 
     # Get KPI function metadata from the plugin module
-    kpi_functions = get_kpi_functions_entrypoint(model.plugin_module)
+    from projects.caliper.engine.kpi.decorators import get_kpi_functions
+
+    try:
+        plugin_module_obj = __import__(model.plugin_module, fromlist=[""])
+        kpi_functions = get_kpi_functions(plugin_module_obj)
+    except (ImportError, AttributeError):
+        kpi_functions = {}
 
     for kpi in kpis:
         run_id = kpi.get("run_id", "unknown")
@@ -270,53 +474,88 @@ def _run_artifacts_to_kpis(
     output_dir: Path,
     plugin_module: str,
     base_dir: Path,
+    manifest_path: Path | None,
+    step_logs_dir: Path,
 ) -> dict[str, Any]:
-    """Generate KPI JSON using the plugin's compute_kpis method."""
+    """Generate KPI JSON using fork/exec subprocess execution."""
 
     if not postprocess_config.kpi.enabled:
-        return {"status": "disabled", "reason": "kpi disabled", "completed_at": time.time()}
+        return {
+            "status": "disabled",
+            "reason": "kpi disabled",
+            "completed_at": time.time(),
+            "log_file": None,
+        }
     if not postprocess_config.kpi.artifacts_to_kpis.enabled:
         return {
             "status": "disabled",
             "reason": "kpi.artifacts_to_kpis disabled",
             "completed_at": time.time(),
+            "log_file": None,
         }
 
     try:
-        # Write KPI JSON
+        # Prepare paths
         output_file = output_dir / postprocess_config.kpi.artifacts_to_kpis.output
+        output_file.parent.mkdir(parents=True, exist_ok=True)
 
-        # Log command to reproduce this step
-        log_artifacts_to_kpis_command(
-            base_dir=base_dir,
-            plugin_module=plugin_module,
+        # Create temporary status file for subprocess communication
+        status_file = output_dir / "kpi_generate_status.yaml"
+
+        # Build CLI command
+        command = build_kpi_generate_command(
+            config=postprocess_config,
+            tree_root=base_dir,
+            manifest_path=manifest_path,
+            status_file=status_file,
             output_file=output_file,
         )
 
-        kpis = plugin.compute_kpis(model)
-        output_file.parent.mkdir(parents=True, exist_ok=True)
-
-        # Transform flat KPI list into hierarchical structure
-        hierarchical_data = _transform_kpis_to_hierarchical_format(kpis, model)
-
-        with open(output_file, "w") as f:
-            json.dump(hierarchical_data, f, indent=2)
-
-        logger.info(
-            f"Generated hierarchical KPI structure with {len(kpis)} total records in {output_file}"
+        # Execute command using generic function
+        result, status_data, log_file = _execute_caliper_command(
+            command=command,
+            step_name="caliper kpi generate",
+            status_file=status_file,
+            step_logs_dir=step_logs_dir,
         )
-        return {
-            "status": "success",
-            "kpi_count": len(kpis),
-            "output_file": _make_path_relative_to_base(output_file, output_dir),
-            "completed_at": time.time(),
-        }
+
+        # Clean up temporary status file
+        try:
+            status_file.unlink()
+        except FileNotFoundError:
+            pass
+
+        # Convert to expected format
+        if status_data.get("success"):
+            relative_path = _make_path_relative_to_base(output_file, env.ARTIFACT_DIR)
+            logger.info(
+                f"KPI generate: output_file={output_file}, env.ARTIFACT_DIR={env.ARTIFACT_DIR}, relative_path={relative_path}"
+            )
+            return {
+                "status": "success",
+                "output_file": relative_path,
+                "completed_at": time.time(),
+                "log_file": log_file,
+            }
+        else:
+            return {
+                "status": "failed",
+                "error": status_data.get("error", "Unknown error"),
+                "completed_at": time.time(),
+                "log_file": log_file,
+            }
+
     except Exception as e:
+        # Log the full traceback to help with debugging
+        import traceback
+
+        full_traceback = traceback.format_exc()
         logger.error(f"KPI generation failed: {e}")
-        return {"status": "failed", "error": str(e), "completed_at": time.time()}
+        logger.error(f"Full traceback:\n{full_traceback}")
+        return {"status": "failed", "error": str(e), "completed_at": time.time(), "log_file": None}
 
 
-# _run_s3_import function removed - now using s3_import_entrypoint directly
+# _run_s3_import function removed - now using fork/exec subprocess execution directly
 
 
 def _run_artifacts_to_ai_data(
@@ -326,56 +565,68 @@ def _run_artifacts_to_ai_data(
     output_dir: Path,
     plugin_module: str,
     base_dir: Path,
+    manifest_path: Path | None,
+    step_logs_dir: Path,
 ) -> dict[str, Any]:
-    """Export AI evaluation payload with structured directories and copied artifacts."""
+    """Export AI evaluation payload using fork/exec subprocess execution."""
     try:
-        # Always log the step header, even for skipped operations
+        # Create AI data directory and output file path
         ai_data_dir = output_dir / postprocess_config.kpi.artifacts_to_ai_data.output_dir
+        ai_data_dir.mkdir(parents=True, exist_ok=True)
         output_file = ai_data_dir / "ai_data_payload.json"
-        log_ai_data_command(
-            base_dir=base_dir,
-            plugin_module=plugin_module,
+
+        # Create temporary status file for subprocess communication
+        status_file = output_dir / "ai_eval_export_status.yaml"
+
+        # Build CLI command
+        command = build_ai_eval_export_command(
+            config=postprocess_config,
+            tree_root=base_dir,
+            manifest_path=manifest_path,
+            status_file=status_file,
             output_file=output_file,
+            use_cache=True,  # Default to using cache in orchestration
         )
 
-        if not hasattr(plugin, "build_ai_data_payload"):
+        # Execute command using generic function
+        result, status_data, log_file = _execute_caliper_command(
+            command=command,
+            step_name="caliper ai-eval-export",
+            status_file=status_file,
+            step_logs_dir=step_logs_dir,
+        )
+
+        # Clean up temporary status file
+        try:
+            status_file.unlink()
+        except FileNotFoundError:
+            pass
+
+        # Convert to expected format
+        if status_data.get("success"):
             return {
-                "status": "skipped",
-                "reason": "plugin does not support AI evaluation",
+                "status": "success",
+                "output_file": status_data.get("output_file", str(ai_data_dir)),
+                "ai_data_dir": _make_path_relative_to_base(ai_data_dir, env.ARTIFACT_DIR),
                 "completed_at": time.time(),
+                "log_file": log_file,
+            }
+        else:
+            return {
+                "status": "failed",
+                "error": status_data.get("error", "Unknown error"),
+                "completed_at": time.time(),
+                "log_file": log_file,
             }
 
-        # Create AI evaluation directory structure using configured output directory
-        ai_data_dir.mkdir(parents=True, exist_ok=True)
-
-        # Build payload from plugin
-        payload = plugin.build_ai_data_payload(model)
-
-        # Export structured test entries with artifact copying
-        exported_entries = _export_test_entries_with_artifacts(model, ai_data_dir, base_dir, plugin)
-
-        # Add exported entries info to payload
-        payload["exported_test_entries"] = exported_entries
-
-        # Write main AI eval payload
-        output_file.parent.mkdir(parents=True, exist_ok=True)
-
-        with open(output_file, "w") as f:
-            json.dump(payload, f, indent=2)
-
-        logger.info(f"Generated AI evaluation payload in {output_file}")
-        logger.info(f"Exported {len(exported_entries)} test entries with artifacts")
-
-        return {
-            "status": "success",
-            "output_file": _make_path_relative_to_base(output_file, output_dir),
-            "ai_data_dir": _make_path_relative_to_base(ai_data_dir, output_dir),
-            "exported_entries": len(exported_entries),
-            "completed_at": time.time(),
-        }
     except Exception as e:
+        # Log the full traceback to help with debugging
+        import traceback
+
+        full_traceback = traceback.format_exc()
         logger.error(f"AI eval export failed: {e}")
-        return {"status": "failed", "error": str(e), "completed_at": time.time()}
+        logger.error(f"Full traceback:\n{full_traceback}")
+        return {"status": "failed", "error": str(e), "completed_at": time.time(), "log_file": None}
 
 
 def _load_test_labels(test_dir: Path) -> dict[str, Any]:
@@ -494,50 +745,162 @@ def _run_kpis_to_csv(
     model,
     output_dir: Path,
     kpi_json_path: Path,
+    base_dir: Path,
+    manifest_path: Path | None,
+    step_logs_dir: Path,
 ) -> dict[str, Any]:
-    """Export KPI data to CSV format using the plugin's compute_kpis method."""
+    """Export KPI data to CSV format using fork/exec subprocess execution."""
 
     if not postprocess_config.kpi.enabled:
-        return {"status": "disabled", "reason": "kpi disabled", "completed_at": time.time()}
+        return {
+            "status": "disabled",
+            "reason": "kpi disabled",
+            "completed_at": time.time(),
+            "log_file": None,
+        }
     if not postprocess_config.kpi.kpis_to_csv.enabled:
         return {
             "status": "disabled",
             "reason": "kpi.kpis_to_csv disabled",
             "completed_at": time.time(),
+            "log_file": None,
         }
 
     try:
-        # Compute KPIs from the model
-        kpi_records = plugin.compute_kpis(model)
-
         # Create output file path
         output_file = output_dir / postprocess_config.kpi.kpis_to_csv.output
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
-        # Log command to reproduce this step
-        log_kpis_to_csv_command(
-            input_path=kpi_json_path,
-            output_path=output_file,
+        # Create temporary status file for subprocess communication
+        status_file = output_dir / "kpi_csv_export_status.yaml"
+
+        # Build CLI command
+        command = build_kpi_csv_export_command(
+            config=postprocess_config,
+            tree_root=base_dir,
+            manifest_path=manifest_path,
+            status_file=status_file,
+            input_file=kpi_json_path,
+            output_file=output_file,
         )
 
-        # Use Caliper entrypoint for CSV export
-        result_path = export_kpis_to_csv_entrypoint(
-            plugin=plugin,
-            kpi_records=kpi_records,
-            output_path=output_file,
-            include_header_comments=postprocess_config.kpi.kpis_to_csv.include_header_comments,
+        # Execute command using generic function
+        result, status_data, log_file = _execute_caliper_command(
+            command=command,
+            step_name="caliper kpi csv-export",
+            status_file=status_file,
+            step_logs_dir=step_logs_dir,
         )
 
-        logger.info(f"Exported {len(kpi_records)} KPI records to CSV: {result_path}")
-        return {
-            "status": "success",
-            "kpi_count": len(kpi_records),
-            "output_file": _make_path_relative_to_base(result_path, output_dir),
-            "completed_at": time.time(),
-        }
+        # Clean up temporary status file
+        try:
+            status_file.unlink()
+        except FileNotFoundError:
+            pass
+
+        # Convert to expected format
+        if status_data.get("success"):
+            return {
+                "status": "success",
+                "kpi_count": status_data.get("kpi_count", 0),
+                "output_file": _make_path_relative_to_base(output_file, env.ARTIFACT_DIR),
+                "completed_at": time.time(),
+                "log_file": log_file,
+            }
+        else:
+            return {
+                "status": "failed",
+                "error": status_data.get("error", "Unknown error"),
+                "completed_at": time.time(),
+                "log_file": log_file,
+            }
+
     except Exception as e:
+        # Log the full traceback to help with debugging
+        import traceback
+
+        full_traceback = traceback.format_exc()
         logger.error(f"KPI CSV export failed: {e}")
-        return {"status": "failed", "error": str(e), "completed_at": time.time()}
+        logger.error(f"Full traceback:\n{full_traceback}")
+        return {"status": "failed", "error": str(e), "completed_at": time.time(), "log_file": None}
+
+
+def _run_analyse_kpis(
+    postprocess_config: CaliperOrchestrationPostprocessConfig,
+    output_dir: Path,
+    plugin_module: str,
+    base_dir: Path,
+    manifest_path: Path | None,
+    current_kpis_file: Path,
+    step_logs_dir: Path,
+) -> dict[str, Any]:
+    """Analyze KPIs using fork/exec subprocess execution."""
+
+    if not postprocess_config.analyze.enabled:
+        return {
+            "status": "disabled",
+            "reason": "analyze disabled",
+            "completed_at": time.time(),
+            "log_file": None,
+        }
+
+    try:
+        # Prepare paths
+        output_file = output_dir / postprocess_config.analyze.output
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Calculate historical KPIs directory path
+        historical_kpis_dir = Path(postprocess_config.analyze.historical_kpis)
+        if not historical_kpis_dir.is_absolute():
+            historical_kpis_dir = output_dir / historical_kpis_dir
+
+        # Create temporary status file for subprocess communication
+        status_file = output_dir / "analyse_kpis_status.yaml"
+
+        # Build CLI command
+        command = build_analyse_kpis_command(
+            config=postprocess_config,
+            tree_root=base_dir,
+            manifest_path=manifest_path,
+            status_file=status_file,
+            output_file=output_file,
+            current_kpis_file=current_kpis_file,
+            historical_kpis_dir=historical_kpis_dir,
+        )
+
+        # Execute command using generic function
+        result, status_data, log_file = _execute_caliper_command(
+            command=command,
+            step_name="caliper kpi analyse-kpis",
+            status_file=status_file,
+            step_logs_dir=step_logs_dir,
+        )
+
+        # Clean up temporary status file
+        try:
+            status_file.unlink()
+        except FileNotFoundError:
+            pass
+
+        # Convert to expected format
+        if status_data.get("success"):
+            return {
+                "status": "success",
+                "output_file": _make_path_relative_to_base(output_file, env.ARTIFACT_DIR),
+                "completed_at": time.time(),
+                "log_file": log_file,
+            }
+        else:
+            return {
+                "status": "failed",
+                "error": status_data.get("error", "Unknown error"),
+                "completed_at": time.time(),
+                "log_file": log_file,
+            }
+
+    except Exception as e:
+        logger.exception("KPI analysis failed in _run_analyse_kpis")
+        return {"status": "failed", "error": str(e), "completed_at": time.time(), "log_file": None}
 
 
 class CaliperPostprocessOrchestrator:
@@ -646,13 +1009,20 @@ class CaliperPostprocessOrchestrator:
         logger.info("Starting postprocessing steps")
         self._run_parse_step()
         logger.info(f"After parse step: parse_failed={self.parse_failed}")
-        self._run_visualize_step()
-        logger.info(f"After visualize step: visualize_failed={self.visualize_failed}")
-        self._run_kpi_and_ai_data_steps()
-        logger.info(
-            f"After KPI/AI steps: artifacts_to_kpis_failed={self.artifacts_to_kpis_failed}, ai_data_failed={self.ai_data_failed}"
-        )
-        logger.info("All postprocessing steps completed")
+
+        # Abort pipeline if parse failed - no point in running other steps without data
+        if self.parse_failed:
+            logger.error("Parse step failed - aborting remaining postprocessing steps")
+            logger.info("Pipeline aborted due to parse failure")
+        else:
+            self._run_visualize_step()
+            logger.info(f"After visualize step: visualize_failed={self.visualize_failed}")
+
+            self._run_kpi_and_ai_data_steps()
+            logger.info(
+                f"After KPI/AI steps: artifacts_to_kpis_failed={self.artifacts_to_kpis_failed}, ai_data_failed={self.ai_data_failed}"
+            )
+            logger.info("All postprocessing steps completed")
 
         # Compute final status and build result
         final_status = self._compute_final_status()
@@ -781,109 +1151,135 @@ class CaliperPostprocessOrchestrator:
         if not self.config.parse.enabled:
             return
 
-        with step_logging("caliper_parse", self.step_logs_dir) as log_file:
-            try:
-                model, mod_str = parse_entrypoint(
-                    self.config,
-                    self.tree_root,
-                    self.manifest_path,
-                    use_cache=not self.config.parse.no_cache,
-                )
+        import tempfile
 
-                # Log command to reproduce this step
-                log_parse_command(
-                    base_dir=self.tree_root,
-                    plugin_module=mod_str,
-                    use_cache=not self.config.parse.no_cache,
-                    manifest_path=self.manifest_path,
-                )
+        # Create status file for CLI output
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as status_f:
+            status_file = Path(status_f.name)
 
+        try:
+            # Build CLI command
+            command = build_parse_command(
+                config=self.config,
+                tree_root=self.tree_root,
+                manifest_path=self.manifest_path,
+                status_file=status_file,
+                use_cache=not self.config.parse.no_cache,
+            )
+
+            # Execute command using generic function
+            result, status_data, log_file = _execute_caliper_command(
+                command=command,
+                step_name="caliper parse",
+                status_file=status_file,
+                step_logs_dir=self.step_logs_dir,
+            )
+
+            if result.returncode == 0 and status_data and status_data.get("success", False):
                 self._add_step(
                     "parse",
                     {
                         "status": "success",
-                        "plugin_module": mod_str,
-                        "record_count": len(model.unified_result_records),
-                        "parse_cache_ref": model.parse_cache_ref,
+                        "plugin_module": status_data.get("plugin_module", "unknown"),
+                        "record_count": status_data.get("parsed_records", 0),
+                        "test_directories": status_data.get("test_directories", []),
+                        "test_directories_count": status_data.get("test_directories_count", 0),
+                        "parse_cache_ref": status_data.get("cache_ref"),
                         "completed_at": time.time(),
                     },
                     log_file,
                 )
-            except Exception as e:  # noqa: BLE001
+            else:
                 self.parse_failed = True
-                logger.exception("Caliper parse failed")
+                error_msg = (status_data or {}).get(
+                    "error", f"Command failed with exit code {result.returncode}"
+                )
+                logger.error("Caliper parse failed: %s", error_msg)
                 self._add_step(
                     "parse",
                     {
                         "status": "failure",
-                        "detail": str(e),
-                        "traceback": traceback.format_exc(),
+                        "detail": error_msg,
+                        "exit_code": result.returncode,
                         "completed_at": time.time(),
                     },
                     log_file,
                 )
+
+        except Exception as e:  # noqa: BLE001
+            self.parse_failed = True
+            logger.exception("Parse step execution failed")
+            self._add_step(
+                "parse",
+                {
+                    "status": "failure",
+                    "detail": str(e),
+                    "traceback": traceback.format_exc(),
+                    "completed_at": time.time(),
+                },
+                None,  # No log file if we couldn't even start
+            )
+        finally:
+            # Clean up temporary status file
+            if status_file.exists():
+                status_file.unlink()
 
     def _run_visualize_step(self) -> None:
         """Execute the visualize step if enabled."""
         if not self.config.visualize.enabled:
             return
 
-        with step_logging("caliper_visualize", self.step_logs_dir) as log_file:
-            try:
-                mod_str, plugin = load_plugin_entrypoint(
-                    self.config, tree_root=self.tree_root, manifest_path=self.manifest_path
+        import tempfile
+
+        # Create status file for CLI output
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as status_f:
+            status_file = Path(status_f.name)
+
+        try:
+            # Resolve visualize output directory
+            if self.visualize_output_dir is not None:
+                output_dir = self.visualize_output_dir.expanduser().resolve()
+                logger.info(f"Using explicit visualize output directory: {output_dir}")
+            else:
+                output_dir = _resolve_visualize_output_dir(
+                    self.config.visualize.output_dir,
+                )
+                logger.info(
+                    f"Resolved visualize output directory from config '{self.config.visualize.output_dir}': {output_dir}"
                 )
 
-                viz_cfg_path = _resolve_visualize_config_path(
-                    self.config.visualize.visualize_config,
-                    artifact_tree=self.tree_root,
-                )
+            # Build CLI command
+            command = build_visualize_command(
+                config=self.config,
+                tree_root=self.tree_root,
+                manifest_path=self.manifest_path,
+                status_file=status_file,
+                output_dir=output_dir,
+                use_cache=not self.config.parse.no_cache,
+            )
 
-                if self.visualize_output_dir is not None:
-                    output_dir = self.visualize_output_dir.expanduser().resolve()
-                    logger.info(f"Using explicit visualize output directory: {output_dir}")
-                else:
-                    output_dir = _resolve_visualize_output_dir(
-                        self.config.visualize.output_dir,
-                    )
-                    logger.info(
-                        f"Resolved visualize output directory from config '{self.config.visualize.output_dir}': {output_dir}"
-                    )
+            # Execute command using generic function
+            result, status_data, log_file = _execute_caliper_command(
+                command=command,
+                step_name="caliper visualize",
+                status_file=status_file,
+                step_logs_dir=self.step_logs_dir,
+            )
 
-                # Log command to reproduce this step
-                log_visualize_command(
-                    base_dir=self.tree_root,
-                    plugin_module=mod_str,
-                    output_dir=output_dir,
-                    reports_csv=self.config.visualize.reports,
-                    report_group=self.config.visualize.report_group,
-                    visualize_config_path=viz_cfg_path,
-                    include_pairs=tuple(self.config.visualize.include_labels),
-                    exclude_pairs=tuple(self.config.visualize.exclude_labels),
-                    use_cache=not self.config.parse.no_cache,
-                )
+            if result.returncode == 0 and status_data and status_data.get("success", False):
+                # Get output files and paths from status
+                output_files = status_data.get("output_files", [])
 
-                paths = run_visualize_entrypoint(
-                    base_dir=self.tree_root,
-                    plugin_module=mod_str,
-                    plugin=plugin,
-                    output_dir=output_dir,
-                    reports_csv=self.config.visualize.reports,
-                    report_group=self.config.visualize.report_group,
-                    visualize_config_path=viz_cfg_path,
-                    include_pairs=tuple(self.config.visualize.include_labels),
-                    exclude_pairs=tuple(self.config.visualize.exclude_labels),
-                    use_cache=not self.config.parse.no_cache,
-                    cache_path=self.cache_path,
-                )
-
-                # Convert paths to relative paths from output_dir
+                # Convert absolute paths to relative paths from output_dir if needed
                 relative_paths = []
-                for path in paths:
+                for path in output_files:
                     try:
                         path_obj = Path(path)
-                        relative_path = path_obj.relative_to(output_dir)
-                        relative_paths.append(str(relative_path))
+                        if path_obj.is_absolute():
+                            relative_path = path_obj.relative_to(output_dir)
+                            relative_paths.append(str(relative_path))
+                        else:
+                            relative_paths.append(str(path))
                     except ValueError:
                         # If path is not under output_dir, keep as-is
                         relative_paths.append(str(path))
@@ -899,27 +1295,48 @@ class CaliperPostprocessOrchestrator:
                     "visualize",
                     {
                         "status": "success",
-                        "plugin_module": mod_str,
+                        "plugin_module": status_data.get("plugin_module", "unknown"),
                         "output_files": relative_paths,
                         "output_dir": relative_output_dir,
+                        "generated_files": status_data.get("generated_files", len(relative_paths)),
+                        "completed_at": time.time(),
+                    },
+                    log_file,
+                )
+            else:
+                self.visualize_failed = True
+                error_msg = (status_data or {}).get(
+                    "error", f"Command failed with exit code {result.returncode}"
+                )
+                logger.error("Caliper visualize failed: %s", error_msg)
+                self._add_step(
+                    "visualize",
+                    {
+                        "status": "failure",
+                        "detail": error_msg,
+                        "exit_code": result.returncode,
                         "completed_at": time.time(),
                     },
                     log_file,
                 )
 
-            except Exception as e:  # noqa: BLE001
-                self.visualize_failed = True
-                logger.exception("Caliper visualize failed")
-                self._add_step(
-                    "visualize",
-                    {
-                        "status": "failure",
-                        "detail": str(e),
-                        "traceback": traceback.format_exc(),
-                        "completed_at": time.time(),
-                    },
-                    log_file,
-                )
+        except Exception as e:  # noqa: BLE001
+            self.visualize_failed = True
+            logger.exception("Visualize step execution failed")
+            self._add_step(
+                "visualize",
+                {
+                    "status": "failure",
+                    "detail": str(e),
+                    "traceback": traceback.format_exc(),
+                    "completed_at": time.time(),
+                },
+                None,  # No log file if we couldn't even start
+            )
+        finally:
+            # Clean up temporary status file
+            if status_file.exists():
+                status_file.unlink()
 
     def _run_kpi_and_ai_data_steps(self) -> None:
         """Execute KPI generation, CSV export, KPI export, and AI evaluation steps."""
@@ -933,14 +1350,24 @@ class CaliperPostprocessOrchestrator:
             output_dir.mkdir(parents=True, exist_ok=True)
 
             # Load plugin and model
-            model, mod_str = parse_entrypoint(
-                self.config,
-                self.tree_root,
-                self.manifest_path,
-                use_cache=not self.config.parse.no_cache,
+            from projects.caliper.engine.load_plugin import load_plugin
+            from projects.caliper.engine.parse import run_parse
+            from projects.caliper.engine.plugin_config import resolve_plugin_module_string
+
+            # Load plugin
+            mod_str, _manifest = resolve_plugin_module_string(
+                base_dir=self.tree_root,
+                postprocess_config=self.manifest_path,
+                cli_plugin=self.config.plugin_module,
             )
-            mod_str, plugin = load_plugin_entrypoint(
-                self.config, tree_root=self.tree_root, manifest_path=self.manifest_path
+            plugin = load_plugin(mod_str)
+
+            # Parse model
+            model = run_parse(
+                base_dir=self.tree_root,
+                plugin_module=mod_str,
+                plugin=plugin,
+                use_cache=not self.config.parse.no_cache,
             )
 
             # KPI JSON generation
@@ -1023,12 +1450,19 @@ class CaliperPostprocessOrchestrator:
     ) -> None:
         """Execute the KPI generation step."""
         if self.config.kpi.artifacts_to_kpis.enabled:
-            with step_logging("caliper_artifacts_to_kpis", self.step_logs_dir) as log_file:
-                result = _run_artifacts_to_kpis(
-                    self.config, plugin, model, output_dir, mod_str, self.tree_root
-                )
-                self._add_step("artifacts_to_kpis", result, log_file)
-                self._check_step_result_and_set_failure("artifacts_to_kpis", result)
+            result = _run_artifacts_to_kpis(
+                self.config,
+                plugin,
+                model,
+                output_dir,
+                mod_str,
+                self.tree_root,
+                self.manifest_path,
+                self.step_logs_dir,
+            )
+            log_file = result.pop("log_file", None)
+            self._add_step("artifacts_to_kpis", result, log_file)
+            self._check_step_result_and_set_failure("artifacts_to_kpis", result)
         else:
             self._add_step(
                 "artifacts_to_kpis",
@@ -1052,14 +1486,23 @@ class CaliperPostprocessOrchestrator:
             )
             return
 
-        with step_logging("caliper_kpis_to_csv", self.step_logs_dir) as log_file:
-            # Path to the JSON file for reference in command logging
-            kpi_json_path = output_dir / self.config.kpi.artifacts_to_kpis.output
-            result = _run_kpis_to_csv(self.config, plugin, model, output_dir, kpi_json_path)
-            self._add_step("kpis_to_csv", result, log_file)
-            if result.get("status") == "failed":
-                # CSV export failure doesn't affect overall status - it's supplementary
-                logger.warning("KPI CSV export failed but continuing execution")
+        # Path to the JSON file for reference in command logging
+        kpi_json_path = output_dir / self.config.kpi.artifacts_to_kpis.output
+        result = _run_kpis_to_csv(
+            self.config,
+            plugin,
+            model,
+            output_dir,
+            kpi_json_path,
+            self.tree_root,
+            self.manifest_path,
+            self.step_logs_dir,
+        )
+        log_file = result.pop("log_file", None)
+        self._add_step("kpis_to_csv", result, log_file)
+        if result.get("status") == "failed":
+            # CSV export failure doesn't affect overall status - it's supplementary
+            logger.warning("KPI CSV export failed but continuing execution")
 
     def _run_artifacts_to_ai_data_step(
         self, plugin: Any, model: Any, output_dir: Path, mod_str: str
@@ -1076,24 +1519,31 @@ class CaliperPostprocessOrchestrator:
             )
             return
 
-        with step_logging("caliper_artifacts_to_ai_data", self.step_logs_dir) as log_file:
-            try:
-                result = _run_artifacts_to_ai_data(
-                    self.config, plugin, model, output_dir, mod_str, self.tree_root
-                )
-                self._add_step("artifacts_to_ai_data", result, log_file)
+        try:
+            result = _run_artifacts_to_ai_data(
+                self.config,
+                plugin,
+                model,
+                output_dir,
+                mod_str,
+                self.tree_root,
+                self.manifest_path,
+                self.step_logs_dir,
+            )
+            log_file = result.pop("log_file", None)
+            self._add_step("artifacts_to_ai_data", result, log_file)
 
-                logger.info("AI eval export result:")
-                logger.info(json.dumps(result, indent=2, default=str))
+            logger.info("AI eval export result:")
+            logger.info(json.dumps(result, indent=2, default=str))
 
-                # Check if the result indicates failure or warning
-                self._check_step_result_and_set_failure("artifacts_to_ai_data", result)
+            # Check if the result indicates failure or warning
+            self._check_step_result_and_set_failure("artifacts_to_ai_data", result)
 
-            except Exception as e:
-                logger.exception("AI eval export failed")
-                step_result = {"status": "failed", "error": str(e)}
-                self._add_step("artifacts_to_ai_data", step_result, log_file)
-                self._check_step_result_and_set_failure("artifacts_to_ai_data", step_result)
+        except Exception as e:
+            logger.exception("AI eval export failed")
+            step_result = {"status": "failed", "error": str(e)}
+            self._add_step("artifacts_to_ai_data", step_result, None)
+            self._check_step_result_and_set_failure("artifacts_to_ai_data", step_result)
 
     def _run_s3_import_step(self, output_dir: Path) -> None:
         """Execute the S3 import step."""
@@ -1108,29 +1558,66 @@ class CaliperPostprocessOrchestrator:
             )
             return
 
-        with step_logging("caliper_s3_import", self.step_logs_dir) as log_file:
+        try:
+            # Create temporary status file for subprocess communication
+            status_file = output_dir / "s3_import_status.yaml"
+
+            # Build CLI command
+            command = build_s3_import_command(
+                config=self.config,
+                status_file=status_file,
+                output_dir=output_dir,
+            )
+
+            # Execute command using generic function
+            result, status_data, log_file = _execute_caliper_command(
+                command=command,
+                step_name="caliper s3 import",
+                status_file=status_file,
+                step_logs_dir=self.step_logs_dir,
+            )
+
+            # Clean up temporary status file
             try:
-                result = s3_import_entrypoint(self.config, output_dir)
+                status_file.unlink()
+            except FileNotFoundError:
+                pass
 
-                # Standardize field names and convert paths to relative
-                if "import_dir" in result:
-                    # Rename import_dir to output_dir and make relative
-                    result["output_dir"] = _make_path_relative_to_base(
-                        result.pop("import_dir"), output_dir
-                    )
+            # Convert to expected format
+            if status_data.get("success"):
+                # Get the actual import directory (where files were downloaded)
+                import_dir = output_dir / self.config.s3.import_.output_dir
+                step_result = {
+                    "status": "success",
+                    "output_dir": _make_path_relative_to_base(import_dir, env.ARTIFACT_DIR),
+                    "file_count": status_data.get("file_count", 0),
+                    "completed_at": time.time(),
+                }
+                if status_data.get("warning"):
+                    step_result["warning"] = status_data["warning"]
+                if status_data.get("imported_path"):
+                    step_result["imported_path"] = status_data["imported_path"]
+            else:
+                step_result = {
+                    "status": "failed",
+                    "error": status_data.get("error", "Unknown error"),
+                    "completed_at": time.time(),
+                }
+                if status_data.get("imported_path"):
+                    step_result["imported_path"] = status_data["imported_path"]
 
-                self._add_step("s3_import", result, log_file)
+            self._add_step("s3_import", step_result, log_file)
 
-                logger.info("S3 import result:")
-                logger.info(json.dumps(result, indent=2, default=str))
+            logger.info("S3 import result:")
+            logger.info(json.dumps(step_result, indent=2, default=str))
 
-                self._check_step_result_and_set_failure("s3_import", result)
+            self._check_step_result_and_set_failure("s3_import", step_result)
 
-            except Exception as e:
-                logger.exception("S3 import failed")
-                step_result = {"status": "failed", "error": str(e)}
-                self._add_step("s3_import", step_result, log_file)
-                self._check_step_result_and_set_failure("s3_import", step_result)
+        except Exception as e:
+            logger.exception("S3 import failed")
+            step_result = {"status": "failed", "error": str(e), "completed_at": time.time()}
+            self._add_step("s3_import", step_result, None)
+            self._check_step_result_and_set_failure("s3_import", step_result)
 
     def _run_analyse_kpis_step(self, output_dir: Path, plugin_module: str) -> None:
         """Execute the KPI analysis step."""
@@ -1172,33 +1659,26 @@ class CaliperPostprocessOrchestrator:
             self.analyze_failed = True
             return
 
-        with step_logging("caliper_analyse_kpis", self.step_logs_dir) as log_file:
-            try:
-                # Convert relative path to absolute for analyze function
-                current_kpis_path = output_dir / current_kpis_file
+        # Convert relative path back to absolute path
+        current_kpis_path = env.ARTIFACT_DIR / current_kpis_file
 
-                result = analyze_kpis_entrypoint(
-                    self.config, plugin_module, self.tree_root, output_dir, current_kpis_path
-                )
+        result = _run_analyse_kpis(
+            postprocess_config=self.config,
+            output_dir=output_dir,
+            plugin_module=plugin_module,
+            base_dir=self.tree_root,
+            manifest_path=self.manifest_path,
+            current_kpis_file=current_kpis_path,
+            step_logs_dir=self.step_logs_dir,
+        )
 
-                # Make output_file path relative
-                if "output_file" in result:
-                    result["output_file"] = _make_path_relative_to_base(
-                        result["output_file"], output_dir
-                    )
+        log_file = result.pop("log_file", None)
+        self._add_step("analyse_kpis", result, log_file)
 
-                self._add_step("analyse_kpis", result, log_file)
+        logger.info("KPI analysis result:")
+        logger.info(json.dumps(result, indent=2, default=str))
 
-                logger.info("KPI analysis result:")
-                logger.info(json.dumps(result, indent=2, default=str))
-
-                self._check_step_result_and_set_failure("analyse_kpis", result)
-
-            except Exception as e:
-                logger.exception("KPI analysis failed")
-                step_result = {"status": "failed", "error": str(e)}
-                self._add_step("analyse_kpis", step_result, log_file)
-                self._check_step_result_and_set_failure("analyse_kpis", step_result)
+        self._check_step_result_and_set_failure("analyse_kpis", result)
 
     def _run_s3_export_step(self, output_dir: Path) -> None:
         """Execute the S3 export step."""
@@ -1213,115 +1693,135 @@ class CaliperPostprocessOrchestrator:
             )
             return
 
-        with step_logging("caliper_s3_export", self.step_logs_dir) as log_file:
+        try:
+            # Collect file paths from previous steps
+            kpis_file = None
+            csv_file = None
+            ai_data_dir = None
+            analysis_file = None
+
+            # Get KPI JSON file from artifacts_to_kpis step
+            artifacts_to_kpis_step = self._get_step("artifacts_to_kpis")
+            if (
+                artifacts_to_kpis_step
+                and artifacts_to_kpis_step.get("status") == "success"
+                and artifacts_to_kpis_step.get("output_file")
+            ):
+                stored_output_file = artifacts_to_kpis_step["output_file"]
+                kpis_file = env.ARTIFACT_DIR / stored_output_file
+                logger.info(
+                    f"S3 export: env.ARTIFACT_DIR={env.ARTIFACT_DIR}, stored_output_file={stored_output_file}, kpis_file={kpis_file}"
+                )
+
+            # Get CSV file from kpis_to_csv step
+            kpis_to_csv_step = self._get_step("kpis_to_csv")
+            if (
+                kpis_to_csv_step
+                and kpis_to_csv_step.get("status") == "success"
+                and kpis_to_csv_step.get("output_file")
+            ):
+                csv_file = env.ARTIFACT_DIR / kpis_to_csv_step["output_file"]
+
+            # Get AI data directory from artifacts_to_ai_data step
+            ai_data_step = self._get_step("artifacts_to_ai_data")
+
+            logger.info(f"AI data step found:\n{json.dumps(ai_data_step, indent=2)}")
+            if (
+                ai_data_step
+                and ai_data_step.get("status") == "success"
+                and ai_data_step.get("ai_data_dir")
+            ):
+                ai_data_dir = env.ARTIFACT_DIR / ai_data_step["ai_data_dir"]
+                logger.info(f"AI data directory set to: {ai_data_dir}")
+            else:
+                logger.warning(
+                    f"AI data directory not found - step status: {ai_data_step.get('status') if ai_data_step else 'step not found'}, ai_data_dir: {ai_data_step.get('ai_data_dir') if ai_data_step else 'N/A'}"
+                )
+
+            # Get analysis file from analyse_kpis step
+            analyze_step = self._get_step("analyse_kpis")
+            if (
+                analyze_step
+                and analyze_step.get("status") in ("success", "warning")
+                and analyze_step.get("output_file")
+            ):
+                analysis_file = env.ARTIFACT_DIR / analyze_step["output_file"]
+
+            # Create temporary status file for subprocess communication
+            status_file = output_dir / "s3_export_status.yaml"
+
+            # Build CLI command
+            command = build_s3_export_command(
+                config=self.config,
+                status_file=status_file,
+                kpis_file=kpis_file,
+                csv_file=csv_file,
+                ai_data_dir=ai_data_dir,
+                analysis_file=analysis_file,
+            )
+
+            # Execute command using generic function
+            result, status_data, log_file = _execute_caliper_command(
+                command=command,
+                step_name="caliper s3 export",
+                status_file=status_file,
+                step_logs_dir=self.step_logs_dir,
+            )
+
+            # Clean up temporary status file
             try:
-                # Collect file paths from previous steps
-                kpis_file = None
-                csv_file = None
-                ai_data_dir = None
-                analysis_file = None
+                status_file.unlink()
+            except FileNotFoundError:
+                pass
 
-                # Get KPI JSON file from artifacts_to_kpis step
-                artifacts_to_kpis_step = self._get_step("artifacts_to_kpis")
-                if (
-                    artifacts_to_kpis_step
-                    and artifacts_to_kpis_step.get("status") == "success"
-                    and artifacts_to_kpis_step.get("output_file")
-                ):
-                    kpis_file = output_dir / artifacts_to_kpis_step["output_file"]
-
-                # Get CSV file from kpis_to_csv step
-                kpis_to_csv_step = self._get_step("kpis_to_csv")
-                if (
-                    kpis_to_csv_step
-                    and kpis_to_csv_step.get("status") == "success"
-                    and kpis_to_csv_step.get("output_file")
-                ):
-                    csv_file = output_dir / kpis_to_csv_step["output_file"]
-
-                # Get AI data directory from artifacts_to_ai_data step
-                ai_data_step = self._get_step("artifacts_to_ai_data")
-                logger.info(f"AI data step found: {ai_data_step}")
-                if (
-                    ai_data_step
-                    and ai_data_step.get("status") == "success"
-                    and ai_data_step.get("ai_data_dir")
-                ):
-                    ai_data_dir = output_dir / ai_data_step["ai_data_dir"]
-                    logger.info(f"AI data directory set to: {ai_data_dir}")
-                else:
-                    logger.warning(
-                        f"AI data directory not found - step status: {ai_data_step.get('status') if ai_data_step else 'step not found'}, ai_data_dir: {ai_data_step.get('ai_data_dir') if ai_data_step else 'N/A'}"
-                    )
-
-                # Get analysis file from analyse_kpis step
-                analyze_step = self._get_step("analyse_kpis")
-                if (
-                    analyze_step
-                    and analyze_step.get("status") in ("success", "warning")
-                    and analyze_step.get("output_file")
-                ):
-                    analysis_file = output_dir / analyze_step["output_file"]
-
-                # Log the CLI command to reproduce this step
-                s3_parent_config = self.config.s3
-                export_path = f"{s3_parent_config.instance}/{s3_parent_config.directory}"
-
-                log_s3_export_command(
-                    bucket=s3_parent_config.bucket,
-                    export_path=export_path,
-                    kpis_file=kpis_file,
-                    csv_file=csv_file,
-                    ai_data_dir=ai_data_dir,
-                    analysis_file=analysis_file,
-                )
-
-                result = s3_export_entrypoint(
-                    self.config,
-                    output_dir,
-                    kpis_file=kpis_file,
-                    csv_file=csv_file,
-                    ai_data_dir=ai_data_dir,
-                    analysis_file=analysis_file,
-                )
-                self._add_step("s3_export", result, log_file)
-
-                if result.get("status") == "success":
-                    # Format status for better readability
-                    duration = result.get("duration", 0)
-                    uploaded_files = result.get("uploaded_files", 0)
-                    failed_files = result.get("failed_files", 0)
-                    total_files = result.get("total_files", 0)
-                    s3_path = result.get("exported_path", "")
-
-                    logger.info(
-                        f"S3 export completed successfully in {duration}s: "
-                        f"{uploaded_files}/{total_files} files uploaded"
-                        f"{f' ({failed_files} failed)' if failed_files > 0 else ''} "
-                        f"to {s3_path}"
-                    )
-                else:
-                    self._check_step_result_and_set_failure("s3_export", result)
-
-            except Exception as e:
-                error_msg = f"S3 export step failed with exception: {type(e).__name__}: {str(e)}"
-
-                # Log programming errors more prominently
-                if isinstance(e, AttributeError | NameError | TypeError):
-                    logger.error(f"CRITICAL PROGRAMMING ERROR in S3 export: {error_msg}")
-                    logger.exception("Full traceback for programming error:")
-                else:
-                    logger.error(error_msg)
-                    logger.exception("Full traceback:")
-
+            # Convert to expected format
+            if status_data.get("success"):
                 step_result = {
-                    "status": "failed",
-                    "error": error_msg,
-                    "exception_type": type(e).__name__,
+                    "status": "success",
+                    "exported_path": status_data.get("exported_path", ""),
+                    "uploaded_files": status_data.get("uploaded_files", 0),
+                    "total_files": status_data.get("total_files", 0),
                     "completed_at": time.time(),
                 }
-                self._add_step("s3_export", step_result, log_file)
+
+                # Format status for better readability
+                uploaded_files = step_result.get("uploaded_files", 0)
+                total_files = step_result.get("total_files", 0)
+                s3_path = step_result.get("exported_path", "")
+
+                logger.info(
+                    f"S3 export completed successfully: "
+                    f"{uploaded_files}/{total_files} files uploaded to {s3_path}"
+                )
+            else:
+                step_result = {
+                    "status": "failed",
+                    "error": status_data.get("error", "Unknown error"),
+                    "completed_at": time.time(),
+                }
                 self._check_step_result_and_set_failure("s3_export", step_result)
+
+            self._add_step("s3_export", step_result, log_file)
+
+        except Exception as e:
+            error_msg = f"S3 export step failed with exception: {type(e).__name__}: {str(e)}"
+
+            # Log programming errors more prominently
+            if isinstance(e, AttributeError | NameError | TypeError):
+                logger.error(f"CRITICAL PROGRAMMING ERROR in S3 export: {error_msg}")
+                logger.exception("Full traceback for programming error:")
+            else:
+                logger.error(error_msg)
+                logger.exception("Full traceback:")
+
+            step_result = {
+                "status": "failed",
+                "error": error_msg,
+                "exception_type": type(e).__name__,
+                "completed_at": time.time(),
+            }
+            self._add_step("s3_export", step_result, None)
+            self._check_step_result_and_set_failure("s3_export", step_result)
 
     def _compute_final_status(self) -> str:
         """Compute the final postprocessing status."""

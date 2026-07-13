@@ -73,6 +73,14 @@ def wait_for_datasciencecluster_ready(args, ctx):
         log_stdout=True,  # Show the output
         check=False,
     )
+
+    # Abort if the DataScienceCluster is not found
+    if result.returncode != 0:
+        error_msg = f"DataScienceCluster {args.datasciencecluster_name} not found in namespace {args.namespace}"
+        if result.stderr:
+            error_msg += f": {result.stderr.strip()}"
+        raise RuntimeError(error_msg)
+
     phase = result.stdout.strip() if result.stdout else None
 
     if phase == "Ready":

@@ -27,6 +27,12 @@ def run_ai_eval_export(
     )
 
     # Build base payload from plugin
+    if not hasattr(plugin, "build_ai_data_payload"):
+        raise AttributeError(
+            f"Plugin {plugin_module} does not support AI evaluation export. "
+            "Missing build_ai_data_payload method."
+        )
+
     build = plugin.build_ai_data_payload
     payload = build(model)
 
@@ -75,7 +81,11 @@ def _export_test_entries_with_artifacts_engine(
     exported_entries = []
 
     # Get the specific files we want to copy from the plugin
-    target_files = plugin.get_ai_eval_artifact_files(model)
+    if hasattr(plugin, "get_ai_eval_artifact_files"):
+        target_files = plugin.get_ai_eval_artifact_files(model)
+    else:
+        # Fallback: copy common test artifacts
+        target_files = ["*.log", "*.json", "*.yaml", "*.yml"]
 
     for idx, record in enumerate(model.unified_result_records):
         # Create directory for this test entry
@@ -93,29 +103,68 @@ def _export_test_entries_with_artifacts_engine(
 
         # Copy target files if they exist
         for target_file in target_files:
-            source_file = base_dir / target_file
-            if source_file.exists():
-                # Create target directory structure in test entry dir
-                target_path = test_entry_dir / Path(target_file).name
-                target_path.parent.mkdir(parents=True, exist_ok=True)
+            # Handle plugin-provided paths directly, expand fallback patterns
+            if hasattr(plugin, "get_ai_eval_artifact_files"):
+                # Plugin provided specific files - treat as direct paths
+                source_file = base_dir / target_file
+                if source_file.exists():
+                    # Create target directory structure in test entry dir
+                    target_path = test_entry_dir / Path(target_file).name
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
 
-                try:
-                    shutil.copy2(source_file, target_path)
-                    entry_info["copied_files"].append(
-                        {
-                            "source": str(source_file),
-                            "target": str(target_path),
-                            "size_bytes": source_file.stat().st_size,
-                        }
+                    try:
+                        shutil.copy2(source_file, target_path)
+                        entry_info["copied_files"].append(
+                            {
+                                "source": str(source_file),
+                                "target": str(target_path),
+                                "size_bytes": source_file.stat().st_size,
+                            }
+                        )
+                        logger.debug(f"Copied {source_file} -> {target_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to copy {source_file}: {e}")
+                        entry_info["missing_files"].append(
+                            {"file": str(source_file), "error": str(e)}
+                        )
+                else:
+                    entry_info["missing_files"].append(
+                        {"file": str(source_file), "error": "File does not exist"}
                     )
-                    logger.debug(f"Copied {source_file} -> {target_path}")
-                except Exception as e:
-                    logger.warning(f"Failed to copy {source_file}: {e}")
-                    entry_info["missing_files"].append({"file": str(source_file), "error": str(e)})
             else:
-                entry_info["missing_files"].append(
-                    {"file": str(source_file), "error": "File does not exist"}
-                )
+                # Fallback mode - expand glob patterns
+                import glob
+
+                pattern_path = base_dir / target_file
+                matched_files = glob.glob(str(pattern_path))
+
+                if matched_files:
+                    # Copy all matched files
+                    for matched_file_str in matched_files:
+                        matched_file = Path(matched_file_str)
+                        target_path = test_entry_dir / matched_file.name
+                        target_path.parent.mkdir(parents=True, exist_ok=True)
+
+                        try:
+                            shutil.copy2(matched_file, target_path)
+                            entry_info["copied_files"].append(
+                                {
+                                    "source": str(matched_file),
+                                    "target": str(target_path),
+                                    "size_bytes": matched_file.stat().st_size,
+                                }
+                            )
+                            logger.debug(f"Copied {matched_file} -> {target_path}")
+                        except Exception as e:
+                            logger.warning(f"Failed to copy {matched_file}: {e}")
+                            entry_info["missing_files"].append(
+                                {"file": str(matched_file), "error": str(e)}
+                            )
+                else:
+                    # Pattern matched no files
+                    entry_info["missing_files"].append(
+                        {"file": str(pattern_path), "error": "Pattern matched no files"}
+                    )
 
         # Write entry metadata
         entry_metadata_file = test_entry_dir / "entry_metadata.json"
