@@ -201,17 +201,19 @@ def test_ci_init_uses_project_default_preset_when_no_explicit_preset_is_provided
     assert runtime_config.get_benchmark_keys() == ["short"]
 
 
-def test_list_vaults_only_includes_rhoai_rc_vault_for_custom_catalog_runs() -> None:
+def test_list_vaults_only_includes_rhoai_custom_catalog_vaults_for_custom_catalog_runs() -> None:
     _init_project_config()
 
     core_config.project.set_config("platform.rhoai.custom_catalog.enabled", False)
     assert "psap-rhoai-rc" not in llmd_ci.list_vaults()
+    assert "psap-forge-staging-image-pull" not in llmd_ci.list_vaults()
 
     core_config.project.set_config("platform.rhoai.custom_catalog.enabled", True)
     assert "psap-rhoai-rc" in llmd_ci.list_vaults()
+    assert "psap-forge-staging-image-pull" in llmd_ci.list_vaults()
 
 
-def test_prepare_phase_adds_rhoai_rc_vault_only_for_custom_catalog_runs(
+def test_prepare_phase_adds_rhoai_custom_catalog_vaults_only_for_custom_catalog_runs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _init_project_config()
@@ -230,7 +232,9 @@ def test_prepare_phase_adds_rhoai_rc_vault_only_for_custom_catalog_runs(
     llmd_ci.init_vaults_for_phase("prepare")
 
     assert "psap-rhoai-rc" not in calls[0]["optional_vaults"]
+    assert "psap-forge-staging-image-pull" not in calls[0]["optional_vaults"]
     assert "psap-rhoai-rc" in calls[1]["optional_vaults"]
+    assert "psap-forge-staging-image-pull" in calls[1]["optional_vaults"]
 
 
 def test_prepare_rhoai_operator_runs_registry_setup_before_custom_catalog_deployment(

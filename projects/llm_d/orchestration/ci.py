@@ -28,6 +28,10 @@ from projects.llm_d.orchestration.prepare_sequence import run_prepare_sequence
 from projects.llm_d.orchestration.test_phase import run as test_toolbox_run
 
 logger = logging.getLogger(__name__)
+RHOAI_CUSTOM_CATALOG_VAULTS = [
+    "psap-rhoai-rc",
+    "psap-forge-staging-image-pull",
+]
 
 
 def init():
@@ -41,7 +45,7 @@ def list_vaults() -> list[str]:
     """List all vaults (includes both mandatory and optional)."""
     all_vaults = vault.phase_vault_list_all()
     if config.project.get_config("platform.rhoai.custom_catalog.enabled", False):
-        return [*all_vaults, "psap-rhoai-rc"]
+        return [*all_vaults, *RHOAI_CUSTOM_CATALOG_VAULTS]
 
     return all_vaults
 
@@ -59,7 +63,7 @@ def init_vaults_for_phase(phase: str) -> None:
     if phase == "prepare" and config.project.get_config(
         "platform.rhoai.custom_catalog.enabled", False
     ):
-        optional_vaults = [*optional_vaults, "psap-rhoai-rc"]
+        optional_vaults = [*optional_vaults, *RHOAI_CUSTOM_CATALOG_VAULTS]
 
     vault.init(mandatory_vaults=mandatory_vaults, optional_vaults=optional_vaults)
 
