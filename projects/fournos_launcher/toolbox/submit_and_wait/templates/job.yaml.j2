@@ -10,7 +10,11 @@ metadata:
 spec:
   owner: {{ args.owner }}
   displayName: {{ args.display_name }}
+  {% if args.clusterless -%}
+  clusterless: {{ args.clusterless }}
+  {%- else -%}
   cluster: {{ args.cluster_name }}
+  {%- endif %}
   exclusive: {{ args.exclusive }}
   pipeline: {{ args.pipeline_name }}
   {% if args.gpu_count and args.gpu_type -%}

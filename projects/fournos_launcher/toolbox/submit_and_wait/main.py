@@ -47,9 +47,9 @@ class FournosJobFailureError(RuntimeError):
 
 @entrypoint
 def run(
-    cluster_name: str,
     project: str,
     *,
+    cluster_name: str | None = None,
     args: list = None,
     variables_overrides: dict = None,
     job_name: str = "",
@@ -63,13 +63,14 @@ def run(
     exclusive: bool = True,
     gpu_count: int = None,
     gpu_type: str = None,
+    clusterless: bool = False,
 ):
     """
     Submit a FOURNOS job and wait for completion
 
     Args:
-        cluster_name: Name of the target cluster for the FOURNOS job
         project: The project name to execute (e.g., 'llm_d', 'skeleton')
+        cluster_name: Name of the target cluster for the FOURNOS job (None when clusterless=True)
         args: List of arguments to pass to the project (default: empty list)
         variables_overrides: Dictionary of config variables to override (default: empty dict)
         job_name: Custom name for the FOURNOS job (auto-generated if empty)
@@ -83,12 +84,13 @@ def run(
         exclusive: Whether the job should run exclusively on its nodes (default: True)
         gpu_count: Number of GPUs required for the job (default: None)
         gpu_type: Type of GPU required for the job (default: None)
+        clusterless: Whether to enable clusterless mode (makes cluster_name optional, forces exclusive=False) (default: False)
 
     Examples:
         # Called by entrypoint with config values:
         run(
+            "llm_d",
             cluster_name="my-cluster",
-            project="llm_d",
             args=["test", "--verbose"],
             variables_overrides={"model": "mistral", "replicas": 2},
             namespace="my-fournos-jobs",
@@ -101,6 +103,10 @@ def run(
             gpu_type="nvidia-tesla-v100",
         )
     """
+    # Enforce clusterless=True always uses exclusive=False to prevent conflicts
+    if clusterless:
+        exclusive = False
+
     # Set defaults
     if args is None:
         args = []
@@ -123,8 +129,11 @@ def run(
 def validate_inputs(args, ctx):
     """Validate input parameters"""
 
-    if not args.cluster_name:
-        raise ValueError("cluster_name is required")
+    if not args.cluster_name and not args.clusterless:
+        raise ValueError("cluster_name is required unless clusterless mode is enabled")
+
+    if args.clusterless and args.exclusive:
+        raise ValueError("Clusterless mode and exclusive mode cannot both be enabled")
 
     if not args.project:
         raise ValueError("project is required")
