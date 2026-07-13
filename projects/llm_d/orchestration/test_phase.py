@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import logging
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
 from projects.core.dsl import shell
 from projects.core.dsl.utils import slugify_identifier
+from projects.core.dsl.utils.k8s import oc
 from projects.core.library import env
 from projects.core.library.postprocess import run_and_postprocess, write_test_labels
 from projects.core.library.run import SignalInterrupt
@@ -24,6 +26,13 @@ from projects.llm_d.orchestration.utils import write_yaml
 from projects.llm_d.toolbox.cleanup_test_resources import main as cleanup_test_resources_command
 
 logger = logging.getLogger(__name__)
+SERVING_CONTROL_PLANE_DEPLOYMENTS = (
+    "kserve-controller-manager",
+    "llmisvc-controller-manager",
+    "model-serving-api",
+    "odh-model-controller",
+)
+SERVING_CONTROL_PLANE_STABILIZATION_SECONDS = 45
 
 
 def create_test_labels() -> None:
@@ -177,10 +186,13 @@ def deploy_inference_service() -> str:
     # Step 1: Ensure model cache is ready
     _prepare_model_cache()
 
-    # Step 2: Build and write inference service manifest
+    # Step 2: Wait for the serving control plane to settle before creating the service.
+    _wait_for_serving_control_plane_ready()
+
+    # Step 3: Build and write inference service manifest
     manifest_path = _build_inference_service_manifest()
 
-    # Step 3: Deploy the service and wait for endpoint
+    # Step 4: Deploy the service and wait for endpoint
     logger.info("Deploying LLMInferenceService from manifest: %s", manifest_path)
     endpoint_url = deploy_llmisvc.run(
         namespace=namespace,
@@ -202,6 +214,48 @@ def _prepare_model_cache() -> None:
     # Use the same prepare_model_cache function as the prepare phase
     # This includes vault token handling and PVC existence checks
     prepare_model_cache()
+
+
+def _wait_for_serving_control_plane_ready() -> None:
+    from projects.llm_d.orchestration import runtime_config
+
+    rhoai_namespace = runtime_config.get_platform_config()["rhoai"]["namespace"]
+
+    for deployment_name in SERVING_CONTROL_PLANE_DEPLOYMENTS:
+        result = oc(
+            "wait",
+            "--for=condition=Available",
+            "--timeout=300s",
+            f"deployment/{deployment_name}",
+            "-n",
+            rhoai_namespace,
+            check=False,
+        )
+        if result.returncode != 0:
+            status_result = oc(
+                "get",
+                "deployments",
+                "-n",
+                rhoai_namespace,
+                "-o",
+                "wide",
+                check=False,
+            )
+            error_msg = (
+                f"Timeout waiting for serving control plane deployment "
+                f"{deployment_name} in {rhoai_namespace}"
+            )
+            if status_result.returncode == 0:
+                error_msg += f"\n\nCurrent deployment status:\n{status_result.stdout}"
+            raise RuntimeError(error_msg)
+
+    # The webhook deployments can report Available before leader election and informer
+    # startup finish, which makes the first LLMInferenceService create race the webhook.
+    logger.info(
+        "Waiting %ss for serving control plane stabilization",
+        SERVING_CONTROL_PLANE_STABILIZATION_SECONDS,
+    )
+    time.sleep(SERVING_CONTROL_PLANE_STABILIZATION_SECONDS)
 
 
 def _build_inference_service_manifest() -> Path:
