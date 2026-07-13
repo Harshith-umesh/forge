@@ -37,9 +37,9 @@ RUN pip install --no-cache-dir uv
 # Install OpenShift CLI (oc)
 RUN curl -LO "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz" && \
     tar -xzf openshift-client-linux.tar.gz && \
-    chmod +x oc kubectl && \
-    mv oc kubectl /usr/local/bin/ && \
-    rm -f openshift-client-linux.tar.gz
+    chmod +x oc && \
+    mv oc /usr/local/bin/ && \
+    rm -f openshift-client-linux.tar.gz kubectl
 
 # Optimize uv for container environments
 ENV UV_COMPILE_BYTECODE=1
