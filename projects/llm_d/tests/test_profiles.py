@@ -373,7 +373,19 @@ def test_wait_for_rhoai_pull_secret_ready_treats_empty_mcp_status_as_not_ready(
         clock["value"] += 0.1
 
     def _fake_oc_get_json(*args, **kwargs):
-        return {"data": {".dockerconfigjson": "unused"}}
+        payload = {
+            "auths": {
+                "quay.io": {"auth": "token-a"},
+                "registry.stage.redhat.io": {"auth": "token-b"},
+            }
+        }
+        return {
+            "data": {
+                ".dockerconfigjson": base64.b64encode(json.dumps(payload).encode("utf-8")).decode(
+                    "utf-8"
+                )
+            }
+        }
 
     def _fake_oc(*args, **kwargs):
         if args[:2] == ("get", "mcp"):
@@ -382,18 +394,28 @@ def test_wait_for_rhoai_pull_secret_ready_treats_empty_mcp_status_as_not_ready(
 
     monkeypatch.setattr(rhoai_deploy, "oc_get_json", _fake_oc_get_json)
     monkeypatch.setattr(rhoai_deploy, "oc", _fake_oc)
-    monkeypatch.setattr(
-        rhoai_deploy,
-        "_decode_pull_secret",
-        lambda _secret: (
-            "quay.io/rhoai registry.stage.redhat.io/rhaii "
-            "registry.stage.redhat.io/rhaii-early-access"
-        ),
-    )
     monkeypatch.setattr(rhoai_deploy.time, "monotonic", _fake_monotonic)
     monkeypatch.setattr(rhoai_deploy.time, "sleep", _fake_sleep)
 
     rhoai_deploy.wait_for_rhoai_pull_secret_ready(timeout_seconds=1, poll_interval_seconds=0)
+
+
+def test_registries_present_accepts_parent_registry_auth_entries() -> None:
+    pull_secret = {
+        "auths": {
+            "quay.io": {"auth": "token-a"},
+            "registry.stage.redhat.io": {"auth": "token-b"},
+        }
+    }
+
+    assert rhoai_deploy._registries_present(
+        pull_secret,
+        (
+            "quay.io/rhoai",
+            "registry.stage.redhat.io/rhaii",
+            "registry.stage.redhat.io/rhaii-early-access",
+        ),
+    )
 
 
 def test_prepare_rhoai_pull_secret_merges_dockerconfigjson_registry_auths(

@@ -210,10 +210,24 @@ def _current_pull_secret_json() -> dict[str, Any]:
         raise RuntimeError("openshift-config/pull-secret is not valid dockerconfigjson") from exc
 
 
+def _normalize_registry_key(registry: str) -> str:
+    return registry.removeprefix("https://").removeprefix("http://").rstrip("/")
+
+
+def _auth_entry_covers_registry(auth_key: str, required_registry: str) -> bool:
+    auth_key = _normalize_registry_key(auth_key)
+    required_registry = _normalize_registry_key(required_registry)
+    return auth_key == required_registry or required_registry.startswith(f"{auth_key}/")
+
+
 def _registries_present(
-    decoded_secret: str, registries: tuple[str, ...] = RHOAI_REGISTRIES
+    pull_secret: dict[str, Any], registries: tuple[str, ...] = RHOAI_REGISTRIES
 ) -> bool:
-    return all(registry in decoded_secret for registry in registries)
+    auth_keys = tuple(pull_secret.get("auths", {}).keys())
+    return all(
+        any(_auth_entry_covers_registry(auth_key, registry) for auth_key in auth_keys)
+        for registry in registries
+    )
 
 
 def _merge_pull_secret_auths(
@@ -234,15 +248,9 @@ def wait_for_rhoai_pull_secret_ready(
 
     while time.monotonic() < deadline:
         try:
-            secret = oc_get_json(
-                "secret",
-                name=RHOAI_PULL_SECRET_NAME,
-                namespace=RHOAI_PULL_SECRET_NAMESPACE,
-            )
-            decoded = _decode_pull_secret(secret)
-            if not _registries_present(decoded, (*RHOAI_CATALOG_REGISTRIES, *RHOAI_REGISTRIES)):
+            pull_secret = _current_pull_secret_json()
+            if not _registries_present(pull_secret, (*RHOAI_CATALOG_REGISTRIES, *RHOAI_REGISTRIES)):
                 raise RuntimeError("required RHOAI registries are not yet present in pull secret")
-
             mcp_status = oc(
                 "get",
                 "mcp",
@@ -283,11 +291,9 @@ def prepare_rhoai_pull_secret(custom_catalog: RhoaiCustomCatalogConfig) -> None:
         )
 
     current_secret = _current_pull_secret_json()
-    current_secret_text = json.dumps(current_secret, sort_keys=True)
-
     required_registries = (*RHOAI_CATALOG_REGISTRIES, *RHOAI_REGISTRIES)
 
-    if _registries_present(current_secret_text, required_registries):
+    if _registries_present(current_secret, required_registries):
         logger.info(
             "RHOAI registries already present in cluster pull secret: %s",
             ", ".join(required_registries),
