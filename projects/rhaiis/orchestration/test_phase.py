@@ -458,9 +458,10 @@ def _upload_predictor_log(run_uuid: str) -> None:
     from projects.core.library import config
     from projects.rhaiis.postprocess.s3_dashboard import upload_predictor_log_to_s3
 
-    log_path = Path(env.ARTIFACT_DIR) / "artifacts" / "inferenceservice.pods.logs"
-    if not log_path.exists():
-        logger.info("No predictor pod log found at %s, skipping upload", log_path)
+    matches = sorted(Path(env.ARTIFACT_DIR).glob("*__capture_isvc_state/artifacts/inferenceservice.pods.logs"))
+    log_path = matches[-1] if matches else None
+    if not log_path or not log_path.exists():
+        logger.info("No predictor pod log found under %s, skipping upload", env.ARTIFACT_DIR)
         return
 
     csv_dashboard_cfg = config.project.get_config("caliper.postprocess.csv_dashboard", {})
