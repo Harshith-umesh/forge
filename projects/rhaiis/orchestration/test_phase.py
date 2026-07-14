@@ -94,10 +94,11 @@ def _run_test(
     fjob_ns = os.environ.get("FOURNOS_WORKLOAD_NAMESPACE", "psap-automation")
     if fjob_name:
         try:
+            mgmt_env = {k: v for k, v in os.environ.items() if k != "KUBECONFIG"}
             subprocess.run(
                 ["oc", "annotate", "fournosjob", fjob_name, "-n", fjob_ns,
                  f"rhaiis.run-uuid={run_uuid}", "--overwrite"],
-                check=False, capture_output=True, timeout=10,
+                check=False, capture_output=True, timeout=10, env=mgmt_env,
             )
             logger.info("Annotated FournosJob %s with run-uuid=%s", fjob_name, run_uuid)
         except Exception:
