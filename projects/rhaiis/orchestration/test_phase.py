@@ -205,6 +205,11 @@ def _run_test(
     finally:
         _capture_and_cleanup(deployment_name, namespace)
 
+    try:
+        _upload_predictor_log(run_uuid)
+    except Exception:
+        logger.warning("Predictor log upload failed; continuing", exc_info=True)
+
     return 0
 
 
@@ -283,11 +288,6 @@ def _run_workload_benchmark(
             _generate_and_sync_dashboard_csv(model_cfg, accelerator_key, workload_key, vllm_args, run_uuid=run_uuid)
         except Exception:
             logger.warning("Dashboard CSV generation/sync failed; continuing", exc_info=True)
-
-    try:
-        _upload_predictor_log(run_uuid)
-    except Exception:
-        logger.warning("Predictor log upload failed; continuing", exc_info=True)
 
 
 def _create_test_labels(
