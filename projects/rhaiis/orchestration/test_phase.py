@@ -85,7 +85,8 @@ def _run_test(
     from projects.rhaiis.toolbox.deploy_kserve_isvc.main import run as deploy_kserve_isvc
     from projects.rhaiis.toolbox.wait_isvc_ready.main import run as wait_isvc_ready
 
-    run_uuid = str(_uuid_mod.uuid4())
+    from projects.core.library import config as _cfg
+    run_uuid = _cfg.project.get_config("tests.rhaiis.run_uuid", "") or str(_uuid_mod.uuid4())
     logger.info("Run UUID for this job: %s", run_uuid)
 
     benchmark_timeout = benchmark_cfg.get("timeout", 14400)
