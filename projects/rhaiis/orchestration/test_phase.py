@@ -676,10 +676,19 @@ def _upload_profiler_traces(
     from projects.core.library import config
     from projects.rhaiis.postprocess.s3_dashboard import upload_profiler_traces_to_s3
 
-    traces_dir = Path(env.ARTIFACT_DIR) / "artifacts" / "traces"
-    if not traces_dir.exists() or not any(traces_dir.iterdir()):
+    trace_files = sorted(Path(env.ARTIFACT_DIR).glob("*__copy_profiler_traces/artifacts/traces/trace_*"))
+    if not trace_files:
         logger.info("No profiler traces to upload")
         return
+
+    traces_dir = trace_files[0].parent
+    if len(set(f.parent for f in trace_files)) > 1:
+        traces_dir = Path(env.ARTIFACT_DIR) / "artifacts" / "traces_combined"
+        traces_dir.mkdir(parents=True, exist_ok=True)
+        for f in trace_files:
+            import shutil
+            shutil.copy2(f, traces_dir / f.name)
+    logger.info("Found %d profiler trace files in %s", len(trace_files), traces_dir)
 
     version = config.project.get_config("tests.rhaiis.version", "")
     if not version:
