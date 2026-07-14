@@ -9,6 +9,16 @@ from projects.rhaiis.orchestration import runtime_config
 
 logger = logging.getLogger(__name__)
 
+_K8S_NAME_MAX = 63
+
+
+def _guidellm_job_name(prefix: str, workload_key: str, deployment_name: str) -> str:
+    """Build a K8s-safe job name: {prefix}-{workload_key}-{model}, trimming model to fit."""
+    base = f"{prefix}-{workload_key}-"
+    available = _K8S_NAME_MAX - len(base)
+    model = deployment_name[:available] if available > 0 else ""
+    return f"{base}{model}".rstrip("-")
+
 
 def run(
     *,
@@ -244,7 +254,7 @@ def _run_workload_benchmark(
         pre_index = env.next_artifact_index()
         run_guidellm_benchmark(
             endpoint_url=f"{endpoint_url}/v1",
-            name=f"guidellm-{deployment_name}-{workload_key}",
+            name=_guidellm_job_name("guidellm-bench", workload_key, deployment_name),
             namespace=namespace,
             image=benchmark_image,
             timeout=benchmark_timeout,
@@ -557,7 +567,7 @@ def _run_warmup_step(
     try:
         run_guidellm_benchmark(
             endpoint_url=f"{endpoint_url}/v1",
-            name=f"guidellm-warmup-{deployment_name}-{workload_key}",
+            name=_guidellm_job_name("guidellm-warmup", workload_key, deployment_name),
             namespace=namespace,
             image=benchmark_cfg.get("image", "ghcr.io/vllm-project/guidellm:v0.6.0"),
             timeout=benchmark_timeout,
@@ -621,7 +631,7 @@ def _run_profiler_step(
         try:
             run_guidellm_benchmark(
                 endpoint_url=f"{endpoint_url}/v1",
-                name=f"guidellm-profiler-{deployment_name}-{workload_key}-{gate_value}",
+                name=_guidellm_job_name("guidellm-profiler", workload_key, deployment_name),
                 namespace=namespace,
                 image=benchmark_cfg.get("image", "ghcr.io/vllm-project/guidellm:v0.6.0"),
                 timeout=benchmark_timeout,
