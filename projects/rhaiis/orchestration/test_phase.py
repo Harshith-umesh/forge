@@ -85,6 +85,9 @@ def _run_test(
     from projects.rhaiis.toolbox.deploy_kserve_isvc.main import run as deploy_kserve_isvc
     from projects.rhaiis.toolbox.wait_isvc_ready.main import run as wait_isvc_ready
 
+    run_uuid = str(_uuid_mod.uuid4())
+    logger.info("Run UUID for this job: %s", run_uuid)
+
     benchmark_timeout = benchmark_cfg.get("timeout", 14400)
     wait_guidellm_benchmark_task._retry_config["attempts"] = max(1, benchmark_timeout // 10)
 
@@ -177,6 +180,7 @@ def _run_test(
                 namespace=namespace,
                 endpoint_url=endpoint_url,
                 benchmark_timeout=benchmark_timeout,
+                run_uuid=run_uuid,
             )
 
         try:
@@ -219,9 +223,9 @@ def _run_workload_benchmark(
     namespace: str,
     endpoint_url: str,
     benchmark_timeout: int,
+    run_uuid: str,
 ) -> None:
     """Run benchmark and post-processing for a single workload."""
-    run_uuid = str(_uuid_mod.uuid4())
     logger.info("=== Benchmark %s (UUID: %s) ===", workload_key, run_uuid)
 
     workload = runtime_config.get_workload(workload_key)
