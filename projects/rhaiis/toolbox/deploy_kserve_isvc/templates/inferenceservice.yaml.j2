@@ -10,6 +10,7 @@ metadata:
     prometheus.io/port: "8080"
   labels:
     opendatahub.io/dashboard: "true"
+    vllm-profiler/enabled: "true"
   name: {{ args.deployment_name }}
   namespace: {{ args.namespace }}
 spec:
