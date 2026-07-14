@@ -41,7 +41,6 @@ def setup_directories(args, ctx):
     shell.mkdir("src")
     shell.mkdir("artifacts")
     ctx.display_name = args.display_name or args.catalog_source_name
-    ctx.publisher = args.publisher or ""
     return f"Prepared directories for {ctx.display_name}"
 
 
