@@ -89,6 +89,20 @@ def _run_test(
     run_uuid = _cfg.project.get_config("tests.rhaiis.run_uuid", "") or str(_uuid_mod.uuid4())
     logger.info("Run UUID for this job: %s", run_uuid)
 
+    import os, subprocess
+    fjob_name = os.environ.get("FJOB_NAME", "")
+    fjob_ns = os.environ.get("FOURNOS_WORKLOAD_NAMESPACE", "psap-automation")
+    if fjob_name:
+        try:
+            subprocess.run(
+                ["oc", "annotate", "fournosjob", fjob_name, "-n", fjob_ns,
+                 f"rhaiis.run-uuid={run_uuid}", "--overwrite"],
+                check=False, capture_output=True, timeout=10,
+            )
+            logger.info("Annotated FournosJob %s with run-uuid=%s", fjob_name, run_uuid)
+        except Exception:
+            logger.debug("Failed to annotate FournosJob with UUID", exc_info=True)
+
     benchmark_timeout = benchmark_cfg.get("timeout", 14400)
     wait_guidellm_benchmark_task._retry_config["attempts"] = max(1, benchmark_timeout // 10)
 
