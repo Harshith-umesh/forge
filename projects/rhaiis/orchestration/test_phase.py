@@ -681,6 +681,25 @@ def _derive_profiler_label(workload: dict) -> str:
     return f"isl{isl}_osl{osl}"
 
 
+def _infer_profile_labels_from_traces(trace_files: list) -> list[str]:
+    """Extract unique profile labels from trace filenames.
+
+    Filenames follow the pattern: trace_rank{R}_pid{P}_run{LABEL}_range{S}-{E}.json
+    The {LABEL} portion is the gate value used during profiling (e.g. 'isl1000_osl1000').
+    """
+    import re
+
+    pattern = re.compile(r"_run(.+?)_range\d+-\d+")
+    labels: list[str] = []
+    seen: set[str] = set()
+    for f in trace_files:
+        m = pattern.search(f.name)
+        if m and m.group(1) not in seen:
+            seen.add(m.group(1))
+            labels.append(m.group(1))
+    return labels
+
+
 def _upload_profiler_traces(
     model_cfg: dict,
     accelerator: str,
@@ -711,13 +730,18 @@ def _upload_profiler_traces(
         logger.info("No version configured, skipping profiler trace upload")
         return
 
+    profile_labels = profiler_cfg.get("labels", [])
+    if not profile_labels:
+        profile_labels = _infer_profile_labels_from_traces(trace_files)
+        logger.info("Inferred profile labels from trace filenames: %s", profile_labels)
+
     result = upload_profiler_traces_to_s3(
         traces_dir,
         model_name=model_cfg.get("hf_model_id", ""),
         accelerator=accelerator,
         tp_size=int(vllm_args.get("tensor-parallel-size", 1)),
         version=version,
-        profile_labels=profiler_cfg.get("labels", []),
+        profile_labels=profile_labels,
         s3_bucket=profiler_cfg.get("s3_bucket", "psap-dashboard-data"),
         s3_prefix=profiler_cfg.get("s3_prefix", "pytorch-profiles/rhaiis"),
         vault_name=profiler_cfg.get("vault", "psap-forge-dashboard-s3"),
