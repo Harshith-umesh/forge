@@ -5,7 +5,7 @@ import logging
 from projects.cluster.toolbox.cleanup_operators import (
     main as cleanup_operators_command,
 )
-from projects.core.dsl.utils.k8s import oc_resource_exists
+from projects.core.dsl.utils.k8s import oc, oc_resource_exists
 from projects.llm_d.toolbox.cleanup_test_resources import main as cleanup_test_resources_command
 
 logger = logging.getLogger(__name__)
@@ -73,6 +73,8 @@ def cleanup_operators(*, dry_run: bool = False) -> None:
         dry_run=dry_run,
     )
 
+    _cleanup_stale_crds(platform, dry_run=dry_run)
+
 
 def _identify_operators_to_delete(platform: dict, cleanup_config: dict) -> list[dict]:
     """Identify which operators should be cleaned up based on configuration."""
@@ -112,3 +114,27 @@ def _identify_operators_to_delete(platform: dict, cleanup_config: dict) -> list[
 
     logger.info(f"Identified {len(operators_to_delete)} operators for deletion")
     return operators_to_delete
+
+
+def _cleanup_stale_crds(platform: dict, *, dry_run: bool = False) -> None:
+    """Delete CRDs listed under cleanup_crds in operator specs.
+
+    Some operators (e.g. rhcl-operator) leave CRDs with stored API versions
+    that block reinstallation on the next run.
+    """
+    operators = platform.get("operators", {})
+    if not isinstance(operators, dict):
+        return
+
+    for package_name, operator_spec in operators.items():
+        if not isinstance(operator_spec, dict):
+            continue
+        for crd in operator_spec.get("cleanup_crds", []):
+            if not oc_resource_exists("crd", crd):
+                logger.info("CRD %s not present, skipping", crd)
+                continue
+            if dry_run:
+                logger.info("[DRY RUN] Would delete CRD %s (from %s)", crd, package_name)
+                continue
+            logger.info("Deleting stale CRD %s (from %s)", crd, package_name)
+            oc("delete", "crd", crd, "--ignore-not-found=true", "--timeout=60s", check=False)
