@@ -3,11 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from typing import Any
+from pathlib import Path
 
 from projects.cluster.toolbox.bootstrap_lws_operator import main as bootstrap_lws_operator
-from projects.cluster.toolbox.cluster_deploy_operator import main as cluster_deploy_operator
-from projects.cluster.toolbox.deploy_custom_catalog import main as deploy_custom_catalog
 from projects.cluster.toolbox.wait_for_crds import main as wait_for_crds_command
 from projects.core.dsl.utils import slugify_identifier, truncate_k8s_name
 from projects.core.dsl.utils.k8s import (
@@ -29,25 +27,20 @@ from projects.llm_d.toolbox.capture_prepare_state.main import (
     run as capture_prepare_state_toolbox_run,
 )
 from projects.llm_d.toolbox.ensure_gateway import main as ensure_gateway_command
+from projects.rhoai.library.deploy import (
+    ensure_operator_subscription,
+    operator_spec_by_package,
+)
+from projects.rhoai.library.deploy import (
+    prepare_rhoai_operator as rhoai_prepare_rhoai_operator,
+)
 from projects.rhoai.toolbox.apply_datasciencecluster import main as apply_datasciencecluster_command
 from projects.rhoai.toolbox.wait_datasciencecluster_ready import (
     main as wait_datasciencecluster_ready_command,
 )
 
 logger = logging.getLogger(__name__)
-
-
-def operator_spec_by_package(platform: dict[str, Any], package: str) -> dict[str, Any]:
-    operators = platform["operators"]
-    if isinstance(operators, dict):
-        if package in operators:
-            return {"package": package, **operators[package]}
-        raise KeyError(f"Unknown operator package in llm_d platform config: {package}")
-
-    for operator_spec in operators:
-        if operator_spec["package"] == package:
-            return operator_spec
-    raise KeyError(f"Unknown operator package in llm_d platform config: {package}")
+RHOAI_ICSP_MANIFEST = Path(__file__).resolve().parent / "manifests" / "rhoai-registry-icsp.yaml"
 
 
 def verify_oc_access() -> None:
@@ -76,54 +69,9 @@ def verify_cluster_version() -> None:
         )
 
 
-def ensure_operator_subscription(operator_spec: dict[str, str]) -> dict[str, object]:
-    return cluster_deploy_operator.run(
-        package_name=operator_spec["package"],
-        target_namespace=operator_spec["namespace"],
-        source_name=operator_spec["source"],
-        channel=operator_spec["channel"],
-        source_namespace=operator_spec.get("source_namespace", "openshift-marketplace"),
-        display_name=operator_spec.get("display_name", operator_spec["package"]),
-        artifact_dirname_suffix=f"_{operator_spec['package']}",
-    )
-
-
-def deploy_rhoai_custom_catalog(*, rhoai: dict) -> int:
-    custom_catalog = rhoai["custom_catalog"]
-    if not custom_catalog["enabled"]:
-        logger.info("RHOAI custom catalog disabled; using default catalog source")
-        return 0
-
-    if not custom_catalog.get("image"):
-        raise RuntimeError("RHOAI custom catalog is enabled but no image was configured")
-
-    return deploy_custom_catalog.run(
-        catalog_source_name=custom_catalog["name"],
-        catalog_namespace=custom_catalog["namespace"],
-        catalog_image=custom_catalog["image"],
-        display_name=custom_catalog.get("display_name", custom_catalog["name"]),
-    )
-
-
-def rhoai_operator_spec(
-    *,
-    rhoai: dict,
-    operator_spec: dict[str, str],
-) -> dict[str, str]:
-    custom_catalog = rhoai["custom_catalog"]
-    if not custom_catalog["enabled"]:
-        return operator_spec
-
-    updated_spec = dict(operator_spec)
-    updated_spec["source"] = custom_catalog["name"]
-    updated_spec["source_namespace"] = custom_catalog["namespace"]
-    return updated_spec
-
-
-def prepare_rhcl_operator() -> None:
-    platform = runtime_config.get_platform_config()
-    operator_spec = operator_spec_by_package(platform, "rhcl-operator")
-    ensure_operator_subscription(operator_spec)
+def apply_rhoai_icsp() -> None:
+    logger.info("Applying RHOAI ICSP manifest: %s", RHOAI_ICSP_MANIFEST)
+    oc("apply", "-f", str(RHOAI_ICSP_MANIFEST))
 
 
 def prepare_cert_manager() -> None:
@@ -179,20 +127,10 @@ def prepare_gpu_operator() -> None:
 
 def prepare_rhoai_operator() -> None:
     platform = runtime_config.get_platform_config()
-    prepare_rhcl_operator()
-    deploy_rhoai_custom_catalog(rhoai=platform["rhoai"])
-    operator_spec = operator_spec_by_package(platform, "rhods-operator")
-    operator_spec = rhoai_operator_spec(rhoai=platform["rhoai"], operator_spec=operator_spec)
-    ensure_operator_subscription(operator_spec)
-    ensure_required_crds_before_dsc()
-
-
-def ensure_required_crds_before_dsc() -> None:
-    platform = runtime_config.get_platform_config()
-    rhoai = platform["rhoai"]
-    wait_for_crds_command.run(
-        crd_names=rhoai["required_crds_before_dsc"],
-        display_name="RHOAI pre-DSC CRDs",
+    rhoai_prepare_rhoai_operator(
+        platform=platform,
+        rhoai=platform["rhoai"],
+        icsp_applier=apply_rhoai_icsp,
     )
 
 

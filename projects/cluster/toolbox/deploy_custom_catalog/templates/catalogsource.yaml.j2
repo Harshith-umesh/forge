@@ -7,3 +7,6 @@ spec:
   sourceType: grpc
   image: {{ args.catalog_image }}
   displayName: {{ ctx.display_name }}
+{% if args.publisher %}
+  publisher: {{ args.publisher }}
+{% endif %}

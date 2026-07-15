@@ -16,6 +16,7 @@ from projects.guidellm.toolbox.run_guidellm_benchmark import main as run_guidell
 from projects.guidellm.toolbox.run_smoke_request import main as run_smoke_request_command
 from projects.kserve.toolbox.capture_llmisvc_state import main as capture_llmisvc_state
 from projects.kserve.toolbox.deploy_llmisvc import main as deploy_llmisvc
+from projects.kserve.toolbox.wait_kserve_ready import main as wait_kserve_ready
 from projects.llm_d.orchestration.prepare_phase import prepare_model_cache
 from projects.llm_d.orchestration.render_inference_service import (
     render_inference_service_from_parts,
@@ -177,10 +178,14 @@ def deploy_inference_service() -> str:
     # Step 1: Ensure model cache is ready
     _prepare_model_cache()
 
-    # Step 2: Build and write inference service manifest
+    # Step 2: Wait for the serving control plane to settle before creating the service.
+    rhoai_namespace = platform["rhoai"]["namespace"]
+    wait_kserve_ready.run(namespace=rhoai_namespace)
+
+    # Step 3: Build and write inference service manifest
     manifest_path = _build_inference_service_manifest()
 
-    # Step 3: Deploy the service and wait for endpoint
+    # Step 4: Deploy the service and wait for endpoint
     logger.info("Deploying LLMInferenceService from manifest: %s", manifest_path)
     endpoint_url = deploy_llmisvc.run(
         namespace=namespace,

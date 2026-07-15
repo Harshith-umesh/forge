@@ -17,6 +17,7 @@ def run(
     catalog_image: str,
     *,
     display_name: str = "",
+    publisher: str = "",
 ) -> int:
     """
     Deploy a CatalogSource from a custom index image and wait for it to become READY.
@@ -26,6 +27,7 @@ def run(
         catalog_namespace: Namespace where the CatalogSource will be deployed
         catalog_image: Index image backing the CatalogSource
         display_name: Optional human-friendly label for logs
+        publisher: Optional publisher label for the CatalogSource
     """
 
     execute_tasks(locals())
