@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import time
+import yaml
 
-from projects.core.dsl import entrypoint, execute_tasks, task
+from projects.core.dsl import entrypoint, execute_tasks, retry, task
 from projects.core.dsl.utils.k8s import oc
 
 SERVING_CONTROL_PLANE_DEPLOYMENTS = (
@@ -13,7 +13,6 @@ SERVING_CONTROL_PLANE_DEPLOYMENTS = (
     "model-serving-api",
     "odh-model-controller",
 )
-SERVING_CONTROL_PLANE_STABILIZATION_SECONDS = 45
 
 
 @entrypoint
@@ -66,15 +65,46 @@ def wait_for_deployments(args, ctx):
     return "All serving control plane deployments are available"
 
 
+@retry(attempts=40, delay=5, backoff=1.0)
 @task
-def wait_for_stabilization(args, ctx):
-    """Wait for serving control plane to stabilize after becoming available"""
+def probe_webhook_ready(args, ctx):
+    """Probe the admission webhook with a dry-run apply to confirm it is serving"""
 
-    # The webhook deployments can report Available before leader election and informer
-    # startup finish, which makes the first LLMInferenceService create race the webhook.
-    time.sleep(SERVING_CONTROL_PLANE_STABILIZATION_SECONDS)
+    probe_manifest = {
+        "apiVersion": "serving.kserve.io/v1alpha1",
+        "kind": "LLMInferenceService",
+        "metadata": {
+            "name": "forge-webhook-probe",
+            "namespace": args.namespace,
+        },
+        "spec": {
+            "model": {
+                "uri": "hf://probe/model",
+                "name": "probe",
+            },
+        },
+    }
 
-    return f"Waited {SERVING_CONTROL_PLANE_STABILIZATION_SECONDS}s for stabilization"
+    probe_dir = args.artifact_dir / "src"
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    probe_path = probe_dir / "webhook-probe.yaml"
+    with open(probe_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(probe_manifest, f, sort_keys=False)
+
+    result = oc(
+        "apply",
+        "--dry-run=server",
+        "-f",
+        str(probe_path),
+        "-n",
+        args.namespace,
+        check=False,
+    )
+
+    if result.returncode == 0:
+        return "Webhook is ready (dry-run accepted)"
+
+    return False
 
 
 if __name__ == "__main__":
