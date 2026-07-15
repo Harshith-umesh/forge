@@ -299,6 +299,35 @@ def get_deployment_profile() -> dict[str, Any]:
     return resolved_profile
 
 
+def get_pd_config() -> dict[str, Any]:
+    """Get P/D configuration from active deployment profile."""
+    profile = get_deployment_profile()
+    return profile.get("pd_config", {})
+
+
+def get_prefill_pod_count() -> int:
+    """Get number of prefill pods for current deployment profile."""
+    pd_config = get_pd_config()
+    return pd_config.get("prefill_pods", 1)
+
+
+def get_decode_pod_count() -> int:
+    """Get number of decode pods for current deployment profile."""
+    pd_config = get_pd_config()
+    return pd_config.get("decode_pods", 1)
+
+
+def get_scheduler_config() -> str:
+    """Get scheduler configuration for current deployment profile."""
+    pd_config = get_pd_config()
+    return pd_config.get("scheduler_config", "default")
+
+
+def is_pd_deployment() -> bool:
+    """Check if current deployment profile is a P/D deployment."""
+    return bool(get_pd_config())
+
+
 def get_smoke_request() -> dict[str, Any]:
     """Get the smoke request configuration"""
     smoke_request_key = config.project.get_config("runtime.smoke_request_key")
