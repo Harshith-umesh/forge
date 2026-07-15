@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 
-from projects.core.dsl import entrypoint, execute_tasks, retry, task
+from projects.core.dsl import always, entrypoint, execute_tasks, retry, task
 from projects.core.dsl.utils import write_json, write_text
 from projects.core.dsl.utils.k8s import (
     oc,
@@ -129,7 +129,7 @@ def create_smoke_pod(args, ctx):
     return f"Created smoke pod {ctx.pod_name}"
 
 
-@retry(attempts=60, delay=5, backoff=1.0)
+@retry(attempts=12, delay=5, backoff=1.0)
 @task
 def wait_smoke_pod_running(args, ctx):
     """Wait for smoke pod to be running"""
@@ -224,9 +224,60 @@ def execute_smoke_request(args, ctx):
     return "Smoke request completed successfully"
 
 
+@always
+@task
+def capture_smoke_pod_debug_info(args, ctx):
+    """Capture pod YAML and description for debugging (always runs)"""
+
+    if not hasattr(ctx, "pod_name"):
+        return "No pod name available for debug capture"
+
+    # Ensure artifacts directory exists
+    artifacts_dir = args.artifact_dir / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        # Capture pod YAML
+        yaml_result = oc(
+            "get",
+            "pod",
+            ctx.pod_name,
+            "-n",
+            args.namespace,
+            "-o",
+            "yaml",
+            check=False,
+        )
+        if yaml_result.returncode == 0 and yaml_result.stdout:
+            write_text(artifacts_dir / f"{ctx.pod_name}.yaml", yaml_result.stdout)
+
+        # Capture pod description
+        desc_result = oc(
+            "describe",
+            "pod",
+            ctx.pod_name,
+            "-n",
+            args.namespace,
+            check=False,
+        )
+        if desc_result.returncode == 0 and desc_result.stdout:
+            write_text(artifacts_dir / f"{ctx.pod_name}.description.txt", desc_result.stdout)
+
+        return f"Captured debug info for pod {ctx.pod_name}"
+
+    except Exception as e:
+        # Don't fail the task if debug capture fails
+        logger.warning(f"Failed to capture debug info for pod {ctx.pod_name}: {e}")
+        return f"Failed to capture debug info: {e}"
+
+
+@always
 @task
 def cleanup_smoke_pod(args, ctx):
     """Delete the smoke pod after test completion"""
+
+    if not hasattr(ctx, "pod_name"):
+        return "No pod name available for cleanup"
 
     oc(
         "delete",
