@@ -24,7 +24,7 @@ def run(
     namespace: str,
     endpoint_url: str,
     pod_name: str = "llm-d-smoke",
-    client_image: str = "curlimages/curl:8.11.1",
+    client_image: str = "quay.io/curl/curl:8.21.0",
     endpoint_path: str = "/v1/completions",
     request_timeout_seconds: int = 60,
     served_model_name: str,
