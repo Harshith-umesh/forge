@@ -264,7 +264,7 @@ def create_copy_pod(args, ctx):
     return f"Created copy pod {ctx.benchmark_name}-copy"
 
 
-@retry(attempts=24, delay=5, backoff=1.0)
+@retry(attempts=60, delay=5, backoff=1.0)
 @task
 def wait_copy_pod_ready(args, ctx):
     """Wait for copy pod to be ready"""
