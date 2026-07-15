@@ -48,6 +48,8 @@ def cleanup():
     ns = runtime_config.get_namespace()
     logger.info(f"Cleaning up rhaiis benchmark resources in {ns}")
 
+    oc("delete", "inferenceservice", "--all", "-n", ns, "--ignore-not-found", check=False)
+    oc("delete", "servingruntime", "--all", "-n", ns, "--ignore-not-found", check=False)
     oc("delete", "job", "--all", "-n", ns, "--ignore-not-found", check=False)
     oc("delete", "pod", "--all", "-n", ns, "--ignore-not-found", check=False)
     logger.info("Cleanup complete")
