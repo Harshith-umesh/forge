@@ -20,8 +20,7 @@ profile3:
 
 profile4:
   data: "prompt_tokens=8000,output_tokens=1000"
-  rates: [1, 25, 50, 75, 100]
-  max_seconds: 450
+  rates: [1]
+  max_seconds: 45
   samples: 50
-  vllm_args:
-    max-model-len: 10000
+
