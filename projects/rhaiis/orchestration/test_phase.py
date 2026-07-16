@@ -418,7 +418,7 @@ def _generate_psap_payload(
 
 def _generate_and_sync_dashboard_csv(
     model_cfg: dict,
-    accelerator: str,
+    accelerator_key: str,
     workload_key: str,
     vllm_args: dict,
     *,
@@ -428,6 +428,9 @@ def _generate_and_sync_dashboard_csv(
 
     from projects.core.library import config
     from projects.rhaiis.postprocess.csv_export import find_psap_files, generate_dashboard_csv
+
+    # Use chip family only (e.g. "H200") — cluster_tag is only for run ID in the CSV
+    accelerator = accelerator_key.split("_")[0].upper() if "_" in accelerator_key else accelerator_key.upper()
 
     psap_files = find_psap_files(Path(env.ARTIFACT_DIR))
     if not psap_files:
@@ -473,7 +476,7 @@ def _generate_and_sync_dashboard_csv(
 
 def _run_standalone_analysis(
     model_cfg: dict,
-    accelerator: str,
+    accelerator_key: str,
     vllm_args: dict,
     *,
     run_uuid: str = "",
@@ -505,6 +508,9 @@ def _run_standalone_analysis(
     if not credentials_path:
         logger.warning("AWS credentials not available, skipping standalone analysis")
         return
+
+    # CSV stores just the chip family (e.g. "H200"), not the full accelerator_key with cluster tag
+    accelerator = accelerator_key.split("_")[0].upper() if "_" in accelerator_key else accelerator_key.upper()
 
     consolidated_path = None
     current_csv_path = None
