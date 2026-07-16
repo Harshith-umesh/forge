@@ -200,13 +200,26 @@ def capture_cleanup_state(args, ctx):
     artifacts_dir = args.artifact_dir / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
 
-    result = oc("get", "csv", "-A", "-o", "wide", check=False, log_stdout=False)
-    if result.returncode == 0 and result.stdout:
-        (artifacts_dir / "remaining-csvs.txt").write_text(result.stdout, encoding="utf-8")
+    oc(
+        "get",
+        "csv",
+        "-A",
+        "-o",
+        "wide",
+        check=False,
+        log_stdout=False,
+        stdout_dest=artifacts_dir / "remaining-csvs.txt",
+    )
 
-    result = oc("get", "namespaces", "-o", "wide", check=False, log_stdout=False)
-    if result.returncode == 0 and result.stdout:
-        (artifacts_dir / "remaining-namespaces.txt").write_text(result.stdout, encoding="utf-8")
+    oc(
+        "get",
+        "namespaces",
+        "-o",
+        "wide",
+        check=False,
+        log_stdout=False,
+        stdout_dest=artifacts_dir / "remaining-namespaces.txt",
+    )
 
     return "Captured post-cleanup state"
 
