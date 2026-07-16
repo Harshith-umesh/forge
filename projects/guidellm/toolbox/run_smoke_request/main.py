@@ -238,7 +238,7 @@ def capture_smoke_pod_debug_info(args, ctx):
 
     try:
         # Capture pod YAML
-        yaml_result = oc(
+        oc(
             "get",
             "pod",
             ctx.pod_name,
@@ -248,20 +248,17 @@ def capture_smoke_pod_debug_info(args, ctx):
             "yaml",
             check=False,
         )
-        if yaml_result.returncode == 0 and yaml_result.stdout:
-            write_text(artifacts_dir / f"{ctx.pod_name}.yaml", yaml_result.stdout)
 
         # Capture pod description
-        desc_result = oc(
+        oc(
             "describe",
             "pod",
             ctx.pod_name,
             "-n",
             args.namespace,
             check=False,
+            stdout_dest=artifacts_dir / f"{ctx.pod_name}.description.txt",
         )
-        if desc_result.returncode == 0 and desc_result.stdout:
-            write_text(artifacts_dir / f"{ctx.pod_name}.description.txt", desc_result.stdout)
 
         return f"Captured debug info for pod {ctx.pod_name}"
 
