@@ -140,7 +140,12 @@ def _run_test(
 
         profiler_cfg = runtime_config.get_profiler_config()
         profiler_enabled = profiler_cfg.get("enabled", False)
-        warmup_enabled = config.project.get_config("tests.rhaiis.warmup", True)
+        run_benchmark = config.project.get_config("tests.rhaiis.run_benchmark", True)
+        warmup_enabled = (
+            config.project.get_config("tests.rhaiis.warmup", True)
+            and run_benchmark
+            and not profiler_enabled
+        )
 
         logger.info(
             "Running %d workload(s): %s", len(workload_keys), workload_keys,
