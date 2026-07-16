@@ -1,5 +1,36 @@
 # Fournos Launcher Orchestration Changelog
 
+## 2026-07-13 - Clusterless Mode and New Directives
+
+### New PR Directives
+- **Clusterless Directive**: Added `/clusterless` directive to enable clusterless mode execution
+  - **Effect**: Sets `fournos.job.exclusive=false` and `fournos.job.clusterless=true`
+  - **Validation**: Prevents conflicting usage with `/exclusive true`
+- **Fournos Environment Directive**: Added `/fournos` directive for namespace targeting
+  - **Format**: `/fournos wip` or `/fournos staging`
+  - **Effect**: Sets `fournos.namespace` to `psap-automation-{environment}`
+  - **Validation**: Restricts to `wip` and `staging` environments only
+
+### Enhanced Validation
+- **Mutual Exclusivity**: Added comprehensive validation to prevent `clusterless=true` and `exclusive=true` conflicts
+  - **PR Parser Level**: Catches directive conflicts during comment parsing
+  - **CLI Level**: Validates configuration before command execution
+  - **Submit Level**: Final validation before job submission
+- **Optional Cluster**: Made `/cluster` directive optional when `/clusterless` is used
+  - **Smart Validation**: Requires cluster specification only when not in clusterless mode
+  - **Clear Error Messages**: Improved error messaging to explain clusterless option
+
+### Files Modified
+- `pr_args.py` - Added `/clusterless` and `/fournos` directive handlers with validation
+- `cli.py` - Enhanced cluster requirement logic and added conflict validation
+- `submit.py` - Added clusterless/exclusive mutual exclusivity checks
+
+### Benefits
+- **Flexible Execution**: Enables both cluster-targeted and clusterless job execution modes
+- **Environment Targeting**: Simplified namespace selection for different deployment environments
+- **Robust Validation**: Prevents configuration conflicts with clear, actionable error messages
+- **Backward Compatibility**: Maintains existing directive functionality while adding new capabilities
+
 ## 2026-06-30 - Notification System Integration
 
 ### Job Completion Notifications

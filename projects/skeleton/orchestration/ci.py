@@ -102,6 +102,17 @@ def preflight(ctx) -> int:
     return 0
 
 
+@main.command()
+@click.pass_context
+@ci_lib.safe_ci_entrypoint
+def launcher(ctx) -> int:
+    """Launcher job - Deploys fournos jobs."""
+
+    logger.warning("Nothing so far for the launcher job")
+
+    return 0
+
+
 main.add_command(caliper_export_entrypoint)
 main.add_command(caliper_replot_entrypoint)
 
