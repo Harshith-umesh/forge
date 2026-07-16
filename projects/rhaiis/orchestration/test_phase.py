@@ -263,6 +263,10 @@ def _run_workload_benchmark(
     main_benchmark_dir = None
     if not run_benchmark:
         logger.info("run_benchmark=false, skipping main benchmark")
+        try:
+            _run_standalone_analysis(model_cfg, accelerator_key, vllm_args, run_uuid=run_uuid)
+        except Exception:
+            logger.warning("Standalone analysis failed; continuing", exc_info=True)
     else:
         logger.info("Running benchmark at rates=%s for workload=%s", rates, workload_key)
 
@@ -460,6 +464,91 @@ def _generate_and_sync_dashboard_csv(
         return
 
     _run_regression_check(csv_path, compare_version, version, model_cfg, accelerator, run_uuid=run_uuid)
+
+
+def _run_standalone_analysis(
+    model_cfg: dict,
+    accelerator: str,
+    vllm_args: dict,
+    *,
+    run_uuid: str = "",
+) -> None:
+    """Run regression check + agent analysis using existing S3 data (no new benchmark)."""
+    import tempfile
+    from pathlib import Path
+
+    from projects.caliper.cli.s3_export import create_s3_client, get_aws_credentials
+    from projects.core.library import config
+
+    agent_cfg = config.project.get_config("rhaiis.agent_analysis", {})
+    if not agent_cfg.get("enabled", False):
+        logger.info("Standalone analysis skipped: agent_analysis not enabled")
+        return
+
+    version = config.project.get_config("tests.rhaiis.version", "")
+    compare_version = config.project.get_config("tests.rhaiis.compare_version", "")
+    if not version or not compare_version:
+        logger.info("Standalone analysis skipped: version or compare_version not configured")
+        return
+
+    csv_dashboard_cfg = config.project.get_config("caliper.postprocess.csv_dashboard", {})
+    s3_bucket = csv_dashboard_cfg.get("s3_bucket", "psap-dashboard-data")
+    s3_key = csv_dashboard_cfg.get("s3_key", "staging/rhaiis-dashboard/consolidated_dashboard.csv")
+    vault_name = csv_dashboard_cfg.get("vault", "psap-forge-dashboard-s3")
+
+    credentials_path = get_aws_credentials(vault_name, "aws.credentials")
+    if not credentials_path:
+        logger.warning("AWS credentials not available, skipping standalone analysis")
+        return
+
+    consolidated_path = None
+    current_csv_path = None
+    try:
+        import pandas as pd
+
+        s3 = create_s3_client(credentials_path)
+        with tempfile.NamedTemporaryFile(mode="w+b", suffix=".csv", delete=False) as tmp:
+            consolidated_path = tmp.name
+        s3.download_file(s3_bucket, s3_key, consolidated_path)
+
+        df = pd.read_csv(consolidated_path, on_bad_lines="warn")
+        for col in df.columns:
+            if df[col].dtype == object:
+                df[col] = df[col].str.strip()
+
+        model_id = model_cfg.get("hf_model_id", "")
+        tp = str(vllm_args.get("tensor-parallel-size", 1))
+
+        current_rows = df[
+            (df["version"] == version)
+            & (df["model"] == model_id)
+            & (df["accelerator"] == accelerator)
+            & (df["TP"].astype(str) == tp)
+        ]
+
+        if current_rows.empty:
+            logger.warning(
+                "No data found in S3 for version=%s, model=%s, accelerator=%s, TP=%s",
+                version, model_id, accelerator, tp,
+            )
+            return
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as tmp:
+            current_csv_path = tmp.name
+            current_rows.to_csv(tmp, index=False)
+
+        logger.info("Standalone analysis: found %d rows for version=%s", len(current_rows), version)
+        _run_regression_check(
+            current_csv_path, compare_version, version, model_cfg, accelerator, run_uuid=run_uuid,
+        )
+    except Exception:
+        logger.warning("Standalone analysis failed", exc_info=True)
+    finally:
+        import os
+        if consolidated_path and os.path.exists(consolidated_path):
+            os.unlink(consolidated_path)
+        if current_csv_path and os.path.exists(current_csv_path):
+            os.unlink(current_csv_path)
 
 
 def _run_regression_check(
