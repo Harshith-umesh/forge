@@ -534,7 +534,7 @@ def _run_standalone_analysis(
             (df["version"] == version)
             & (df["model"] == model_id)
             & (df["accelerator"] == accelerator)
-            & (df["TP"].astype(str) == tp)
+            & (df["TP"].astype(float).astype(int).astype(str) == tp)
         ]
 
         if current_rows.empty:
