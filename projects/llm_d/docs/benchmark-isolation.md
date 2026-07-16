@@ -84,7 +84,9 @@ previous 2D behavior with no overhead.
 
 Workloads can override deployment profile settings via `deployment_overrides`
 in `config.d/workloads.yaml`. This dict is deep-merged on top of the resolved
-deployment profile when building the LLMISVC manifest.
+deployment profile when building the LLMISVC manifest. Lists (like `vllm_args`)
+are **replaced entirely**, not concatenated — this avoids duplicate or
+conflicting flags when the override supplies a different set of arguments.
 
 ```yaml
 benchmarks:

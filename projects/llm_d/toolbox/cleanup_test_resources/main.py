@@ -218,9 +218,15 @@ def wait_for_workload_pods_deletion(args, ctx):
 
 
 def _best_effort_delete(description: str, *oc_args: str) -> None:
-    """Best effort deletion of Kubernetes resources with timeout"""
+    """Best effort deletion of Kubernetes resources with timeout."""
     try:
-        oc(*oc_args, "--timeout=120s", check=False)
+        result = oc(*oc_args, "--timeout=300s", check=False)
+        if result.returncode != 0:
+            logger.warning(
+                "Failed to delete %s (rc=%d), capturing describe", description, result.returncode
+            )
+            describe_args = tuple(a for a in oc_args if a != "delete")
+            oc("describe", *describe_args, check=False)
     except subprocess.TimeoutExpired:
         logger.warning("Timed out deleting %s: oc %s", description, " ".join(oc_args))
 
