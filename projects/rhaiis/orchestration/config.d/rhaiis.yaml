@@ -4,7 +4,7 @@ cluster_tag: ""
 
 gpu_types:
   nvidia: h200
-  amd: mi300x
+  amd_mi300x: mi300x
   l40s: l40s
 
 images:
