@@ -40,6 +40,16 @@ def get_supported_fournos_directives() -> dict[str, str]:
                         Format: /exclusive true|false
                         Example: /exclusive false
                         Effect: Sets fournos.job.exclusive in configuration (default: true).""",
+        "/clusterless": """Enable clusterless mode for FOURNOS job execution.
+                          Format: /clusterless
+                          Example: /clusterless
+                          Effect: Sets fournos.job.exclusive=false and fournos.job.clusterless=true.
+                          Note: Clusterless and exclusive modes are mutually exclusive.""",
+        "/fournos": """Set FOURNOS namespace environment.
+                      Format: /fournos environment
+                      Example: /fournos wip
+                               /fournos staging
+                      Effect: Sets fournos.namespace to psap-automation-{environment}.""",
         "/pipeline": """Set FOURNOS pipeline name for job execution.
                        Format: /pipeline pipeline_name
                        Example: /pipeline llm-load-test
@@ -113,6 +123,53 @@ def handle_exclusive_directive(line: str) -> dict[str, str]:
         )
 
     return {"fournos.job.exclusive": exclusive_value == "true"}
+
+
+def handle_clusterless_directive(line: str) -> dict[str, str]:
+    """
+    Handle /clusterless directive for enabling clusterless mode.
+
+    Format: /clusterless
+
+    Args:
+        line: The directive line
+
+    Returns:
+        Dictionary with clusterless configuration (sets exclusive=false, clusterless=true)
+    """
+    return {"fournos.job.exclusive": False, "fournos.job.clusterless": True}
+
+
+def handle_fournos_directive(line: str) -> dict[str, str]:
+    """
+    Handle /fournos directive for setting FOURNOS namespace environment.
+
+    Format: /fournos environment
+
+    Args:
+        line: The directive line
+
+    Returns:
+        Dictionary with namespace configuration
+
+    Raises:
+        ValueError: If environment is not wip or staging
+    """
+    FOURNOS_NAMESPACE_BASE = "psap-automation"
+    VALID_ENVIRONMENTS = {"wip", "staging"}
+
+    environment = line.removeprefix("/fournos ").strip()
+
+    if not environment:
+        raise ValueError(f"Invalid /fournos directive: environment cannot be empty in '{line}'")
+
+    if environment not in VALID_ENVIRONMENTS:
+        raise ValueError(
+            f"Invalid /fournos directive: environment must be one of {VALID_ENVIRONMENTS}, got '{environment}' in '{line}'"
+        )
+
+    namespace = f"{FOURNOS_NAMESPACE_BASE}-{environment}"
+    return {"fournos.namespace": namespace}
 
 
 def handle_pipeline_directive(line: str) -> dict[str, str]:
@@ -291,6 +348,8 @@ def get_fournos_directive_handlers() -> dict[str, callable]:
     return {
         "/cluster": handle_cluster_directive,
         "/exclusive": handle_exclusive_directive,
+        "/clusterless": handle_clusterless_directive,
+        "/fournos": handle_fournos_directive,
         "/pipeline": handle_pipeline_directive,
         "/gpu": handle_gpu_directive,
         "/parallel": handle_parallel_directive,
@@ -323,6 +382,14 @@ def parse_fournos_directives(
         system_name="FOURNOS",
         required_directives=None,  # No required directives for FOURNOS
     )
+
+    # Validate directive conflicts
+    if config_overrides.get("fournos.job.clusterless") and config_overrides.get(
+        "fournos.job.exclusive"
+    ):
+        raise ValueError(
+            "Conflicting directives: /clusterless and /exclusive true cannot both be used"
+        )
 
     # Log successful parses at info level for FOURNOS
     for directive in parsed_directives:
