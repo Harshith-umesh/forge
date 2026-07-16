@@ -104,6 +104,22 @@ def _run_test(
         except Exception:
             logger.debug("Failed to annotate FournosJob with UUID", exc_info=True)
 
+    from projects.core.library import config
+
+    profiler_cfg = runtime_config.get_profiler_config()
+    profiler_enabled = profiler_cfg.get("enabled", False)
+    run_benchmark = config.project.get_config("tests.rhaiis.run_benchmark", True)
+
+    # Standalone analysis only — no deployment needed
+    if not run_benchmark and not profiler_enabled:
+        logger.info("run_benchmark=false and profiler=false, running standalone analysis only")
+        for wl_key in workload_keys:
+            try:
+                _run_standalone_analysis(model_cfg, accelerator_key, vllm_args, run_uuid=run_uuid)
+            except Exception:
+                logger.warning("Standalone analysis failed; continuing", exc_info=True)
+        return 0
+
     benchmark_timeout = benchmark_cfg.get("timeout", 14400)
     wait_guidellm_benchmark_task._retry_config["attempts"] = max(1, benchmark_timeout // 10)
 
@@ -136,11 +152,6 @@ def _run_test(
 
         endpoint_url = f"http://{deployment_name}-predictor.{namespace}.svc.cluster.local:8080"
 
-        from projects.core.library import config
-
-        profiler_cfg = runtime_config.get_profiler_config()
-        profiler_enabled = profiler_cfg.get("enabled", False)
-        run_benchmark = config.project.get_config("tests.rhaiis.run_benchmark", True)
         warmup_enabled = (
             config.project.get_config("tests.rhaiis.warmup", True)
             and run_benchmark
