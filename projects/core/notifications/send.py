@@ -755,6 +755,7 @@ def send_regression_notification(
     webhook_vault: str | None = None,
     notification_vault: str | None = None,
     dry_run: bool = False,
+    report_url: str = "",
 ) -> bool:
     """Send regression/improvement Slack notification from analysis results.
 
@@ -770,6 +771,7 @@ def send_regression_notification(
         webhook_vault: Vault containing slack-webhook-url file
         notification_vault: Fallback vault for Bot-Token Slack credentials
         dry_run: Log only, don't send
+        report_url: Optional presigned URL to an agent analysis report
 
     Returns:
         True if notification sent successfully
@@ -834,6 +836,8 @@ def send_regression_notification(
     else:
         user_line = ""
 
+    report_line = f"*Agent Analysis:* <{report_url}|View Report>\n" if report_url else ""
+
     message = (
         f"{icon} *{headline}*\n"
         f"{user_line}"
@@ -841,6 +845,7 @@ def send_regression_notification(
         f"*Model:* {model}\n"
         f"*Accelerator:* {accelerator}\n"
         f"*Versions:* {current_version} vs {compare_version} (baseline)\n"
+        f"{report_line}"
         f"*Changes:*\n{details}"
     )
 

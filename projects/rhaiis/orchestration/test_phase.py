@@ -509,6 +509,15 @@ def _run_regression_check(
         )
 
         if analysis.get("regression_count", 0) > 0 or analysis.get("improvement_count", 0) > 0:
+            report_url = ""
+            agent_cfg = config.project.get_config("rhaiis.agent_analysis", {})
+            if agent_cfg.get("enabled", False):
+                report_url = _run_agent_analysis(
+                    analysis, model_cfg, accelerator,
+                    current_version, compare_version, run_uuid,
+                    severity_threshold=agent_cfg.get("severity_threshold", 10),
+                )
+
             from projects.core.notifications.send import send_regression_notification
 
             send_regression_notification(
@@ -519,6 +528,7 @@ def _run_regression_check(
                 slack_user=config.project.get_config("tests.rhaiis.slack_user", ""),
                 webhook_vault="psap-forge-rhaiis-slack",
                 notification_vault="psap-forge-notifications",
+                report_url=report_url,
             )
     except Exception:
         logger.warning("Regression analysis failed; continuing", exc_info=True)
@@ -526,6 +536,103 @@ def _run_regression_check(
         import os
         if consolidated_path and os.path.exists(consolidated_path):
             os.unlink(consolidated_path)
+
+
+def _run_agent_analysis(
+    analysis: dict,
+    model_cfg: dict,
+    accelerator: str,
+    current_version: str,
+    compare_version: str,
+    run_uuid: str,
+    *,
+    severity_threshold: int = 10,
+) -> str:
+    """Request AI agent analysis for severe regressions. Returns report URL or empty string."""
+    from pathlib import Path
+
+    from projects.core.library import config
+    from projects.rhaiis.postprocess.agent import (
+        AGENT_SEVERITY_THRESHOLD,
+        build_pr_followup_prompt,
+        check_agent_connectivity,
+        markdown_to_html,
+        request_agent_analysis,
+        send_followup,
+    )
+
+    agent_cfg = config.project.get_config("rhaiis.agent_analysis", {})
+    agent_url = agent_cfg.get("url", "")
+    if not agent_url:
+        logger.warning("Agent analysis enabled but no URL configured (rhaiis.agent_analysis.url)")
+        return ""
+
+    threshold = severity_threshold or AGENT_SEVERITY_THRESHOLD
+    severe = [r for r in analysis.get("regressions", []) if abs(r["pct_diff"]) > threshold]
+    if not severe:
+        logger.info("No severe regressions (>%d%%), skipping agent analysis", threshold)
+        return ""
+
+    ok, detail = check_agent_connectivity(agent_url)
+    if not ok:
+        logger.warning("Agent not reachable, skipping analysis: %s", detail)
+        return ""
+
+    tp = str(model_cfg.get("vllm_args", {}).get("tensor-parallel-size", 1))
+    model = model_cfg.get("hf_model_id", "")
+    improvements = analysis.get("improvements", [])
+
+    agent_response = request_agent_analysis(
+        model=model,
+        accelerator=accelerator,
+        current_version=current_version,
+        compare_version=compare_version,
+        tp=tp,
+        severe_regressions=severe,
+        job_id=run_uuid,
+        improvements=improvements if improvements else None,
+        agent_url=agent_url,
+    )
+    if not agent_response:
+        return ""
+
+    pr_prompt = build_pr_followup_prompt(current_version, compare_version)
+    pr_analysis = send_followup(message=pr_prompt, job_id=run_uuid, agent_url=agent_url)
+    if pr_analysis:
+        agent_response = f"{agent_response}\n\n---\n\n## Related Pull Requests\n\n{pr_analysis}"
+
+    html_content = markdown_to_html(
+        agent_response, run_uuid, model, current_version, compare_version,
+    )
+    html_path = Path(env.ARTIFACT_DIR) / f"agent_analysis_{run_uuid}.html"
+    html_path.write_text(html_content, encoding="utf-8")
+    logger.info("Agent analysis saved to %s", html_path)
+
+    try:
+        from projects.caliper.cli.s3_export import create_s3_client, get_aws_credentials
+
+        csv_dashboard_cfg = config.project.get_config("caliper.postprocess.csv_dashboard", {})
+        vault_name = csv_dashboard_cfg.get("vault", "psap-forge-dashboard-s3")
+        credentials_path = get_aws_credentials(vault_name, "aws.credentials")
+        if credentials_path:
+            s3 = create_s3_client(credentials_path)
+            s3_bucket = "psap-dashboard-data"
+            s3_key = f"reports/rhaiis/{run_uuid}_analysis.html"
+            s3.upload_file(
+                str(html_path), s3_bucket, s3_key,
+                ExtraArgs={"ContentType": "text/html"},
+            )
+            report_url = s3.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": s3_bucket, "Key": s3_key},
+                ExpiresIn=2592000,
+            )
+            logger.info("Agent analysis uploaded to S3, presigned URL generated")
+            return report_url
+    except Exception:
+        logger.warning("Failed to upload agent analysis to S3; continuing", exc_info=True)
+
+    return ""
 
 
 def _upload_predictor_log(run_uuid: str) -> None:
