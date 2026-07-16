@@ -113,11 +113,13 @@ def _run_test(
     # Standalone analysis only — no deployment needed
     if not run_benchmark and not profiler_enabled:
         logger.info("run_benchmark=false and profiler=false, running standalone analysis only")
-        for wl_key in workload_keys:
-            try:
-                _run_standalone_analysis(model_cfg, accelerator_key, vllm_args, run_uuid=run_uuid)
-            except Exception:
-                logger.warning("Standalone analysis failed; continuing", exc_info=True)
+        try:
+            _run_standalone_analysis(
+                model_cfg, accelerator_key, vllm_args,
+                run_uuid=run_uuid, restrict_profiles=workload_keys or None,
+            )
+        except Exception:
+            logger.warning("Standalone analysis failed; continuing", exc_info=True)
         return 0
 
     benchmark_timeout = benchmark_cfg.get("timeout", 14400)
@@ -482,7 +484,7 @@ def _generate_and_sync_dashboard_csv(
     if not compare_version:
         return
 
-    _run_regression_check(csv_path, compare_version, version, model_cfg, accelerator, run_uuid=run_uuid)
+    _run_regression_check(csv_path, compare_version, version, model_cfg, accelerator, run_uuid=run_uuid, vllm_args=vllm_args)
 
 
 def _run_standalone_analysis(
@@ -491,6 +493,7 @@ def _run_standalone_analysis(
     vllm_args: dict,
     *,
     run_uuid: str = "",
+    restrict_profiles: list[str] | None = None,
 ) -> None:
     """Run regression check + agent analysis using existing S3 data (no new benchmark)."""
     import tempfile
@@ -561,7 +564,8 @@ def _run_standalone_analysis(
 
         logger.info("Standalone analysis: found %d rows for version=%s", len(current_rows), version)
         _run_regression_check(
-            current_csv_path, compare_version, version, model_cfg, accelerator, run_uuid=run_uuid,
+            current_csv_path, compare_version, version, model_cfg, accelerator,
+            run_uuid=run_uuid, restrict_profiles=restrict_profiles, vllm_args=vllm_args,
         )
     except Exception:
         logger.warning("Standalone analysis failed", exc_info=True)
@@ -581,6 +585,8 @@ def _run_regression_check(
     accelerator: str,
     *,
     run_uuid: str = "",
+    restrict_profiles: list[str] | None = None,
+    vllm_args: dict | None = None,
 ) -> None:
     import tempfile
     from pathlib import Path
@@ -617,6 +623,7 @@ def _run_regression_check(
             compare_version=compare_version,
             current_version=current_version,
             output_file=output_file,
+            restrict_profiles=restrict_profiles,
         )
 
         if analysis.get("regression_count", 0) > 0 or analysis.get("improvement_count", 0) > 0:
@@ -631,6 +638,7 @@ def _run_regression_check(
 
             from projects.core.notifications.send import send_regression_notification
 
+            _vllm = vllm_args or {}
             send_regression_notification(
                 analysis,
                 model=model_cfg.get("hf_model_id", ""),
@@ -640,6 +648,8 @@ def _run_regression_check(
                 webhook_vault="psap-forge-rhaiis-slack",
                 notification_vault="psap-forge-notifications",
                 report_url=report_url,
+                tp=str(_vllm.get("tensor-parallel-size", "")),
+                dp=str(_vllm.get("data-parallel-size", "")),
             )
     except Exception:
         logger.warning("Regression analysis failed; continuing", exc_info=True)

@@ -745,6 +745,54 @@ def _get_webhook_url(vault_name: str) -> str | None:
     return path.read_text().strip()
 
 
+DASHBOARD_BASE_URL = "https://staging-aidash.apps.ocp4.intlab.redhat.com/"
+
+PROFILE_DISPLAY_NAMES = {
+    "profile1": "Profile A: Balanced (1k/1k)",
+    "profile2": "Profile B: Variable Workload (512/2k)",
+    "profile3": "Profile C: Large Prompt (2k/128)",
+    "profile4": "Profile D: Prefill Heavy (8k/1k)",
+}
+
+
+def _build_dashboard_url(
+    *,
+    model: str = "",
+    accelerator: str = "",
+    current_version: str = "",
+    compare_version: str = "",
+    profiles: list[str] | None = None,
+    tp: str = "",
+) -> str:
+    """Build a RHAIIS dashboard URL with filters pre-selected."""
+    from urllib.parse import quote, urlencode
+
+    params: dict[str, str] = {"view": "RHAIIS Dashboard"}
+
+    if accelerator:
+        params["accelerators"] = accelerator
+    if model:
+        params["models"] = model
+
+    versions = ",".join(v for v in [current_version, compare_version] if v)
+    if versions:
+        params["versions"] = versions
+
+    if profiles:
+        display_names = [PROFILE_DISPLAY_NAMES.get(p, p) for p in profiles]
+        params["profile"] = ",".join(display_names)
+
+    if tp:
+        try:
+            params["tp_sizes"] = f"{float(tp):.1f}"
+        except (ValueError, TypeError):
+            params["tp_sizes"] = tp
+
+    params["section"] = "performance_plots"
+
+    return f"{DASHBOARD_BASE_URL}?{urlencode(params, quote_via=quote)}"
+
+
 def send_regression_notification(
     analysis_result: dict,
     *,
@@ -756,6 +804,8 @@ def send_regression_notification(
     notification_vault: str | None = None,
     dry_run: bool = False,
     report_url: str = "",
+    tp: str = "",
+    dp: str = "",
 ) -> bool:
     """Send regression/improvement Slack notification from analysis results.
 
@@ -772,6 +822,8 @@ def send_regression_notification(
         notification_vault: Fallback vault for Bot-Token Slack credentials
         dry_run: Log only, don't send
         report_url: Optional presigned URL to an agent analysis report
+        tp: Tensor parallelism size for display
+        dp: Data parallelism size for display
 
     Returns:
         True if notification sent successfully
@@ -838,14 +890,35 @@ def send_regression_notification(
 
     report_line = f"*Agent Analysis:* <{report_url}|View Report>\n" if report_url else ""
 
+    parallelism_line = ""
+    parallelism_parts = []
+    if tp:
+        parallelism_parts.append(f"TP={tp}")
+    if dp:
+        parallelism_parts.append(f"DP={dp}")
+    if parallelism_parts:
+        parallelism_line = f"*Parallelism:* {', '.join(parallelism_parts)}\n"
+
+    dashboard_url = _build_dashboard_url(
+        model=model,
+        accelerator=accelerator,
+        current_version=current_version,
+        compare_version=compare_version,
+        profiles=profiles if profiles else None,
+        tp=tp,
+    )
+    dashboard_line = f"*Dashboard:* <{dashboard_url}|View Dashboard>\n"
+
     message = (
         f"{icon} *{headline}*\n"
         f"{user_line}"
         f"*Job:* `{job_id}`\n"
         f"*Model:* {model}\n"
         f"*Accelerator:* {accelerator}\n"
+        f"{parallelism_line}"
         f"*Versions:* {current_version} vs {compare_version} (baseline)\n"
         f"{report_line}"
+        f"{dashboard_line}"
         f"*Changes:*\n{details}"
     )
 

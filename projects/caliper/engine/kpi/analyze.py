@@ -178,6 +178,7 @@ def run_regression_analysis(
     compare_version: str,
     current_version: str,
     output_file: Path,
+    restrict_profiles: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """Run regression analysis comparing current run against baseline.
 
@@ -189,6 +190,7 @@ def run_regression_analysis(
             str(consolidated_csv_path),
             compare_version,
             current_version,
+            restrict_profiles=restrict_profiles,
         )
 
         if skip_reason:
