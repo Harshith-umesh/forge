@@ -34,14 +34,12 @@ caliper:
       enabled: false
     kpi:
       enabled: true
-      generate:
+      artifacts_to_kpis:
         enabled: true
         output: kpis.json
-      export:
-        enabled: false
     analyze:
       enabled: false
-      baseline: null
+      historical_kpis: null
       output: kpi_analyze.json
 
   export:
