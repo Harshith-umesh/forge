@@ -249,6 +249,7 @@ def _build_inference_service_manifest() -> Path:
         deployment_profile = runtime_config.deep_merge(deployment_profile, benchmark_overrides)
 
     # Build the InferenceService manifest
+    deployment_profile_name = runtime_config.get_deployment_profile_name()
     manifest = render_inference_service_from_parts(
         config_dir=config_dir,
         namespace=namespace,
@@ -257,6 +258,7 @@ def _build_inference_service_manifest() -> Path:
         model_slug=model_slug,
         deployment_profile=deployment_profile,
         model_cache=model_cache,
+        deployment_profile_name=deployment_profile_name,
     )
 
     # Write the manifest to artifacts

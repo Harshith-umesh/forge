@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 import hashlib
 from pathlib import Path
 from typing import Any
@@ -24,10 +23,14 @@ def render_inference_service_from_parts(
     model_slug: str,
     deployment_profile: dict[str, Any],
     model_cache: dict[str, Any],
+    deployment_profile_name: str | None = None,
 ) -> dict[str, Any]:
     """Render an llm_d-owned LLMInferenceService manifest from concrete runtime inputs."""
     template_path = Path(config_dir) / inference_service["template"]
     manifest = _load_yaml(template_path)
+
+    # Check if this is a P/D deployment
+    is_pd_deployment = "pd_config" in deployment_profile
 
     name = inference_service["name"]
     manifest["metadata"]["name"] = name
@@ -78,32 +81,13 @@ def render_inference_service_from_parts(
             "hf_token_secret_key": model_cache["hf"].get("token_secret_key"),
         }
 
-    manifest["spec"]["replicas"] = deployment_profile["replicas"]
     manifest["spec"]["model"]["uri"] = cache_spec["model_uri"] if cache_spec else source_uri
     manifest["spec"]["model"]["name"] = model_slug
 
-    serving_container = manifest["spec"]["template"]["containers"][0]
-    serving_container["resources"] = _build_serving_resources(deployment_profile)
-    if deployment_profile.get("serving_image"):
-        serving_container["image"] = deployment_profile["serving_image"]
-    vllm_args = _build_vllm_args(deployment_profile.get("vllm_args", {}))
-    tensor_parallelism = str(deployment_profile["tensor_parallelism"])
-    if not _has_cli_arg(vllm_args, "tensor-parallel-size"):
-        vllm_args.append(f"--tensor-parallel-size={tensor_parallelism}")
-    if vllm_args:
-        serving_container["args"] = vllm_args
-
-    scheduler = deployment_profile.get("scheduler", {})
-    if scheduler is None:
-        manifest["spec"]["router"].pop("scheduler", None)
+    if is_pd_deployment:
+        return _render_pd_deployment(manifest, deployment_profile, deployment_profile_name)
     else:
-        manifest["spec"]["router"]["scheduler"] = copy.deepcopy(scheduler)
-        if deployment_profile.get("router_image"):
-            manifest["spec"]["router"]["scheduler"]["template"]["containers"][0]["image"] = (
-                deployment_profile["router_image"]
-            )
-
-    return manifest
+        return _render_standard_deployment(manifest, deployment_profile)
 
 
 def _build_serving_resources(deployment_profile: dict[str, Any]) -> dict[str, Any]:
@@ -142,3 +126,159 @@ def _has_cli_arg(args: list[str], option_name: str) -> bool:
     prefix = f"--{option_name}="
     bare = f"--{option_name}"
     return any(arg == bare or arg.startswith(prefix) for arg in args)
+
+
+def _render_standard_deployment(
+    manifest: dict[str, Any], deployment_profile: dict[str, Any]
+) -> dict[str, Any]:
+    """Render standard (non-P/D) deployment configuration."""
+    manifest["spec"]["replicas"] = deployment_profile["replicas"]
+
+    serving_container = manifest["spec"]["template"]["containers"][0]
+    serving_container["resources"] = _build_serving_resources(deployment_profile)
+    if deployment_profile.get("serving_image"):
+        serving_container["image"] = deployment_profile["serving_image"]
+    vllm_args = _build_vllm_args(deployment_profile.get("vllm_args", {}))
+    tensor_parallelism = str(deployment_profile["tensor_parallelism"])
+    if not _has_cli_arg(vllm_args, "tensor-parallel-size"):
+        vllm_args.append(f"--tensor-parallel-size={tensor_parallelism}")
+    if vllm_args:
+        serving_container["args"] = vllm_args
+
+    scheduler = deployment_profile.get("scheduler", {})
+    if scheduler is None:
+        manifest["spec"]["router"].pop("scheduler", None)
+    else:
+        manifest["spec"]["router"]["scheduler"] = copy.deepcopy(scheduler)
+        if deployment_profile.get("router_image"):
+            manifest["spec"]["router"]["scheduler"]["template"]["containers"][0]["image"] = (
+                deployment_profile["router_image"]
+            )
+
+    return manifest
+
+
+def _render_pd_deployment(
+    manifest: dict[str, Any],
+    deployment_profile: dict[str, Any],
+    deployment_profile_name: str | None = None,
+) -> dict[str, Any]:
+    """Render P/D (Prefill/Decode) deployment configuration."""
+    pd_config = deployment_profile["pd_config"]
+
+    # Update service name to include deployment profile for P/D
+    current_name = manifest["metadata"]["name"]
+    if current_name == "llm-d" and deployment_profile_name:  # Only modify if it's the default name
+        manifest["metadata"]["name"] = f"llm-d-{deployment_profile_name}"
+
+    # Set main replicas to 2 for P/D
+    manifest["spec"]["replicas"] = 2
+
+    # Configure prefill section
+    manifest["spec"]["prefill"] = {
+        "replicas": 2,
+        "template": _build_pd_pod_template(deployment_profile, is_prefill=True),
+    }
+
+    # Configure main template (decode)
+    manifest["spec"]["template"] = _build_pd_pod_template(deployment_profile, is_prefill=False)
+
+    # Simplified router for P/D
+    manifest["spec"]["router"] = {
+        "scheduler": {"template": {"containers": [{"name": "main"}]}},
+        "route": {},
+        "gateway": {},
+    }
+
+    return manifest
+
+
+def _build_pd_pod_template(
+    deployment_profile: dict[str, Any], is_prefill: bool = False
+) -> dict[str, Any]:
+    """Build pod template for P/D deployment."""
+    tensor_parallelism = str(deployment_profile["tensor_parallelism"])
+
+    # Build VLLM environment variable configuration specific to prefill/decode
+    if is_prefill:
+        # Prefill configuration
+        vllm_args_list = [
+            "--disable-uvicorn-access-log",
+            "--block-size 128",
+            '--kv-transfer-config \'{"kv_connector":"NixlConnector", "kv_role":"kv_both"}\'',
+            f"--tensor-parallel-size={tensor_parallelism}",
+            "--disable-uvicorn-access-log",  # Appears twice in prefill
+            "--enable-prefix-caching",
+            "--uvicorn-log-level=debug",
+            "--trust-remote-code",
+            "--gpu-memory-utilization=0.92",
+            "--max-model-len=40960",
+        ]
+    else:
+        # Decode configuration
+        vllm_args_list = [
+            "--block-size 128",
+            '--kv-transfer-config \'{"kv_connector":"NixlConnector", "kv_role":"kv_both"}\'',
+            f"--tensor-parallel-size={tensor_parallelism}",
+            "--disable-uvicorn-access-log",
+            "--enable-prefix-caching",
+            "--uvicorn-log-level=debug",
+            "--trust-remote-code",
+            "--gpu-memory-utilization=0.92",
+            "--max-model-len 40960",  # Space instead of equals for decode
+        ]
+
+    vllm_additional_args = " ".join(vllm_args_list)
+
+    container = {
+        "name": "main",
+        "env": [
+            {"name": "VLLM_ADDITIONAL_ARGS", "value": vllm_additional_args},
+            {
+                "name": "VLLM_NIXL_SIDE_CHANNEL_HOST",
+                "valueFrom": {"fieldRef": {"apiVersion": "v1", "fieldPath": "status.podIP"}},
+            },
+            {"name": "UCX_IB_GID_INDEX", "value": "3"},
+        ],
+        "livenessProbe": {
+            "failureThreshold": 1000,
+            "httpGet": {"path": "/health", "port": 8000, "scheme": "HTTPS"},
+            "initialDelaySeconds": 900,
+            "periodSeconds": 60,
+            "timeoutSeconds": 60,
+        },
+        "readinessProbe": {
+            "failureThreshold": 10000,
+            "httpGet": {"path": "/health", "port": 8000, "scheme": "HTTPS"},
+            "initialDelaySeconds": 60,
+            "periodSeconds": 30,
+            "successThreshold": 1,
+            "timeoutSeconds": 30,
+        },
+        "resources": {
+            "limits": {"dra.llm-d.io/gpu-nic-pair": tensor_parallelism},
+            "requests": {
+                "cpu": "4",
+                "dra.llm-d.io/gpu-nic-pair": tensor_parallelism,
+                "memory": "64Gi",
+            },
+        },
+        "securityContext": {"capabilities": {"add": ["IPC_LOCK", "SYS_RAWIO"]}},
+        "startupProbe": {
+            "failureThreshold": 150,
+            "httpGet": {"path": "/health", "port": 8000, "scheme": "HTTPS"},
+            "periodSeconds": 10,
+            "successThreshold": 1,
+            "timeoutSeconds": 1,
+        },
+    }
+
+    template = {"serviceAccountName": "llm-d-privileged", "containers": [container]}
+
+    # Add tolerations only to main template (decode), not prefill
+    if not is_prefill:
+        template["tolerations"] = [
+            {"effect": "NoSchedule", "key": "nvidia.com/gpu", "operator": "Exists"}
+        ]
+
+    return template
