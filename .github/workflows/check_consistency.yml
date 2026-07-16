@@ -18,11 +18,31 @@ jobs:
       PYTHONPATH: ${{ github.workspace }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: ./.github/steps/prepare_minimal_ubuntu_image
 
       - name: Check that no symlink is broken
         run: bin/run_ansible_toolbox.py repo validate_no_broken_link
+
+      - name: Check that all source files end with EOL
+        run: |
+          # Find all source files and check they end with newline
+          files_without_eol=()
+
+          while IFS= read -r -d '' file; do
+            if [[ -s "$file" ]] && [[ -n "$(tail -c1 "$file")" ]]; then
+              files_without_eol+=("$file")
+            fi
+          done < <(find . -path './.git' -prune -o \( -name "*.py" -o -name "*.yml" -o -name "*.yaml" -o -name "*.json" -o -name "*.md" \) -type f -print0)
+
+          if [[ ${#files_without_eol[@]} -gt 0 ]]; then
+            echo "❌ Files missing final newline:"
+            printf '%s\n' "${files_without_eol[@]}"
+            echo "Fix with: echo >> filename"
+            exit 1
+          fi
+          echo "✅ All source files end with newline"

@@ -13,6 +13,7 @@ from pathlib import Path
 
 from projects.caliper.orchestration.postprocess import run_postprocess_from_orchestration_config
 from projects.caliper.orchestration.postprocess_outcome import TestPhaseOutcome
+from projects.core.library import env
 from projects.core.library import vault as vault_lib
 
 logger = logging.getLogger(__name__)
@@ -304,15 +305,14 @@ def run_replot_from_orchestration_config(
         if artifact_directory.exists():
             logger.info("Running post-processing...")
 
-            visualize_output_dir = artifact_directory / "postprocess_output"
-            visualize_output_dir.mkdir(parents=True, exist_ok=True)
-
-            postprocess_result = run_postprocess_from_orchestration_config(
-                postprocess_config_raw=postprocess_config or {},
-                artifacts_dir=artifact_directory,
-                visualize_output_dir=visualize_output_dir,
-                test_outcome=TestPhaseOutcome("SUCCESS"),
-            )
+            with env.TempArtifactDir(artifact_directory / "postprocess_output"):
+                # Let Caliper handle output directory resolution from config
+                postprocess_result = run_postprocess_from_orchestration_config(
+                    postprocess_config_raw=postprocess_config or {},
+                    artifacts_dir=artifact_directory,
+                    visualize_output_dir=None,  # Let Caliper resolve from config
+                    test_outcome=TestPhaseOutcome("SUCCESS"),
+                )
         else:
             logger.info("Artifacts directory not found")
             postprocess_result = {

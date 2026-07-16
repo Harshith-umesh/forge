@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,8 @@ from projects.caliper.postprocess.helpers.visualization_utils import (
     create_report_title_display,
     save_figure,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_get_curve_value(curves: dict, metric_name: str, index: int, default: Any = 0.0) -> Any:
@@ -51,18 +54,18 @@ def create_dataframe_from_records(records: list[UnifiedResultRecord]) -> pd.Data
     Returns:
         DataFrame with all benchmark metrics and distinguishing labels
     """
-    print(f"📊 Converting {len(records)} records to analysis dataframe...")
+    logger.info(f"📊 Converting {len(records)} records to analysis dataframe...")
     data = []
 
     # Get parameters that vary across all records for legend names
-    print("🔍 Analyzing parameter variations for meaningful legend names...")
+    logger.info("🔍 Analyzing parameter variations for meaningful legend names...")
     varying_params = get_varying_parameters(records)
     if varying_params:
-        print(f"   Found varying parameters: {', '.join(sorted(varying_params))}")
+        logger.info(f"   Found varying parameters: {', '.join(sorted(varying_params))}")
     else:
-        print("   No varying parameters found - using default naming")
+        logger.info("   No varying parameters found - using default naming")
 
-    print("📝 Processing records and extracting metrics...")
+    logger.info("📝 Processing records and extracting metrics...")
     for record in records:
         # Skip records without GuideLLM data or missing benchmarks
         if not record.run_identity.get("guidellm") or record.metrics.get("no_benchmarks_found"):
@@ -77,7 +80,7 @@ def create_dataframe_from_records(records: list[UnifiedResultRecord]) -> pd.Data
 
         if has_curves and isinstance(request_rates, list) and len(request_rates) > 0:
             # New format: expand performance curves into multiple data points
-            print(
+            logger.info(
                 f"   🔄 Expanding performance curves for {legend_name} ({len(request_rates)} points)"
             )
             curves = record.metrics.get("performance_curves", {})
@@ -157,7 +160,7 @@ def create_dataframe_from_records(records: list[UnifiedResultRecord]) -> pd.Data
                 data.append(row)
         else:
             # Old format: single data point per record (backward compatibility)
-            print(f"   📊 Using scalar metrics for {legend_name}")
+            logger.info(f"   📊 Using scalar metrics for {legend_name}")
             # Extract scalar request_rate if it's a single value
             request_rate = (
                 request_rates[0]
@@ -226,14 +229,14 @@ def create_dataframe_from_records(records: list[UnifiedResultRecord]) -> pd.Data
             data.append(row)
 
     if not data:
-        print("⚠️  No GuideLLM data found in records")
+        logger.info("⚠️  No GuideLLM data found in records")
         return pd.DataFrame()
 
-    print(f"✅ Successfully processed {len(data)} data points from {len(records)} records")
+    logger.info(f"✅ Successfully processed {len(data)} data points from {len(records)} records")
     df = pd.DataFrame(data)
 
     # Sort for consistent ordering
-    print("📋 Organizing data by configuration, concurrency, and request rate...")
+    logger.info("📋 Organizing data by configuration, concurrency, and request rate...")
     # Sort and fill any NaN values in numeric columns with 0 for consistent plotting
     df = df.sort_values(
         ["test_configuration", "request_concurrency", "request_rate", "rate_point_index"]
@@ -259,7 +262,7 @@ def create_dataframe_from_records(records: list[UnifiedResultRecord]) -> pd.Data
         ]
     )
 
-    print(
+    logger.info(
         f"🎯 Expanded {total_records} benchmark records into {len(df)} data points across {len(configs)} configurations:"
     )
     for config in configs:
@@ -270,7 +273,7 @@ def create_dataframe_from_records(records: list[UnifiedResultRecord]) -> pd.Data
             if rate_points > 1
             else f"{config_data['request_rate'].iloc[0]:.1f} req/s"
         )
-        print(f"   • {config}: {rate_points} rate points ({rate_range})")
+        logger.info(f"   • {config}: {rate_points} rate points ({rate_range})")
 
     return df
 
@@ -279,11 +282,11 @@ def create_dataframe_from_records(records: list[UnifiedResultRecord]) -> pd.Data
 def create_throughput_scaling_plot(df: pd.DataFrame, title_context: str = ""):
     """Create throughput scaling scatter plot."""
     try:
-        print("📈 Creating throughput scaling scatter plot...")
+        logger.info("📈 Creating throughput scaling scatter plot...")
         import plotly.express as px
 
         if df.empty:
-            print("⚠️  No data available for throughput scaling plot")
+            logger.info("⚠️  No data available for throughput scaling plot")
             return None
 
         title = f"Request Throughput vs Concurrency by Configuration{title_context}"
@@ -314,22 +317,22 @@ def create_throughput_scaling_plot(df: pd.DataFrame, title_context: str = ""):
         )
         fig.update_yaxes(rangemode="tozero")
 
-        print("✅ Throughput scaling plot created successfully")
+        logger.info("✅ Throughput scaling plot created successfully")
         return fig
 
     except Exception as e:
-        print(f"❌ Failed to create throughput scaling plot: {e}")
+        logger.info(f"❌ Failed to create throughput scaling plot: {e}")
         return None
 
 
 def create_latency_vs_throughput_plot(df: pd.DataFrame, title_context: str = ""):
     """Create latency vs throughput scatter plot."""
     try:
-        print("📈 Creating latency vs throughput trade-off plot...")
+        logger.info("📈 Creating latency vs throughput trade-off plot...")
         import plotly.express as px
 
         if df.empty:
-            print("⚠️  No data available for latency vs throughput plot")
+            logger.info("⚠️  No data available for latency vs throughput plot")
             return None
 
         title = f"Latency vs Throughput Trade-off{title_context}"
@@ -353,22 +356,22 @@ def create_latency_vs_throughput_plot(df: pd.DataFrame, title_context: str = "")
             showlegend=True, width=800, height=500, font={"size": 12}, title_font_size=16
         )
 
-        print("✅ Latency vs throughput plot created successfully")
+        logger.info("✅ Latency vs throughput plot created successfully")
         return fig
 
     except Exception as e:
-        print(f"❌ Failed to create latency vs throughput plot: {e}")
+        logger.info(f"❌ Failed to create latency vs throughput plot: {e}")
         return None
 
 
 def create_token_throughput_vs_concurrency_plot(df: pd.DataFrame, title_context: str = ""):
     """Create token throughput vs concurrency line plot."""
     try:
-        print("📈 Creating token throughput vs concurrency scaling plot...")
+        logger.info("📈 Creating token throughput vs concurrency scaling plot...")
         import plotly.express as px
 
         if df.empty:
-            print("⚠️  No data available for token throughput vs concurrency plot")
+            logger.info("⚠️  No data available for token throughput vs concurrency plot")
             return None
 
         title = f"Token Throughput vs Concurrency{title_context}<br><sub>Higher is better</sub>"
@@ -399,22 +402,22 @@ def create_token_throughput_vs_concurrency_plot(df: pd.DataFrame, title_context:
         )
         fig.update_yaxes(rangemode="tozero")
 
-        print("✅ Token throughput vs concurrency plot created successfully")
+        logger.info("✅ Token throughput vs concurrency plot created successfully")
         return fig
 
     except Exception as e:
-        print(f"❌ Failed to create token throughput vs concurrency plot: {e}")
+        logger.info(f"❌ Failed to create token throughput vs concurrency plot: {e}")
         return None
 
 
 def create_ttft_analysis_plot(df: pd.DataFrame, title_context: str = ""):
     """Create TTFT analysis line plot."""
     try:
-        print("📈 Creating TTFT (Time to First Token) analysis plot...")
+        logger.info("📈 Creating TTFT (Time to First Token) analysis plot...")
         import plotly.express as px
 
         if df.empty:
-            print("⚠️  No data available for TTFT analysis plot")
+            logger.info("⚠️  No data available for TTFT analysis plot")
             return None
 
         title = f"TTFT vs Concurrency{title_context}<br><sub>Lower is better</sub>"
@@ -440,23 +443,23 @@ def create_ttft_analysis_plot(df: pd.DataFrame, title_context: str = ""):
         )
         fig.update_yaxes(rangemode="tozero")
 
-        print("✅ TTFT analysis plot created successfully")
+        logger.info("✅ TTFT analysis plot created successfully")
         return fig
 
     except Exception as e:
-        print(f"❌ Failed to create TTFT analysis plot: {e}")
+        logger.info(f"❌ Failed to create TTFT analysis plot: {e}")
         return None
 
 
 def create_token_throughput_percentiles_plot(df: pd.DataFrame, title_context: str = ""):
     """Create token throughput percentiles plot."""
     try:
-        print("📈 Creating token throughput percentiles distribution plot...")
+        logger.info("📈 Creating token throughput percentiles distribution plot...")
         import plotly.express as px
         import plotly.graph_objects as go
 
         if df.empty:
-            print("⚠️  No data available for token throughput percentiles plot")
+            logger.info("⚠️  No data available for token throughput percentiles plot")
             return None
 
         title = f"Output Token Throughput Percentiles{title_context}<br><sub>Higher is better</sub>"
@@ -465,7 +468,9 @@ def create_token_throughput_percentiles_plot(df: pd.DataFrame, title_context: st
 
         # Get unique configurations and colors
         configurations = sorted(df["test_configuration"].unique())
-        print(f"   Plotting {len(configurations)} configurations with percentile distributions...")
+        logger.info(
+            f"   Plotting {len(configurations)} configurations with percentile distributions..."
+        )
         available_colors = px.colors.qualitative.Set1
         color_map = {
             config: available_colors[i % len(available_colors)]
@@ -480,7 +485,7 @@ def create_token_throughput_percentiles_plot(df: pd.DataFrame, title_context: st
             ("P75", "output_tokens_per_second_p75", {"width": 3, "dash": "dash"}, 0.9),
             ("P90", "output_tokens_per_second_p90", {"width": 2, "dash": "dashdot"}, 0.8),
         ]
-        print(f"   Adding {len(percentiles)} percentile lines per configuration...")
+        logger.info(f"   Adding {len(percentiles)} percentile lines per configuration...")
 
         for config in configurations:
             config_df = df[df["test_configuration"] == config].sort_values("request_concurrency")
@@ -510,11 +515,11 @@ def create_token_throughput_percentiles_plot(df: pd.DataFrame, title_context: st
         )
         fig.update_yaxes(rangemode="tozero")
 
-        print("✅ Token throughput percentiles plot created successfully")
+        logger.info("✅ Token throughput percentiles plot created successfully")
         return fig
 
     except Exception as e:
-        print(f"❌ Failed to create token throughput percentiles plot: {e}")
+        logger.info(f"❌ Failed to create token throughput percentiles plot: {e}")
         return None
 
 
@@ -565,7 +570,7 @@ def generate_token_throughput_vs_concurrency(
     report_number: int | None = None,
 ) -> str | None:
     """Generate token throughput vs concurrency analysis and save to file."""
-    print("\n🚀 Generating token throughput vs concurrency analysis...")
+    logger.info("\n🚀 Generating token throughput vs concurrency analysis...")
     df = create_dataframe_from_records(records)
     if df.empty:
         return None
@@ -645,16 +650,16 @@ def generate_comprehensive_performance_report(
         # Create report identifier using core utilities
         display_title = create_report_title_display(report_title, report_number)
 
-        print(f"\n🚀 Starting {display_title} generation...")
-        print("=" * 70)
+        logger.info(f"\n🚀 Starting {display_title} generation...")
+        logger.info("=" * 70)
 
         df = create_dataframe_from_records(records)
         if df.empty:
-            print("❌ No data available for analysis")
+            logger.info("❌ No data available for analysis")
             return None
 
-        print("\n📊 Generating performance analysis plots...")
-        print("   This may take a moment as we create high-quality visualizations...")
+        logger.info("\n📊 Generating performance analysis plots...")
+        logger.info("   This may take a moment as we create high-quality visualizations...")
 
         # Generate all the plots as figures
         plot_functions = [
@@ -673,17 +678,17 @@ def generate_comprehensive_performance_report(
 
         report_dir = output_dir / report_dir_name
         report_dir.mkdir(exist_ok=True)
-        print(f"\n📁 Created report directory: {report_dir_name}")
+        logger.info(f"\n📁 Created report directory: {report_dir_name}")
 
         plots_data = []
         for i, (plot_name, plot_func) in enumerate(plot_functions, 1):
-            print(f"\n📈 [{i}/{len(plot_functions)}] Processing {plot_name}...")
+            logger.info(f"\n📈 [{i}/{len(plot_functions)}] Processing {plot_name}...")
             try:
                 fig = plot_func(df, title_context)
                 if fig:
                     # Save as both PNG and HTML in the report directory
                     filename = plot_name.lower().replace(" ", "_")
-                    print(f"💾 Saving {plot_name} as PNG and HTML...")
+                    logger.info(f"💾 Saving {plot_name} as PNG and HTML...")
 
                     # Save PNG image
                     width = 900 if "Percentiles" in plot_name else 800
@@ -704,26 +709,26 @@ def generate_comprehensive_performance_report(
                                 f"{report_dir_name}/{Path(html_path).name}",  # HTML path
                             )
                         )
-                        print(f"✅ {plot_name} saved as PNG and HTML")
+                        logger.info(f"✅ {plot_name} saved as PNG and HTML")
                 else:
-                    print(f"⚠️  {plot_name} could not be created (no figure returned)")
+                    logger.info(f"⚠️  {plot_name} could not be created (no figure returned)")
 
             except Exception as e:
-                print(f"❌ Failed to generate {plot_name}: {e}")
+                logger.info(f"❌ Failed to generate {plot_name}: {e}")
 
-        print(f"\n✅ Successfully generated {len(plots_data)} visualizations!")
+        logger.info(f"\n✅ Successfully generated {len(plots_data)} visualizations!")
 
         # Generate summary statistics
-        print("\n📊 Computing performance statistics and insights...")
+        logger.info("\n📊 Computing performance statistics and insights...")
         summary_stats = _generate_performance_summary(df)
 
         if summary_stats.get("best_tokens"):
             best = summary_stats["best_tokens"]
-            print(f"   🏆 Best performance: {best['value']:.0f} tok/s ({best['config']})")
+            logger.info(f"   🏆 Best performance: {best['value']:.0f} tok/s ({best['config']})")
 
         # Create comprehensive HTML report
-        print("\n📝 Assembling comprehensive HTML report...")
-        print("   🔗 Creating report with images linking to interactive HTML versions...")
+        logger.info("\n📝 Assembling comprehensive HTML report...")
+        logger.info("   🔗 Creating report with images linking to interactive HTML versions...")
 
         html_content = _create_comprehensive_html_report_with_images(
             plots_data, summary_stats, title_context, display_title
@@ -734,28 +739,28 @@ def generate_comprehensive_performance_report(
             "performance_analysis", report_number, report_title, "html"
         )
         report_file = output_dir / filename
-        print(f"\n💾 Writing {display_title} to: {report_file.name}")
+        logger.info(f"\n💾 Writing {display_title} to: {report_file.name}")
         report_file.write_text(html_content, encoding="utf-8")
 
         file_size_mb = report_file.stat().st_size / (1024 * 1024)
-        print(f"📄 Report complete! File size: {file_size_mb:.1f}MB")
-        print("=" * 70)
-        print(f"🎉 {display_title} ready: {report_file.name}")
+        logger.info(f"📄 Report complete! File size: {file_size_mb:.1f}MB")
+        logger.info("=" * 70)
+        logger.info(f"🎉 {display_title} ready: {report_file.name}")
 
         return str(report_file)
 
     except Exception as e:
-        print(f"❌ Failed to generate comprehensive performance report: {e}")
+        logger.info(f"❌ Failed to generate comprehensive performance report: {e}")
         return None
 
 
 def _generate_performance_summary(df: pd.DataFrame) -> dict[str, Any]:
     """Generate performance summary statistics from the dataframe."""
     if df.empty:
-        print("⚠️  No data available for performance summary")
+        logger.info("⚠️  No data available for performance summary")
         return {}
 
-    print("   🔍 Analyzing best performers across all metrics...")
+    logger.info("   🔍 Analyzing best performers across all metrics...")
 
     # Find best performers
     best_tokens_idx = df["tokens_per_second"].idxmax()
@@ -765,7 +770,7 @@ def _generate_performance_summary(df: pd.DataFrame) -> dict[str, Any]:
     best_ttft_idx = df["ttft_median_ms"].idxmin()
 
     # Configuration analysis
-    print("   📊 Computing configuration performance rankings...")
+    logger.info("   📊 Computing configuration performance rankings...")
     config_performance = (
         df.groupby("test_configuration")
         .agg(
@@ -779,7 +784,7 @@ def _generate_performance_summary(df: pd.DataFrame) -> dict[str, Any]:
         .sort_values("tokens_per_second", ascending=False)
     )
 
-    print(f"   ✅ Performance analysis complete for {len(config_performance)} configurations")
+    logger.info(f"   ✅ Performance analysis complete for {len(config_performance)} configurations")
 
     return {
         "total_configurations": len(df["test_configuration"].unique()),

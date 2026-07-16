@@ -16,3 +16,6 @@ medium_test:
 
 long_test:
   skeleton.test.duration_seconds: 300  # Long 5 minute test
+
+agent:
+  agentic.enabled: true

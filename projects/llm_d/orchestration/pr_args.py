@@ -2,13 +2,21 @@
 """
 llm_d Project PR Arguments Parser
 
-llm_d relies on the framework preset mechanism from `/test fournos llm_d PRESET`.
-No llm_d-specific PR directives are currently required.
+Parses llm_d-specific directives from PR trigger comments.
+
+Supported syntax::
+
+    /rhoai.rc-image quay.io/rhoai/rhoai-fbc-fragment@sha256:abc123
 """
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+from projects.rhoai.library.pr_args import get_rhoai_directive_handlers
+
+logger = logging.getLogger(__name__)
 
 
 def get_supported_llm_d_directives() -> dict[str, str]:
@@ -31,5 +39,21 @@ def parse_project_directives(comment_text: str) -> tuple[dict[str, Any], list[st
     Returns:
         Tuple of (configuration overrides dict, list of parsed directive lines)
     """
-    _ = comment_text
-    return {}, []
+    directive_handlers = get_rhoai_directive_handlers()
+    config_overrides: dict[str, Any] = {}
+    parsed_directives: list[str] = []
+
+    for raw_line in comment_text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        for prefix, handler in directive_handlers.items():
+            if line.startswith(prefix):
+                result = handler(line)
+                config_overrides.update(result)
+                parsed_directives.append(line)
+                logger.info("Parsed llm_d directive: %s", line)
+                break
+
+    return config_overrides, parsed_directives

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from projects.caliper.engine.cache import (
@@ -17,6 +18,8 @@ from projects.caliper.engine.parameter_matrix import (
     format_parameter_matrix_summary,
 )
 from projects.caliper.engine.traverse import discover_test_bases
+
+logger = logging.getLogger(__name__)
 
 # Validation functions no longer needed - using per-test-base caching
 
@@ -98,14 +101,14 @@ def run_parse(
 
     if all_warnings and force_report_partial:
         for w in all_warnings:
-            print(f"[parse warning] {w}")  # noqa: T201 — CLI feedback
+            logger.warning(f"[parse warning] {w}")
 
     # Show parameter matrix if requested
     if show_parameter_matrix:
-        print()  # noqa: T201 — CLI feedback
+        logger.info("")
         matrix_analysis = analyze_parameter_matrix(all_records)
         matrix_summary = format_parameter_matrix_summary(matrix_analysis)
-        print(matrix_summary)  # noqa: T201 — CLI feedback
-        print()  # noqa: T201 — CLI feedback
+        logger.info(matrix_summary)
+        logger.info("")
 
     return model

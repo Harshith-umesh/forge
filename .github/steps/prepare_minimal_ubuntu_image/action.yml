@@ -1,4 +1,5 @@
 name: "Prepare FORGE minimal ubuntu image"
+description: "Install minimal Python dependencies required for FORGE repository operations"
 
 runs:
   using: "composite" # <-- this is the important part

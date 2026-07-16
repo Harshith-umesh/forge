@@ -53,13 +53,29 @@ def submit(ctx, cluster, project, args, namespace, override, commit):
             logger.warning(f"Ignoring invalid override format: {override_str} (expected key=value)")
 
     # Override config values if provided
+    clusterless_mode = config.project.get_config("fournos.job.clusterless")
+
     if cluster:
         config.project.set_config("cluster.name", cluster)
     else:
         cluster = config.project.get_config("cluster.name")
-        if not cluster:
-            raise ValueError("--cluster or cluster.name is mandatory")
-    logger.info(f"Using cluster {cluster}")
+
+        if not cluster and not clusterless_mode:
+            raise ValueError(
+                "--cluster or cluster.name is mandatory (unless clusterless mode is enabled)"
+            )
+
+    # Validate clusterless and exclusive modes are not both enabled
+    exclusive_mode = config.project.get_config("fournos.job.exclusive")
+    if clusterless_mode and exclusive_mode:
+        raise ValueError(
+            "Clusterless mode and exclusive mode cannot both be enabled - use /clusterless (sets exclusive=false) or /exclusive false"
+        )
+
+    if cluster:
+        logger.info(f"Using cluster {cluster}")
+    else:
+        logger.info("Using clusterless mode")
 
     if project:
         config.project.set_config("ci_job.project", project)

@@ -145,9 +145,12 @@ class GuideLLMPlugin(PostProcessingPlugin):
             return paths
 
         # Generate reports using the registry
+        invalid_reports: list[str] = []
+
         for report_name in wanted:
             if report_name not in PLOT_REGISTRY:
                 logger.warning("Unknown report '%s' requested", report_name)
+                invalid_reports.append(report_name)
                 continue
 
             plot_config = PLOT_REGISTRY[report_name]
@@ -165,6 +168,14 @@ class GuideLLMPlugin(PostProcessingPlugin):
             except Exception as e:
                 logger.error("Error generating %s: %s", report_name, e)
 
+        # Check for invalid report names and raise error if found
+        if invalid_reports:
+            available_reports = list(PLOT_REGISTRY.keys())
+            raise ValueError(
+                f"Invalid report types requested: {sorted(invalid_reports)}. "
+                f"Available types in this plugin: {sorted(available_reports)}"
+            )
+
         return paths
 
     def kpi_catalog(self) -> list[dict[str, Any]]:
@@ -174,6 +185,27 @@ class GuideLLMPlugin(PostProcessingPlugin):
     def compute_kpis(self, model: UnifiedRunModel) -> list[dict[str, Any]]:
         """Compute KPI values from the unified model."""
         return self.kpi_handler.compute_kpis(model)
+
+    def export_kpis_to_csv(
+        self,
+        kpi_records: list[dict[str, Any]],
+        output_path: Path,
+        include_header_comments: bool = True,
+    ) -> str:
+        """Export KPI records to CSV format using GuideLLM's CSV exporter.
+
+        Args:
+            kpi_records: KPI records from compute_kpis()
+            output_path: Path where to write the CSV file
+            include_header_comments: Whether to include descriptive header comments
+
+        Returns:
+            Path to the generated CSV file
+        """
+        from .csv_export import KPICsvExporter
+
+        exporter = KPICsvExporter()
+        return exporter.export_kpis_to_csv(kpi_records, output_path, include_header_comments)
 
     def build_ai_data_payload(self, model: UnifiedRunModel) -> dict[str, Any]:
         """Build AI evaluation payload from the unified model."""

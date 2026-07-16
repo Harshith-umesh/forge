@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from html import escape
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,8 @@ from typing import Any
 from projects.caliper.postprocess.helpers.visualization_utils import (
     create_report_filename,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def generate_kpi_report(
@@ -35,7 +38,7 @@ def generate_kpi_report(
 
     # Handle multiple records by creating sections for each test
     if len(records) > 1:
-        print(f"📊 Generating multi-test KPI report for {len(records)} test records")
+        logger.info(f"📊 Generating multi-test KPI report for {len(records)} test records")
         return _generate_multi_test_kpi_report(records, output_dir, report_title, report_number)
 
     # Use the single record to extract test conditions and KPIs
@@ -460,7 +463,7 @@ def _generate_multi_test_kpi_report(
     test_sections = []
 
     for i, record in enumerate(records, 1):
-        print(f"   📋 Processing test {i}/{len(records)}: {record.test_base_path}")
+        logger.info(f"   📋 Processing test {i}/{len(records)}: {record.test_base_path}")
 
         # Extract test condition labels
         test_labels = GuideLLMKpiHandler.LABEL_EXTRACTOR.extract(record)
