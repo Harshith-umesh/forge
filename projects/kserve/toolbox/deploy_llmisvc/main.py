@@ -6,7 +6,15 @@ from pathlib import Path
 
 import yaml
 
-from projects.core.dsl import always, entrypoint, execute_tasks, on_failure, retry, task
+from projects.core.dsl import (
+    EarlyReturn,
+    always,
+    entrypoint,
+    execute_tasks,
+    on_failure,
+    retry,
+    task,
+)
 from projects.core.dsl.utils import write_text
 from projects.core.dsl.utils.k8s import (
     oc,
@@ -28,6 +36,7 @@ def run(
     namespace: str,
     inference_service_manifest_path: str,
     gateway_status_address_name: str = "gateway-external",
+    dry_run: bool = False,
 ) -> str:
     """
     Deploy an LLMInferenceService and wait for its endpoint.
@@ -36,6 +45,7 @@ def run(
         namespace: Namespace used by llm_d
         inference_service_manifest_path: Path to the InferenceService YAML manifest file
         gateway_status_address_name: Gateway status address name for endpoint resolution
+        dry_run: If True, only prepare the manifest without deploying
     """
 
     # Load manifest to extract the service name
@@ -48,8 +58,12 @@ def run(
         "inference_service_manifest_path": inference_service_manifest_path,
         "inference_service_name": inference_service_name,
         "gateway_status_address_name": gateway_status_address_name,
+        "dry_run": dry_run,
     }
     context = execute_tasks(task_args)
+
+    if dry_run:
+        return "<dry_run>"
 
     # Ensure endpoint_url is available
     endpoint_url = getattr(context, "endpoint_url", None)
@@ -84,6 +98,16 @@ def copy_manifest_to_src(args, ctx):
     ctx.src_manifest_path = str(src_path)
 
     return f"Copied manifest from {original_path} to {src_path}"
+
+
+@task
+def check_dry_run(args, ctx):
+    """Check if dry-run mode is enabled and return early if so"""
+    if args.dry_run:
+        return EarlyReturn(
+            f"Dry-run completed: Prepared manifest for {args.inference_service_name}"
+        )
+    return "Proceeding with full deployment"
 
 
 @task
@@ -154,6 +178,9 @@ def wait_pods_appear(args, ctx):
 def capture_llmisv_description(args, ctx):
     """Capture LLMISV description with events and status for failure analysis"""
 
+    if args.dry_run:
+        return "Dry-run, nothing to do"
+
     try:
         # Ensure artifacts directory exists
         artifacts_dir = args.artifact_dir / "artifacts"
@@ -187,6 +214,9 @@ def capture_llmisv_description(args, ctx):
 @task
 def capture_replicaset_description(args, ctx):
     """Capture ReplicaSet description for pod creation failure analysis"""
+
+    if args.dry_run:
+        return "Dry-run, nothing to do"
 
     try:
         # Ensure artifacts directory exists
