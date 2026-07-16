@@ -39,5 +39,13 @@ def slugify_identifier(value: str, *, max_length: int = 63) -> str:
 
 
 def truncate_k8s_name(value: str, *, max_length: int = 63) -> str:
-    """Truncate a string to Kubernetes name length limits."""
-    return value[:max_length].rstrip("-")
+    """Truncate a string to Kubernetes name length limits.
+
+    When truncation occurs, a short hash suffix is appended to avoid
+    collisions between names that share a long common prefix.
+    """
+    if len(value) <= max_length:
+        return value
+    hash_suffix = hashlib.sha256(value.encode()).hexdigest()[:6]
+    prefix = value[: max_length - len(hash_suffix) - 1].rstrip("-")
+    return f"{prefix}-{hash_suffix}"
