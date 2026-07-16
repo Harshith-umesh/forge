@@ -30,11 +30,7 @@ def cleanup_namespace(*, namespace: str | None = None) -> None:
         namespace = runtime_config.get_namespace()
     platform = runtime_config.get_platform_config()
     inference_service_name = platform["inference_service"]["name"]
-    benchmark_job_names = runtime_config.get_benchmark_job_names()
-    # Multiple benchmarks may share a job_name (defaults to "guidellm-benchmark");
-    # the broad labeled sweep below deletes every forge-labeled job/pod/pvc
-    # regardless, so a single representative name is enough for the named pass.
-    benchmark_name = benchmark_job_names[0] if benchmark_job_names else None
+    benchmark_name = runtime_config.get_benchmark_job_name()
 
     if not oc_resource_exists("namespace", namespace):
         return

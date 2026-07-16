@@ -165,10 +165,31 @@ def test_release_preset_expands_benchmark_list_and_merges_workload_args() -> Non
         "multi-turn",
     ]
 
-    benchmark_configs = dict(runtime_config.get_benchmark_configs())
-    assert benchmark_configs["concurrent-1k-1k"]["args"]["request_type"] == "text_completions"
-    assert benchmark_configs["heavy-heterogeneous"]["args"]["request_type"] == "text_completions"
-    assert benchmark_configs["multi-turn"]["args"]["request_type"] == "text_completions"
+    run_specs = runtime_config.get_run_specs()
+    for run_spec in run_specs:
+        with runtime_config.activate_run_spec(run_spec):
+            benchmark = runtime_config.get_benchmark_config()
+            assert benchmark["args"]["request_type"] == "text_completions"
+
+
+def test_release_preset_produces_3_run_specs() -> None:
+    _init_project_config()
+
+    core_config.project.apply_preset("gpt-oss-120b-inference-scheduling-release")
+
+    run_specs = runtime_config.get_run_specs()
+
+    assert len(run_specs) == 3
+    assert [spec.benchmark_key for spec in run_specs] == [
+        "concurrent-1k-1k",
+        "heavy-heterogeneous",
+        "multi-turn",
+    ]
+    assert all(spec.model_name == "openai/gpt-oss-120b" for spec in run_specs)
+    assert all(spec.deployment_profile_name == "distributed-default" for spec in run_specs)
+
+    namespaces = [spec.namespace for spec in run_specs]
+    assert len(namespaces) == len(set(namespaces))
 
 
 def test_ci_init_uses_framework_project_args_preset_and_keeps_var_overrides() -> None:
@@ -544,6 +565,116 @@ def test_model_and_deployment_profile_accept_yaml_list_strings() -> None:
     ]
     assert run_specs[0].model_slug == "openai-gpt-oss-120b"
     assert run_specs[2].model_slug == "qwen-qwen3-0-6b"
+    # With a single benchmark_key (or null), benchmark fields reflect the scalar
+    assert all(spec.benchmark_key is not None or spec.benchmark_slug is None for spec in run_specs)
+
+
+def test_3d_matrix_with_multiple_benchmark_keys() -> None:
+    _init_project_config()
+
+    core_config.project.set_config(
+        "runtime.model_name",
+        "[openai/gpt-oss-120b, Qwen/Qwen3-0.6B]",
+    )
+    core_config.project.set_config(
+        "runtime.deployment_profile",
+        "[distributed-default, precise-prefix-cache]",
+    )
+    core_config.project.set_config(
+        "runtime.benchmark_key",
+        "[concurrent-1k-1k, multi-turn]",
+    )
+
+    run_specs = runtime_config.get_run_specs()
+
+    # 2 models x 2 profiles x 2 benchmarks = 8 specs
+    assert len(run_specs) == 8
+    assert all(spec.benchmark_key is not None for spec in run_specs)
+    assert all(spec.benchmark_slug is not None for spec in run_specs)
+
+    assert run_specs[0].model_name == "openai/gpt-oss-120b"
+    assert run_specs[0].deployment_profile_name == "distributed-default"
+    assert run_specs[0].benchmark_key == "concurrent-1k-1k"
+
+    # Verify all namespaces are unique
+    namespaces = [spec.namespace for spec in run_specs]
+    assert len(namespaces) == len(set(namespaces))
+
+    # Verify all artifact dirnames are unique
+    dirnames = [spec.artifact_dirname for spec in run_specs]
+    assert len(dirnames) == len(set(dirnames))
+
+
+def test_null_benchmark_key_produces_smoke_only_specs() -> None:
+    _init_project_config()
+
+    core_config.project.set_config("runtime.benchmark_key", None)
+
+    run_specs = runtime_config.get_run_specs()
+
+    assert len(run_specs) == 1
+    assert run_specs[0].benchmark_key is None
+    assert run_specs[0].benchmark_slug is None
+
+
+def test_single_benchmark_key_backward_compatible() -> None:
+    _init_project_config()
+
+    core_config.project.apply_preset("smoke")
+
+    run_specs = runtime_config.get_run_specs()
+
+    assert len(run_specs) == 1
+    assert run_specs[0].benchmark_key == "short"
+    assert run_specs[0].benchmark_slug == "short"
+    assert run_specs[0].artifact_dirname == "llmd_run"
+
+
+def test_activate_run_spec_sets_benchmark_key() -> None:
+    _init_project_config()
+
+    core_config.project.set_config(
+        "runtime.benchmark_key",
+        "[concurrent-1k-1k, multi-turn]",
+    )
+
+    run_specs = runtime_config.get_run_specs()
+
+    for run_spec in run_specs:
+        with runtime_config.activate_run_spec(run_spec):
+            keys = runtime_config.get_benchmark_keys()
+            assert keys == [run_spec.benchmark_key]
+            assert runtime_config.get_benchmark_config() is not None
+
+
+def test_benchmark_deployment_overrides() -> None:
+    _init_project_config()
+
+    core_config.project.set_config("runtime.benchmark_key", "concurrent-1k-1k")
+    core_config.project.config["workloads"]["benchmarks"]["concurrent-1k-1k"][
+        "deployment_overrides"
+    ] = {"vllm_args": ["--max-model-len=8192"]}
+
+    overrides = runtime_config.get_benchmark_deployment_overrides()
+    assert overrides == {"vllm_args": ["--max-model-len=8192"]}
+
+
+def test_benchmark_deployment_overrides_empty_when_not_set() -> None:
+    _init_project_config()
+
+    core_config.project.set_config("runtime.benchmark_key", "concurrent-1k-1k")
+
+    overrides = runtime_config.get_benchmark_deployment_overrides()
+    assert overrides == {}
+
+
+def test_benchmark_deployment_overrides_empty_when_no_benchmark() -> None:
+    _init_project_config()
+
+    core_config.project.set_config("runtime.benchmark_key", None)
+
+    overrides = runtime_config.get_benchmark_deployment_overrides()
+    assert overrides == {}
 
 
 def test_runtime_rejects_legacy_model_key_path() -> None:
@@ -665,12 +796,14 @@ def test_render_removes_scheduler_when_deployment_requests_null_scheduler() -> N
     assert "scheduler" not in manifest["spec"]["router"]
 
 
-def test_benchmark_job_names_collapse_shared_default() -> None:
+def test_benchmark_job_name_from_activated_spec() -> None:
     _init_project_config()
 
     core_config.project.apply_preset("gpt-oss-120b-inference-scheduling-release")
-    # Three benchmark_keys, all sharing the workload default job_name -> one entry.
-    assert runtime_config.get_benchmark_job_names() == ["guidellm-benchmark"]
+
+    for run_spec in runtime_config.get_run_specs():
+        with runtime_config.activate_run_spec(run_spec):
+            assert runtime_config.get_benchmark_job_name() == "guidellm-benchmark"
 
 
 def test_smoke_preset_benchmark_behavior() -> None:
@@ -679,7 +812,10 @@ def test_smoke_preset_benchmark_behavior() -> None:
     core_config.project.apply_preset("smoke")
     # The smoke preset enables the short benchmark
     assert runtime_config.get_benchmark_keys() == ["short"]
-    assert runtime_config.get_benchmark_job_names() == ["guidellm-benchmark"]
+
+    run_spec = runtime_config.get_run_specs()[0]
+    with runtime_config.activate_run_spec(run_spec):
+        assert runtime_config.get_benchmark_job_name() == "guidellm-benchmark"
 
 
 def test_run_spec_preserves_namespace_managed_flag() -> None:
