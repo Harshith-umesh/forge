@@ -23,6 +23,7 @@ def oc(
     timeout_seconds: float | None = 300,
     log_stdout: bool = True,
     log_stderr: bool = True,
+    stdout_dest: Path | None = None,
 ) -> shell.CommandResult:
     """Run an oc command.
 
@@ -33,6 +34,7 @@ def oc(
         timeout_seconds: Command timeout (not supported)
         log_stdout: Log stdout to console (default True)
         log_stderr: Log stderr to console (default True)
+        stdout_dest: Optional file path to write stdout to
 
     Returns:
         CommandResult with execution details
@@ -45,6 +47,7 @@ def oc(
         shell=False,
         log_stdout=log_stdout,
         log_stderr=log_stderr,
+        stdout_dest=stdout_dest,
     )
 
 
