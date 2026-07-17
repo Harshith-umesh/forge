@@ -133,6 +133,44 @@ pd-scale-test:
   workloads.args:
     request_type: text_completions
 
+# New deployment profiles
+deployment-intelligentrouting-tp4-x4:
+  runtime.selected_preset: deployment-intelligentrouting-tp4-x4
+  runtime.deployment_profile: intelligentrouting-tp4-x4
+
+deployment-simple-tp4-x4:
+  runtime.selected_preset: deployment-simple-tp4-x4
+  runtime.deployment_profile: simple-tp4-x4
+
+deployment-pd-x2-ptp4-px1-dtp4:
+  runtime.selected_preset: deployment-pd-x2-ptp4-px1-dtp4
+  runtime.deployment_profile: pd-x2-ptp4-px1-dtp4
+
+# Smoke presets for new profiles
+smoke-intelligentrouting:
+  extends:
+    - smoke-base
+    - deployment-intelligentrouting-tp4-x4
+  runtime.selected_preset: smoke-intelligentrouting
+  runtime.benchmark_key: short
+  platform.gateway.status_address_name: gateway-internal
+
+smoke-simple-tp4:
+  extends:
+    - smoke-base
+    - deployment-simple-tp4-x4
+  runtime.selected_preset: smoke-simple-tp4
+  runtime.benchmark_key: short
+  platform.gateway.status_address_name: gateway-internal
+
+smoke-pd-tp4:
+  extends:
+    - smoke-base
+    - deployment-pd-x2-ptp4-px1-dtp4
+  runtime.selected_preset: smoke-pd-tp4
+  runtime.benchmark_key: short
+  platform.gateway.status_address_name: gateway-internal
+
 # New presets ported from other tool
 pd-flavors:
   extends:

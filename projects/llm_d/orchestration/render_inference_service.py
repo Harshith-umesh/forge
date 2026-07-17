@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 from pathlib import Path
 from typing import Any
@@ -7,6 +8,7 @@ from typing import Any
 import yaml
 
 from projects.core.dsl.utils import slugify_identifier, truncate_k8s_name
+from projects.core.library import config
 
 
 def _load_yaml(path: Path) -> Any:
@@ -85,9 +87,18 @@ def render_inference_service_from_parts(
     manifest["spec"]["model"]["name"] = model_slug
 
     if is_pd_deployment:
-        return _render_pd_deployment(manifest, deployment_profile, deployment_profile_name)
+        rendered_manifest = _render_pd_deployment(
+            manifest, deployment_profile, deployment_profile_name
+        )
     else:
-        return _render_standard_deployment(manifest, deployment_profile)
+        rendered_manifest = _render_standard_deployment(
+            manifest, deployment_profile, deployment_profile_name
+        )
+
+    # Apply Kueue configuration if enabled
+    _apply_kueue_configuration(rendered_manifest)
+
+    return rendered_manifest
 
 
 def _build_serving_resources(deployment_profile: dict[str, Any]) -> dict[str, Any]:
@@ -129,31 +140,113 @@ def _has_cli_arg(args: list[str], option_name: str) -> bool:
 
 
 def _render_standard_deployment(
-    manifest: dict[str, Any], deployment_profile: dict[str, Any]
+    manifest: dict[str, Any],
+    deployment_profile: dict[str, Any],
+    deployment_profile_name: str | None = None,
 ) -> dict[str, Any]:
     """Render standard (non-P/D) deployment configuration."""
+    # Check if this is intelligent routing (scheduler_manifest exists)
+    scheduler = deployment_profile.get("scheduler")
+    has_scheduler_manifest = "scheduler_manifest" in deployment_profile
+    is_intelligent_routing = scheduler is not None and has_scheduler_manifest
+
+    # Update service name for intelligent routing or use_defaults
+    current_name = manifest["metadata"]["name"]
+    use_defaults = deployment_profile.get("use_defaults", False)
+    if (
+        current_name == "llm-d"
+        and deployment_profile_name
+        and (is_intelligent_routing or use_defaults)
+    ):
+        manifest["metadata"]["name"] = f"llm-d-{deployment_profile_name}"
+
     manifest["spec"]["replicas"] = deployment_profile["replicas"]
 
     serving_container = manifest["spec"]["template"]["containers"][0]
     serving_container["resources"] = _build_serving_resources(deployment_profile)
     if deployment_profile.get("serving_image"):
         serving_container["image"] = deployment_profile["serving_image"]
-    vllm_args = _build_vllm_args(deployment_profile.get("vllm_args", {}))
-    tensor_parallelism = str(deployment_profile["tensor_parallelism"])
-    if not _has_cli_arg(vllm_args, "tensor-parallel-size"):
-        vllm_args.append(f"--tensor-parallel-size={tensor_parallelism}")
-    if vllm_args:
-        serving_container["args"] = vllm_args
 
-    scheduler = deployment_profile.get("scheduler", {})
-    if scheduler is None:
+    # Configure VLLM args based on deployment type and use_defaults flag
+    tensor_parallelism = str(deployment_profile["tensor_parallelism"])
+    use_defaults = deployment_profile.get("use_defaults", False)
+
+    if use_defaults:
+        # Use VLLM_ADDITIONAL_ARGS environment variable when use_defaults is set
+        vllm_args = _build_vllm_args(deployment_profile.get("vllm_args", {}))
+        if not _has_cli_arg(vllm_args, "tensor-parallel-size"):
+            vllm_args.append(f"--tensor-parallel-size={tensor_parallelism}")
+
+        vllm_additional_args = " ".join(vllm_args)
+
+        # Add environment variable (don't set generic env vars or args)
+        if "env" not in serving_container:
+            serving_container["env"] = []
+        serving_container["env"].append(
+            {"name": "VLLM_ADDITIONAL_ARGS", "value": vllm_additional_args}
+        )
+    elif is_intelligent_routing:
+        # Use environment variables for intelligent routing
+        vllm_args_list = [
+            f"--tensor-parallel-size={tensor_parallelism}",
+            "--disable-uvicorn-access-log",
+            "--enable-prefix-caching",
+            "--uvicorn-log-level=debug",
+            "--trust-remote-code",
+            "--gpu-memory-utilization=0.92",
+            "--max-model-len 40960",
+        ]
+        vllm_additional_args = " ".join(vllm_args_list)
+
+        # Add or update environment variables
+        if "env" not in serving_container:
+            serving_container["env"] = []
+        serving_container["env"].append(
+            {"name": "VLLM_ADDITIONAL_ARGS", "value": vllm_additional_args}
+        )
+    else:
+        # Use CLI args for basic deployments
+        vllm_args = _build_vllm_args(deployment_profile.get("vllm_args", {}))
+        if not _has_cli_arg(vllm_args, "tensor-parallel-size"):
+            vllm_args.append(f"--tensor-parallel-size={tensor_parallelism}")
+        if vllm_args:
+            serving_container["args"] = vllm_args
+
+    # Configure router/scheduler
+    has_scheduler_key = "scheduler" in deployment_profile
+    is_simple_deployment = not has_scheduler_key and not has_scheduler_manifest
+
+    if is_simple_deployment:
+        # Simple deployments (no scheduler key, no scheduler_manifest) have no router section at all
+        manifest["spec"].pop("router", None)
+    elif scheduler is None:
+        # Some deployments might have router but no scheduler
         manifest["spec"]["router"].pop("scheduler", None)
     else:
+        # Configure scheduler for intelligent routing
         manifest["spec"]["router"]["scheduler"] = copy.deepcopy(scheduler)
         if deployment_profile.get("router_image"):
             manifest["spec"]["router"]["scheduler"]["template"]["containers"][0]["image"] = (
                 deployment_profile["router_image"]
             )
+
+        # Enhance scheduler for intelligent routing
+        if is_intelligent_routing:
+            # Ensure template structure exists
+            if "template" not in manifest["spec"]["router"]["scheduler"]:
+                manifest["spec"]["router"]["scheduler"]["template"] = {
+                    "containers": [{"name": "main"}]
+                }
+
+            scheduler_template = manifest["spec"]["router"]["scheduler"]["template"]
+
+            # Add nodeSelector and serviceAccountName (if not already set by runtime_config.py)
+            if "nodeSelector" not in scheduler_template:
+                scheduler_template["nodeSelector"] = {
+                    "nvidia.com/gpu.deploy.container-toolkit": "true"
+                }
+            if "serviceAccountName" not in scheduler_template:
+                scheduler_template["serviceAccountName"] = "llm-d-privileged"
 
     return manifest
 
@@ -164,7 +257,6 @@ def _render_pd_deployment(
     deployment_profile_name: str | None = None,
 ) -> dict[str, Any]:
     """Render P/D (Prefill/Decode) deployment configuration."""
-    pd_config = deployment_profile["pd_config"]
 
     # Update service name to include deployment profile for P/D
     current_name = manifest["metadata"]["name"]
@@ -198,37 +290,45 @@ def _build_pd_pod_template(
 ) -> dict[str, Any]:
     """Build pod template for P/D deployment."""
     tensor_parallelism = str(deployment_profile["tensor_parallelism"])
+    use_defaults = deployment_profile.get("use_defaults", False)
 
-    # Build VLLM environment variable configuration specific to prefill/decode
-    if is_prefill:
-        # Prefill configuration
-        vllm_args_list = [
-            "--disable-uvicorn-access-log",
-            "--block-size 128",
-            '--kv-transfer-config \'{"kv_connector":"NixlConnector", "kv_role":"kv_both"}\'',
-            f"--tensor-parallel-size={tensor_parallelism}",
-            "--disable-uvicorn-access-log",  # Appears twice in prefill
-            "--enable-prefix-caching",
-            "--uvicorn-log-level=debug",
-            "--trust-remote-code",
-            "--gpu-memory-utilization=0.92",
-            "--max-model-len=40960",
-        ]
+    # Build VLLM environment variable configuration
+    if use_defaults:
+        # Use deployment profile's vllm_args when use_defaults is set
+        vllm_args = _build_vllm_args(deployment_profile.get("vllm_args", {}))
+        if not _has_cli_arg(vllm_args, "tensor-parallel-size"):
+            vllm_args.append(f"--tensor-parallel-size={tensor_parallelism}")
+        vllm_additional_args = " ".join(vllm_args)
     else:
-        # Decode configuration
-        vllm_args_list = [
-            "--block-size 128",
-            '--kv-transfer-config \'{"kv_connector":"NixlConnector", "kv_role":"kv_both"}\'',
-            f"--tensor-parallel-size={tensor_parallelism}",
-            "--disable-uvicorn-access-log",
-            "--enable-prefix-caching",
-            "--uvicorn-log-level=debug",
-            "--trust-remote-code",
-            "--gpu-memory-utilization=0.92",
-            "--max-model-len 40960",  # Space instead of equals for decode
-        ]
-
-    vllm_additional_args = " ".join(vllm_args_list)
+        # Use P/D-specific configuration when use_defaults is false
+        if is_prefill:
+            # Prefill configuration
+            vllm_args_list = [
+                "--disable-uvicorn-access-log",
+                "--block-size 128",
+                '--kv-transfer-config \'{"kv_connector":"NixlConnector", "kv_role":"kv_both"}\'',
+                f"--tensor-parallel-size={tensor_parallelism}",
+                "--disable-uvicorn-access-log",  # Appears twice in prefill
+                "--enable-prefix-caching",
+                "--uvicorn-log-level=debug",
+                "--trust-remote-code",
+                "--gpu-memory-utilization=0.92",
+                "--max-model-len=40960",
+            ]
+        else:
+            # Decode configuration
+            vllm_args_list = [
+                "--block-size 128",
+                '--kv-transfer-config \'{"kv_connector":"NixlConnector", "kv_role":"kv_both"}\'',
+                f"--tensor-parallel-size={tensor_parallelism}",
+                "--disable-uvicorn-access-log",
+                "--enable-prefix-caching",
+                "--uvicorn-log-level=debug",
+                "--trust-remote-code",
+                "--gpu-memory-utilization=0.92",
+                "--max-model-len 40960",  # Space instead of equals for decode
+            ]
+        vllm_additional_args = " ".join(vllm_args_list)
 
     container = {
         "name": "main",
@@ -282,3 +382,91 @@ def _build_pd_pod_template(
         ]
 
     return template
+
+
+def _apply_kueue_configuration(manifest: dict[str, Any]) -> None:
+    """Apply Kueue annotations and labels to the ISVC manifest.
+
+    Based on the implementation from topsail's test_llmd.py.
+    Can be enabled by setting runtime.kserve_use_kueue config.
+    """
+    # Check if kueue annotations should be enabled
+    enable_kueue = config.project.get_config("runtime.kserve_use_kueue", False)
+
+    if not enable_kueue:
+        return
+
+    # Default kueue configuration (can be made configurable later)
+    kueue_config = {
+        "enabled": True,
+        "prefix": "kueue.x-k8s.io/",
+        "labels": {"queue-name": "default-queue"},
+        "annotations": {"queue-name": "default-queue"},
+    }
+
+    # Get prefix for kueue labels/annotations
+    kueue_prefix = kueue_config.get("prefix", "kueue.x-k8s.io/")
+
+    # Ensure metadata sections exist
+    if "metadata" not in manifest:
+        manifest["metadata"] = {}
+    if "labels" not in manifest["metadata"]:
+        manifest["metadata"]["labels"] = {}
+    if "annotations" not in manifest["metadata"]:
+        manifest["metadata"]["annotations"] = {}
+
+    # Apply Kueue labels
+    kueue_labels = kueue_config.get("labels", {})
+    for label_key, label_value in kueue_labels.items():
+        full_label_key = f"{kueue_prefix}{label_key}"
+        manifest["metadata"]["labels"][full_label_key] = label_value
+
+    # Apply Kueue annotations
+    kueue_annotations = kueue_config.get("annotations", {})
+    for annotation_key, annotation_value in kueue_annotations.items():
+        full_annotation_key = f"{kueue_prefix}{annotation_key}"
+        manifest["metadata"]["annotations"][full_annotation_key] = annotation_value
+
+    # Apply Kueue annotations to router scheduler pod template if it exists
+    if (
+        "spec" in manifest
+        and "router" in manifest["spec"]
+        and "scheduler" in manifest["spec"]["router"]
+    ):
+        scheduler_template = manifest["spec"]["router"]["scheduler"].get("template", {})
+
+        # Ensure metadata exists in scheduler template
+        if "metadata" not in scheduler_template:
+            scheduler_template["metadata"] = {}
+        if "annotations" not in scheduler_template["metadata"]:
+            scheduler_template["metadata"]["annotations"] = {}
+
+        # Apply the same Kueue annotations to the scheduler pod template
+        for annotation_key, annotation_value in kueue_annotations.items():
+            full_annotation_key = f"{kueue_prefix}{annotation_key}"
+            scheduler_template["metadata"]["annotations"][full_annotation_key] = annotation_value
+
+        # Update the scheduler template back to the data structure
+        manifest["spec"]["router"]["scheduler"]["template"] = scheduler_template
+
+    # Calculate pod group total count: 1 scheduler + number of replicas
+    replicas = manifest.get("spec", {}).get("replicas", 1)
+
+    # For P/D deployments, we need to account for prefill replicas too
+    prefill_replicas = 0
+    if "spec" in manifest and "prefill" in manifest["spec"]:
+        prefill_replicas = manifest["spec"]["prefill"].get("replicas", 0)
+
+    # Total: main replicas + prefill replicas + (1 scheduler if router exists)
+    has_scheduler = (
+        "spec" in manifest
+        and "router" in manifest["spec"]
+        and "scheduler" in manifest["spec"]["router"]
+    )
+
+    scheduler_count = 1 if has_scheduler else 0
+    pod_group_total_count = replicas + prefill_replicas + scheduler_count
+
+    manifest["metadata"]["annotations"][f"{kueue_prefix}pod-group-total-count"] = str(
+        pod_group_total_count
+    )

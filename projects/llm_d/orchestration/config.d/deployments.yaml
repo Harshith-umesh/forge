@@ -43,6 +43,7 @@ pd-large:
 pd-x2-ptp4-px1-dtp4:
   scheduler_manifest: manifests/deployments/pd-scheduler.yaml
   tensor_parallelism: 4
+  use_defaults: true
   pd_config:
     prefill_pods: 1  # px1
     decode_pods: 4   # dtp4
@@ -52,9 +53,11 @@ intelligentrouting-tp4-x4:
   scheduler_manifest: manifests/deployments/approximate-prefix-cache.yaml
   tensor_parallelism: 4
   replicas: 4
+  use_defaults: true
   scheduler: {}  # scheduler enabled with default config
 
 simple-tp4-x4:
   tensor_parallelism: 4
   replicas: 4
+  use_defaults: true
   # No scheduler_manifest means scheduler disabled

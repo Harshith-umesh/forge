@@ -294,7 +294,23 @@ def get_deployment_profile() -> dict[str, Any]:
     resolved_profile = deep_merge(defaults, profile)
     if scheduler_manifest:
         scheduler_data = _load_yaml(get_config_dir() / scheduler_manifest)
-        resolved_profile = deep_merge(resolved_profile, scheduler_data)
+
+        # When use_defaults is true, use simplified scheduler template
+        use_defaults = resolved_profile.get("use_defaults", False)
+        if use_defaults:
+            # Create simplified scheduler with just basic container structure
+            simplified_scheduler = {
+                "scheduler": {
+                    "template": {
+                        "containers": [{"name": "main"}],
+                        "nodeSelector": {"nvidia.com/gpu.deploy.container-toolkit": "true"},
+                        "serviceAccountName": "llm-d-privileged",
+                    }
+                }
+            }
+            resolved_profile = deep_merge(resolved_profile, simplified_scheduler)
+        else:
+            resolved_profile = deep_merge(resolved_profile, scheduler_data)
 
     return resolved_profile
 
