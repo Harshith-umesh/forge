@@ -33,6 +33,7 @@ def run(
     timeout: int = 900,
     pvc_size: str = "1Gi",
     guidellm_args: list[str] | None = None,
+    hf_token_secret: str = "",
 ) -> int:
     """
     Run the GuideLLM benchmark against a resolved endpoint.
@@ -45,6 +46,7 @@ def run(
         timeout: Timeout in seconds to wait for job completion
         pvc_size: Size of the PersistentVolumeClaim for storing results
         guidellm_args: List of additional guidellm arguments (e.g., ["--rate=10", "--max-seconds=30"])
+        hf_token_secret: Name of the K8s secret containing HF_TOKEN. If empty, HF_TOKEN is not injected.
     """
 
     execute_tasks(locals())
@@ -139,6 +141,7 @@ def create_guidellm_resources_task(args, ctx):
             image=ctx.image,
             endpoint_url=args.endpoint_url,
             guidellm_args=ctx.guidellm_args,
+            hf_token_secret=args.hf_token_secret,
         ),
     )
     return f"GuideLLM benchmark {ctx.benchmark_name} created"

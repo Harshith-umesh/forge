@@ -11,6 +11,7 @@ benchmarks:
     image: ghcr.io/vllm-project/guidellm:v0.6.0
     timeout: 14400
     pvc_size: 10Gi
+    hf_token_secret: "storage-config"
     args:
       backend_type: openai_http
       rate_type: concurrent

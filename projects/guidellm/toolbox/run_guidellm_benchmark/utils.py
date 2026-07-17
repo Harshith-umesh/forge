@@ -175,6 +175,7 @@ def render_guidellm_job_from_parts(
     image: str,
     endpoint_url: str,
     guidellm_args: list[str],
+    hf_token_secret: str = "",
 ) -> dict[str, Any]:
     """Render a GuideLL-M job manifest from individual components.
 
@@ -184,6 +185,7 @@ def render_guidellm_job_from_parts(
         image: Container image for GuideLLM
         endpoint_url: Gateway endpoint URL
         guidellm_args: Additional arguments for GuideLLM
+        hf_token_secret: Name of the K8s secret containing HF_TOKEN. If empty, HF_TOKEN is not injected.
 
     Returns:
         Job manifest as dict
@@ -195,6 +197,7 @@ def render_guidellm_job_from_parts(
             "namespace": namespace,
             "name": name,
             "image": image,
+            "hf_token_secret": hf_token_secret,
         },
     )
     manifest = yaml.safe_load(rendered_yaml)

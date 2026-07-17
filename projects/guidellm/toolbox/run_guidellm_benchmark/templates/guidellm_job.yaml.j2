@@ -26,12 +26,14 @@ spec:
           env:
             - name: USER
               value: guidellm
+{% if hf_token_secret %}
             - name: HF_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: storage-config
+                  name: {{ hf_token_secret }}
                   key: HF_TOKEN
                   optional: true
+{% endif %}
           volumeMounts:
             - name: home
               mountPath: /home/guidellm

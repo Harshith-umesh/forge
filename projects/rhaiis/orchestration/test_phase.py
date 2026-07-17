@@ -307,6 +307,7 @@ def _run_workload_benchmark(
             timeout=benchmark_timeout,
             pvc_size=benchmark_cfg.get("pvc_size", "5Gi"),
             guidellm_args=guidellm_args,
+            hf_token_secret=benchmark_cfg.get("hf_token_secret", ""),
         )
         from pathlib import Path
         candidates = sorted(Path(env.ARTIFACT_DIR).glob(f"{pre_index:03d}__*"))
@@ -824,6 +825,7 @@ def _run_warmup_step(
             timeout=benchmark_timeout,
             pvc_size=benchmark_cfg.get("pvc_size", "5Gi"),
             guidellm_args=guidellm_args,
+            hf_token_secret=benchmark_cfg.get("hf_token_secret", ""),
         )
         logger.info("Warmup completed")
     except Exception:
@@ -888,6 +890,7 @@ def _run_profiler_step(
                 timeout=benchmark_timeout,
                 pvc_size=benchmark_cfg.get("pvc_size", "5Gi"),
                 guidellm_args=guidellm_args,
+                hf_token_secret=benchmark_cfg.get("hf_token_secret", ""),
             )
         finally:
             enable_profiler_gate(
