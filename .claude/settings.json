@@ -1,0 +1,36 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path' | { read -r f; [[ \"$f\" == *.py ]] && { ruff format . || echo \"Warning: ruff format failed for $f\"; }; } || echo \"Warning: file path processing failed\"",
+            "statusMessage": "Formatting Python code with ruff..."
+          },
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path' | { read -r f; [[ \"$f\" == *.py ]] && { ruff check --fix . || echo \"Warning: ruff check --fix failed for $f\"; }; } || echo \"Warning: file path processing failed\"",
+            "statusMessage": "Fixing Python linting issues with ruff..."
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path' | { read -r f; [[ \"$f\" == *.py ]] && { ruff format . || echo \"Warning: ruff format failed for $f\"; }; } || echo \"Warning: file path processing failed\"",
+            "statusMessage": "Formatting Python code with ruff..."
+          },
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path' | { read -r f; [[ \"$f\" == *.py ]] && { ruff check --fix . || echo \"Warning: ruff check --fix failed for $f\"; }; } || echo \"Warning: file path processing failed\"",
+            "statusMessage": "Fixing Python linting issues with ruff..."
+          }
+        ]
+      }
+    ]
+  }
+}
