@@ -1,15 +1,14 @@
 env_key: PSAP_FORGE_DASHBOARD_S3_SECRET_PATH
 description: |
-  AWS credentials for rhaiis dashboard CSV sync (psap-dashboard-data)
-  and profiler trace uploads. Ported from model-furnace s3-uploader.conf.
+  AWS credentials for dashboard CSV sync and data uploads
+  to S3 buckets used by Forge projects.
 
 content:
   aws.credentials:
     description: |
       AWS credentials file (INI format). The key must have
       s3:GetObject, s3:PutObject, s3:CopyObject on:
-        - psap-dashboard-data  (CSV dashboard, profiler traces)
-        - psap-model-furnace   (vLLM logs)
+        - psap-dashboard-data  (CSV dashboard data, profiler traces)
     sample: |
       [default]
       aws_access_key_id = AKIA...

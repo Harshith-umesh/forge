@@ -10,6 +10,17 @@ from projects.core.dsl import (
 
 @entrypoint
 def run(*, name: str, namespace: str, gate_value: str = "0", disable: bool = False):
+    """Toggle the vLLM profiler gate file on a KServe predictor pod.
+
+    Writes (or removes) /tmp/profiler_gate inside the predictor container
+    to enable or disable on-demand profiling for a running inference service.
+
+    Args:
+        name: KServe InferenceService name used to locate the predictor pod.
+        namespace: Kubernetes namespace where the InferenceService is deployed.
+        gate_value: Value written to the gate file (default "0").
+        disable: When True, removes the gate file instead of creating it.
+    """
     return execute_tasks(locals())
 
 

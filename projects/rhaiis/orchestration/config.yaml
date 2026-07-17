@@ -3,7 +3,6 @@ vaults:
 - psap-forge-mlflow-export
 - psap-forge-aws-s3-export
 - psap-forge-dashboard-s3
-- psap-forge-rhaiis-slack
 
 benchmarks:
   guidellm:

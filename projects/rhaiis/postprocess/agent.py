@@ -13,20 +13,17 @@ from urllib.request import Request, urlopen
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_AGENT_URL = (
-    "https://psap-agent-staging-psap-ai-agent.apps.ocp4.intlab.redhat.com/v1/stream"
-)
 AGENT_TIMEOUT_SECONDS = 600
 AGENT_HEALTH_TIMEOUT = 15
 AGENT_SEVERITY_THRESHOLD = 10
 
 
-def check_agent_connectivity(agent_url: str = "") -> tuple[bool, str]:
+def check_agent_connectivity(agent_url: str) -> tuple[bool, str]:
     """Verify that the agent endpoint is reachable.
 
     Tries a lightweight GET to the agent health URL. Returns (ok, detail).
     """
-    url = agent_url or DEFAULT_AGENT_URL
+    url = agent_url
     base_url = url.rsplit("/", 2)[0]
     health_url = f"{base_url}/health"
 
@@ -109,15 +106,15 @@ def request_agent_analysis(
     compare_version: str,
     tp: str,
     severe_regressions: list,
+    agent_url: str,
     job_id: str = "",
     improvements: Optional[list] = None,
-    agent_url: str = "",
 ) -> Optional[str]:
     """Send regression context to the PSAP agent and return its analysis.
 
     Returns the agent's response as a markdown string, or None on failure.
     """
-    url = agent_url or DEFAULT_AGENT_URL
+    url = agent_url
 
     prompt = _build_prompt(
         model=model,
@@ -168,7 +165,7 @@ def request_agent_analysis(
         return None
 
 
-def send_followup(message: str, job_id: str, agent_url: str = "") -> Optional[str]:
+def send_followup(message: str, job_id: str, agent_url: str) -> Optional[str]:
     """Send a followup message to the agent on an existing session.
 
     Reuses the same thread_id/session_id as request_agent_analysis so the
@@ -176,7 +173,7 @@ def send_followup(message: str, job_id: str, agent_url: str = "") -> Optional[st
 
     Returns the agent's response as a markdown string, or None on failure.
     """
-    url = agent_url or DEFAULT_AGENT_URL
+    url = agent_url
 
     session_key = f"forge-rhaiis-{job_id}"
     body = {

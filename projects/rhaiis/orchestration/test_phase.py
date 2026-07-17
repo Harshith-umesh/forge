@@ -594,6 +594,7 @@ def _run_regression_check(
     from projects.caliper.cli.s3_export import create_s3_client, get_aws_credentials
     from projects.caliper.engine.kpi.analyze import run_regression_analysis
     from projects.core.library import config
+    from projects.rhaiis.postprocess.regression import METRICS, PROFILE_MAP
 
     csv_dashboard_cfg = config.project.get_config("caliper.postprocess.csv_dashboard", {})
     s3_bucket = csv_dashboard_cfg.get("s3_bucket", "psap-dashboard-data")
@@ -623,6 +624,8 @@ def _run_regression_check(
             compare_version=compare_version,
             current_version=current_version,
             output_file=output_file,
+            profile_map=PROFILE_MAP,
+            metrics=METRICS,
             restrict_profiles=restrict_profiles,
         )
 
@@ -636,7 +639,7 @@ def _run_regression_check(
                     severity_threshold=agent_cfg.get("severity_threshold", 10),
                 )
 
-            from projects.core.notifications.send import send_regression_notification
+            from projects.rhaiis.postprocess.regression import send_regression_notification
 
             _vllm = vllm_args or {}
             send_regression_notification(
@@ -645,7 +648,7 @@ def _run_regression_check(
                 accelerator=accelerator,
                 job_id=run_uuid,
                 slack_user=config.project.get_config("tests.rhaiis.slack_user", ""),
-                webhook_vault="psap-forge-rhaiis-slack",
+                webhook_vault="psap-forge-notifications",
                 notification_vault="psap-forge-notifications",
                 report_url=report_url,
                 tp=str(_vllm.get("tensor-parallel-size", "")),

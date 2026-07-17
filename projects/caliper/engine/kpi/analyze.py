@@ -15,21 +15,6 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-PROFILE_MAP = {
-    (1000, 1000): "profile1",
-    (512, 2048): "profile2",
-    (2048, 128): "profile3",
-    (8000, 1000): "profile4",
-}
-
-METRICS = {
-    "total_tok/sec": {"label": "Total Throughput", "higher_is_better": True, "threshold": 5},
-    "output_tok/sec": {"label": "Output Throughput", "higher_is_better": True, "threshold": 5},
-    "ttft_p95": {"label": "TTFT P95", "higher_is_better": False, "threshold": 10},
-    "itl_p95": {"label": "ITL P95", "higher_is_better": False, "threshold": 5},
-    "request_latency_median": {"label": "Median E2E Latency", "higher_is_better": False, "threshold": 5},
-}
-
 
 @dataclass
 class RegressionResult:
@@ -55,9 +40,15 @@ def compare_runs(
     consolidated_csv_path: str,
     compare_version: str,
     current_version: str,
+    profile_map: dict[tuple[int, int], str],
+    metrics: dict[str, dict[str, Any]],
     restrict_profiles: Optional[list[str]] = None,
 ) -> tuple[list[RegressionResult], str]:
     """Compare current run metrics against a baseline version.
+
+    Args:
+        profile_map: Mapping of (input_tokens, output_tokens) -> profile name.
+        metrics: Mapping of CSV column -> {label, higher_is_better, threshold}.
 
     Returns (results, skip_reason). If skip_reason is non-empty, comparison was skipped.
     """
@@ -89,7 +80,7 @@ def compare_runs(
             osl = int(float(row["output toks"]))
         except (ValueError, TypeError):
             return None
-        return PROFILE_MAP.get((isl, osl))
+        return profile_map.get((isl, osl))
 
     current_df["_profile"] = current_df.apply(_assign_profile, axis=1)
     baseline_df["_profile"] = baseline_df.apply(_assign_profile, axis=1)
@@ -132,7 +123,7 @@ def compare_runs(
         cur_common = cur[cur["intended concurrency"].isin(common_conc)]
         base_common = base[base["intended concurrency"].isin(common_conc)]
 
-        for col, meta in METRICS.items():
+        for col, meta in metrics.items():
             if col not in cur_common.columns or col not in base_common.columns:
                 continue
 
@@ -178,6 +169,8 @@ def run_regression_analysis(
     compare_version: str,
     current_version: str,
     output_file: Path,
+    profile_map: dict[tuple[int, int], str],
+    metrics: dict[str, dict[str, Any]],
     restrict_profiles: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """Run regression analysis comparing current run against baseline.
@@ -190,6 +183,8 @@ def run_regression_analysis(
             str(consolidated_csv_path),
             compare_version,
             current_version,
+            profile_map=profile_map,
+            metrics=metrics,
             restrict_profiles=restrict_profiles,
         )
 
