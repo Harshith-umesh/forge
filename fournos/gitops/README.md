@@ -37,12 +37,52 @@ gitops/
 - **Build**: Shipwright build configuration for building forge image from source
 - **BuildRun**: Triggers the build process
 
-### Workflows  
-- **Task**: `forge-step` - Reusable Tekton task for executing forge commands
-- **Pipelines**: Multiple pipeline variants:
-  - `forge-full`: Complete pipeline with pre-cleanup, prepare, test, export-artifacts, and post-cleanup
-  - `pipeline-test-only`: Test execution only
-  - `pipeline-replot`: Replotting functionality
+### Workflows
+- **Task**: `forge-step` — reusable Tekton task for executing forge commands
+- **Pipelines**:
+
+| Pipeline | Steps | Finally | Use case |
+|---|---|---|---|
+| `forge-full` | pre-cleanup → prepare → preflight → test | post-cleanup → export-artifacts | Full lifecycle with cleanup on both ends |
+| `forge-prepare-test` | prepare → preflight → test | export-artifacts | Prepare + test without cleanup |
+| `forge-test-only` | preflight → test | export-artifacts | Skip preparation, just run the test |
+| `forge-prepare-only` | prepare → preflight | export-artifacts | Set up the cluster without benchmarks |
+| `forge-replot` | replot | export-artifacts | Re-run visualization/postprocessing |
+
+Select a pipeline via `spec.pipeline` in the FournosJob CR (default: `fournos-full`).
+
+### FournosJob `spec.env` variables
+
+The `forge-step` task bootstrap script reads certain well-known variables
+from `spec.env` and acts on them before launching the execution engine.
+
+#### Git checkout
+
+| Variable | Description |
+|---|---|
+| `PULL_PULL_SHA` | Checkout a specific git commit SHA. The task runs `git fetch origin <sha>` and `git reset --hard FETCH_HEAD` before executing. |
+| `PULL_NUMBER` | Checkout the HEAD of a GitHub PR (`refs/pull/<number>/head`). Also enables GitHub PR notifications — test results are posted as a comment on the PR. |
+| `PULL_BASE_SHA` | Base branch commit SHA (informational context for the execution engine). |
+
+If neither `PULL_PULL_SHA` nor `PULL_NUMBER` is set, the execution engine
+runs with the code baked into the container image.
+
+`PULL_NUMBER` is the most convenient option for testing a PR: it checks
+out the latest code from that PR **and** posts results back to GitHub.
+
+#### Example
+
+```yaml
+spec:
+  env:
+    PULL_NUMBER: "118"        # checkout PR #118 HEAD + post results to PR
+```
+
+```yaml
+spec:
+  env:
+    PULL_PULL_SHA: "abc123"   # checkout exact commit, no PR notification
+```
 
 ## Environments
 
