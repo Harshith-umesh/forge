@@ -92,6 +92,6 @@ artifacts:
 
 smoke:
   pod_name: llm-d-smoke
-  client_image: curlimages/curl:8.11.1
+  client_image: quay.io/curl/curl:8.21.0
   endpoint_path: /v1/completions
   request_timeout_seconds: 60
