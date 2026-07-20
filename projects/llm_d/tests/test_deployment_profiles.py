@@ -16,10 +16,11 @@ REFERENCE_DIR = Path(__file__).resolve().parent / "reference_deployments"
 
 # Deployment presets to test
 DEPLOYMENT_PRESETS = [
-    "deployment-simple-tp4-x4",
-    "deployment-intelligentrouting-tp4-x4",
-    "deployment-pd-x2-ptp4-px1-dtp4",
+    "cpt-reference-flavors",
 ]
+
+# Check for save deployments mode via environment variable
+SAVE_DEPLOYMENTS = os.environ.get("SAVE_DEPLOYMENTS", "false").lower() in ("true", "1", "yes")
 
 
 @pytest.fixture(autouse=True)
@@ -77,61 +78,174 @@ def _test_preset_generates_expected_llmisvc(preset: str, tmp_path: Path):
     # Check that the command succeeded
     if result.returncode != 0:
         pytest.fail(
-            f"CI command failed for preset {preset}:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+            f"CI command failed for preset {preset}:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}\n\n"
+            f"💡 To save generated deployments as references, use:\n"
+            f"   SAVE_DEPLOYMENTS=true python -m pytest {__name__} -v -s"
         )
 
-    # Find the generated LLMISVC manifest
-    generated_manifest = _find_generated_llmisvc(artifact_dir)
-    if not generated_manifest.exists():
-        pytest.fail(f"Generated LLMISVC manifest not found at {generated_manifest}")
+    # Find all generated LLMISVC manifests
+    deployments = _find_generated_llmisvcs(artifact_dir)
 
-    # Load the generated manifest
-    with generated_manifest.open("r", encoding="utf-8") as f:
-        generated_content = yaml.safe_load(f)
-
-    # Load the reference manifest
-    reference_manifest = REFERENCE_DIR / preset / "llmisvc.yaml"
-    if not reference_manifest.exists():
-        pytest.fail(f"Reference manifest not found at {reference_manifest}")
-
-    with reference_manifest.open("r", encoding="utf-8") as f:
-        reference_content = yaml.safe_load(f)
-
-    # Compare the manifests
-    if generated_content != reference_content:
-        # Generate a diff for better error reporting
-        import difflib
-
-        generated_yaml = yaml.dump(generated_content, default_flow_style=False, sort_keys=True)
-        reference_yaml = yaml.dump(reference_content, default_flow_style=False, sort_keys=True)
-
-        diff = list(
-            difflib.unified_diff(
-                reference_yaml.splitlines(keepends=True),
-                generated_yaml.splitlines(keepends=True),
-                fromfile=f"reference/{preset}/llmisvc.yaml",
-                tofile=f"generated/{preset}/llmisvc.yaml",
-                lineterm="",
-            )
-        )
-
+    if not deployments:
         pytest.fail(
-            f"Generated LLMISVC does not match reference for preset {preset}:\n{''.join(diff)}"
+            f"No generated LLMISVC manifests found in {artifact_dir}\n\n"
+            f"💡 To save generated deployments as references, use:\n"
+            f"   SAVE_DEPLOYMENTS=true python -m pytest {__name__} -v -s"
         )
 
+    # If saving deployments, save them and skip comparison
+    if SAVE_DEPLOYMENTS:
+        _save_deployments(preset, deployments)
+        pytest.skip(f"Saved {len(deployments)} deployments for preset {preset}")
+        return
 
-def _find_generated_llmisvc(artifact_dir: Path) -> Path:
-    """Find the generated LLMISVC manifest in the artifact directory."""
+    # Test each deployment against its reference
+    for deployment in deployments:
+        profile_name = deployment["profile_name"]
+        generated_manifest = deployment["manifest_path"]
+
+        print(f"Testing deployment for profile: {profile_name}")
+
+        if not generated_manifest.exists():
+            pytest.fail(
+                f"Generated LLMISVC manifest not found at {generated_manifest}\n\n"
+                f"💡 To save generated deployments as references, use:\n"
+                f"   SAVE_DEPLOYMENTS=true python -m pytest {__name__} -v -s"
+            )
+
+        # Load the generated manifest
+        with generated_manifest.open("r", encoding="utf-8") as f:
+            generated_content = yaml.safe_load(f)
+
+        # Determine reference manifest path
+        # Look in preset-specific directory structure: preset/deployment-{profile_name}/llmisvc.yaml
+        reference_preset_dir = REFERENCE_DIR / preset
+        reference_deployment_dir = reference_preset_dir / f"deployment-{profile_name}"
+        reference_manifest = reference_deployment_dir / "llmisvc.yaml"
+
+        if not reference_manifest.exists():
+            pytest.fail(
+                f"Reference manifest not found at {reference_manifest}\n\n"
+                f"💡 To save generated deployments as references, use:\n"
+                f"   SAVE_DEPLOYMENTS=true python -m pytest {__name__} -v -s"
+            )
+
+        with reference_manifest.open("r", encoding="utf-8") as f:
+            reference_content = yaml.safe_load(f)
+
+        # Compare the manifests
+        if generated_content != reference_content:
+            # Generate a diff for better error reporting
+            import difflib
+
+            generated_yaml = yaml.dump(generated_content, default_flow_style=False, sort_keys=True)
+            reference_yaml = yaml.dump(reference_content, default_flow_style=False, sort_keys=True)
+
+            diff = list(
+                difflib.unified_diff(
+                    reference_yaml.splitlines(keepends=True),
+                    generated_yaml.splitlines(keepends=True),
+                    fromfile=f"reference/{preset}/deployment-{profile_name}/llmisvc.yaml",
+                    tofile=f"generated/{preset}/{profile_name}/llmisvc.yaml",
+                    lineterm="",
+                )
+            )
+
+            pytest.fail(
+                f"Generated LLMISVC does not match reference for profile {profile_name} in preset {preset}:\n{''.join(diff)}\n\n"
+                f"💡 To update reference deployments with new output, use:\n"
+                f"   SAVE_DEPLOYMENTS=true python -m pytest {__name__} -v -s"
+            )
+
+
+def _save_deployments(preset: str, deployments: list[dict[str, Path]]):
+    """Save generated deployments as reference manifests."""
+    print(f"\nSaving {len(deployments)} deployments for preset {preset}:")
+
+    for deployment in deployments:
+        profile_name = deployment["profile_name"]
+        generated_manifest = deployment["manifest_path"]
+
+        # Create reference directory for this preset and deployment profile
+        reference_preset_dir = REFERENCE_DIR / preset
+        reference_deployment_dir = reference_preset_dir / f"deployment-{profile_name}"
+        reference_deployment_dir.mkdir(parents=True, exist_ok=True)
+
+        # Copy the generated manifest to the reference location
+        reference_manifest = reference_deployment_dir / "llmisvc.yaml"
+
+        with generated_manifest.open("r", encoding="utf-8") as f:
+            content = f.read()
+
+        with reference_manifest.open("w", encoding="utf-8") as f:
+            f.write(content)
+
+        print(f"  Saved {profile_name} → {reference_manifest}")
+
+    print(f"Reference deployments saved to: {reference_preset_dir}")
+
+
+def _find_generated_llmisvcs(artifact_dir: Path) -> list[dict[str, Path]]:
+    """Find all generated LLMISVC manifests in the artifact directory.
+
+    Returns:
+        List of dictionaries with 'profile_name' and 'manifest_path' keys
+    """
     # Look for the pattern: $ARTIFACT_DIR/**/deploy_llmisvc/src/llminferenceservice.yaml
     deploy_llmisvc_dirs = list(artifact_dir.glob("**/*__deploy_llmisvc"))
 
     if not deploy_llmisvc_dirs:
         raise FileNotFoundError(f"No deploy_llmisvc directory found in {artifact_dir}")
 
-    if len(deploy_llmisvc_dirs) > 1:
-        raise ValueError(
-            f"Multiple deploy_llmisvc directories found in {artifact_dir}: {deploy_llmisvc_dirs}"
-        )
+    deployments = []
+    for deploy_dir in deploy_llmisvc_dirs:
+        llmisvc_path = deploy_dir / "src" / "llminferenceservice.yaml"
+        if llmisvc_path.exists():
+            # Extract profile name from the directory structure
+            # Pattern: .../__llmd_run_{profile_name}_{model_slug}/.../__deploy_llmisvc
+            parent_path = (
+                deploy_dir.parent.parent.name
+            )  # e.g., "001__llmd_run_pd-d-x2-p-tp4-d-tp4-p-x1_qwen-qwen3-0-6b"
+            if "__llmd_run_" in parent_path:
+                # Extract the part after __llmd_run_
+                run_part = parent_path.split("__llmd_run_", 1)[1]
 
-    llmisvc_path = deploy_llmisvc_dirs[0] / "src" / "llminferenceservice.yaml"
-    return llmisvc_path
+                # Split by underscore to separate profile from model
+                parts = run_part.split("_")
+
+                # Find where the model name starts (models typically start with specific patterns)
+                model_start_idx = len(parts)
+                for i, part in enumerate(parts):
+                    if part.startswith(("qwen", "meta", "openai", "llama")):
+                        model_start_idx = i
+                        break
+
+                # Profile name is everything before the model
+                if model_start_idx > 0:
+                    profile_parts = parts[:model_start_idx]
+                    profile_name = "-".join(profile_parts)
+                else:
+                    # Fallback: use entire run part minus likely model
+                    profile_name = "-".join(parts[:-1]) if len(parts) > 1 else parts[0]
+
+                deployments.append({"profile_name": profile_name, "manifest_path": llmisvc_path})
+            else:
+                # Fallback: use directory name
+                deployments.append({"profile_name": "unknown", "manifest_path": llmisvc_path})
+
+    return deployments
+
+
+def _find_generated_llmisvc(artifact_dir: Path) -> Path:
+    """Find the generated LLMISVC manifest in the artifact directory (legacy single deployment)."""
+    deployments = _find_generated_llmisvcs(artifact_dir)
+
+    if len(deployments) == 1:
+        return deployments[0]["manifest_path"]
+    elif len(deployments) > 1:
+        raise ValueError(
+            f"Multiple deploy_llmisvc directories found in {artifact_dir}. "
+            f"Use _find_generated_llmisvcs() instead for multi-deployment presets."
+        )
+    else:
+        raise FileNotFoundError(f"No deploy_llmisvc directory found in {artifact_dir}")

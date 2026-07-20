@@ -17,47 +17,25 @@ precise-prefix-cache:
 distributed-default:
   scheduler: {}
 
-# P/D (Prefill/Decode) deployment profiles
-pd-small:
+# Template flavor configurations with name-based extraction
+template__pd:
   scheduler_manifest: manifests/deployments/pd-scheduler.yaml
+  tensor_parallelism: FROM_NAME
+  use_kserve_defaults: true
   pd_config:
-    prefill_pods: 2
-    decode_pods: 4
+    prefill_pods: FROM_NAME
+    decode_pods: FROM_NAME
     scheduler_config: "high-throughput"
 
-pd-medium:
-  scheduler_manifest: manifests/deployments/pd-scheduler.yaml
-  pd_config:
-    prefill_pods: 4
-    decode_pods: 8
-    scheduler_config: "balanced"
-
-pd-large:
-  scheduler_manifest: manifests/deployments/pd-scheduler.yaml
-  pd_config:
-    prefill_pods: 8
-    decode_pods: 16
-    scheduler_config: "low-latency"
-
-# New flavor configurations
-pd-x2-ptp4-px1-dtp4:
-  scheduler_manifest: manifests/deployments/pd-scheduler.yaml
-  tensor_parallelism: 4
-  use_defaults: true
-  pd_config:
-    prefill_pods: 1  # px1
-    decode_pods: 4   # dtp4
-    scheduler_config: "high-throughput"
-
-intelligentrouting-tp4-x4:
+template__intelligentrouting:
+  use_kserve_defaults: true
   scheduler_manifest: manifests/deployments/approximate-prefix-cache.yaml
-  tensor_parallelism: 4
-  replicas: 4
-  use_defaults: true
+  tensor_parallelism: FROM_NAME
+  replicas: FROM_NAME
   scheduler: {}  # scheduler enabled with default config
 
-simple-tp4-x4:
-  tensor_parallelism: 4
-  replicas: 4
-  use_defaults: true
-  # No scheduler_manifest means scheduler disabled
+template__simple:
+  tensor_parallelism: FROM_NAME
+  replicas: FROM_NAME
+  use_kserve_defaults: true
+  scheduler: null # scheduler disabled

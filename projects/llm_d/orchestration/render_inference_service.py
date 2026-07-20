@@ -16,6 +16,44 @@ def _load_yaml(path: Path) -> Any:
         return yaml.safe_load(handle)
 
 
+def _create_model_cache_spec(
+    model_cache: dict[str, Any],
+    source_uri: str,
+    source_scheme: str,
+    model_slug: str,
+    namespace: str,
+) -> dict[str, Any] | None:
+    """Create model cache specification if caching is enabled and applicable."""
+    if not model_cache.get("enabled", False) or source_uri.startswith(("pvc://", "pvc+hf://")):
+        return None
+
+    pvc_defaults = model_cache["pvc"]
+    pvc_prefix = pvc_defaults["name_prefix"]
+    cache_key = hashlib.sha256(source_uri.encode("utf-8")).hexdigest()[:10]
+    pvc_name = truncate_k8s_name(
+        f"{pvc_prefix}-{slugify_identifier(model_slug, max_length=32)}-{cache_key}"
+    )
+    model_path = pvc_defaults["model_directory_name"]
+
+    return {
+        "source_uri": source_uri,
+        "source_scheme": source_scheme,
+        "cache_key": cache_key,
+        "namespace": namespace,
+        "pvc_name": pvc_name,
+        "pvc_size": pvc_defaults["size"],
+        "access_mode": pvc_defaults["access_mode"],
+        "storage_class_name": pvc_defaults.get("storage_class_name"),
+        "model_path": model_path,
+        "model_uri": f"pvc://{pvc_name}/{model_path}",
+        "marker_filename": model_cache["marker_filename"],
+        "marker_path": f"/cache/{model_path}/{model_cache['marker_filename']}",
+        "download_job_name": truncate_k8s_name(f"{pvc_name}-download"),
+        "hf_token_secret_name": model_cache["hf"].get("token_secret_name"),
+        "hf_token_secret_key": model_cache["hf"].get("token_secret_key"),
+    }
+
+
 def render_inference_service_from_parts(
     *,
     config_dir: str | Path,
@@ -55,33 +93,13 @@ def render_inference_service_from_parts(
         source_uri = f"hf://{model_name}"
         source_scheme = "hf"
 
-    cache_spec = None
-    if model_cache.get("enabled", False) and not source_uri.startswith(("pvc://", "pvc+hf://")):
-        pvc_defaults = model_cache["pvc"]
-        pvc_prefix = pvc_defaults["name_prefix"]
-        cache_key = hashlib.sha256(source_uri.encode("utf-8")).hexdigest()[:10]
-        pvc_name = truncate_k8s_name(
-            f"{pvc_prefix}-{slugify_identifier(model_slug, max_length=32)}-{cache_key}"
-        )
-        model_path = pvc_defaults["model_directory_name"]
-
-        cache_spec = {
-            "source_uri": source_uri,
-            "source_scheme": source_scheme,
-            "cache_key": cache_key,
-            "namespace": namespace,
-            "pvc_name": pvc_name,
-            "pvc_size": pvc_defaults["size"],
-            "access_mode": pvc_defaults["access_mode"],
-            "storage_class_name": pvc_defaults.get("storage_class_name"),
-            "model_path": model_path,
-            "model_uri": f"pvc://{pvc_name}/{model_path}",
-            "marker_filename": model_cache["marker_filename"],
-            "marker_path": f"/cache/{model_path}/{model_cache['marker_filename']}",
-            "download_job_name": truncate_k8s_name(f"{pvc_name}-download"),
-            "hf_token_secret_name": model_cache["hf"].get("token_secret_name"),
-            "hf_token_secret_key": model_cache["hf"].get("token_secret_key"),
-        }
+    cache_spec = _create_model_cache_spec(
+        model_cache=model_cache,
+        source_uri=source_uri,
+        source_scheme=source_scheme,
+        model_slug=model_slug,
+        namespace=namespace,
+    )
 
     manifest["spec"]["model"]["uri"] = cache_spec["model_uri"] if cache_spec else source_uri
     manifest["spec"]["model"]["name"] = model_slug
@@ -150,15 +168,10 @@ def _render_standard_deployment(
     has_scheduler_manifest = "scheduler_manifest" in deployment_profile
     is_intelligent_routing = scheduler is not None and has_scheduler_manifest
 
-    # Update service name for intelligent routing or use_defaults
+    # Update service name for intelligent routing or use_kserve_defaults
     current_name = manifest["metadata"]["name"]
-    use_defaults = deployment_profile.get("use_defaults", False)
-    if (
-        current_name == "llm-d"
-        and deployment_profile_name
-        and (is_intelligent_routing or use_defaults)
-    ):
-        manifest["metadata"]["name"] = f"llm-d-{deployment_profile_name}"
+
+    manifest["metadata"]["name"] = f"llm-d-{deployment_profile_name}"
 
     manifest["spec"]["replicas"] = deployment_profile["replicas"]
 
@@ -167,12 +180,12 @@ def _render_standard_deployment(
     if deployment_profile.get("serving_image"):
         serving_container["image"] = deployment_profile["serving_image"]
 
-    # Configure VLLM args based on deployment type and use_defaults flag
+    # Configure VLLM args based on deployment type and use_kserve_defaults flag
     tensor_parallelism = str(deployment_profile["tensor_parallelism"])
-    use_defaults = deployment_profile.get("use_defaults", False)
+    use_kserve_defaults = deployment_profile.get("use_kserve_defaults", False)
 
-    if use_defaults:
-        # Use VLLM_ADDITIONAL_ARGS environment variable when use_defaults is set
+    if use_kserve_defaults:
+        # Use VLLM_ADDITIONAL_ARGS environment variable when use_kserve_defaults is set
         vllm_args = _build_vllm_args(deployment_profile.get("vllm_args", {}))
         if not _has_cli_arg(vllm_args, "tensor-parallel-size"):
             vllm_args.append(f"--tensor-parallel-size={tensor_parallelism}")
@@ -290,17 +303,17 @@ def _build_pd_pod_template(
 ) -> dict[str, Any]:
     """Build pod template for P/D deployment."""
     tensor_parallelism = str(deployment_profile["tensor_parallelism"])
-    use_defaults = deployment_profile.get("use_defaults", False)
+    use_kserve_defaults = deployment_profile.get("use_kserve_defaults", False)
 
     # Build VLLM environment variable configuration
-    if use_defaults:
-        # Use deployment profile's vllm_args when use_defaults is set
+    if use_kserve_defaults:
+        # Use deployment profile's vllm_args when use_kserve_defaults is set
         vllm_args = _build_vllm_args(deployment_profile.get("vllm_args", {}))
         if not _has_cli_arg(vllm_args, "tensor-parallel-size"):
             vllm_args.append(f"--tensor-parallel-size={tensor_parallelism}")
         vllm_additional_args = " ".join(vllm_args)
     else:
-        # Use P/D-specific configuration when use_defaults is false
+        # Use P/D-specific configuration when use_kserve_defaults is false
         if is_prefill:
             # Prefill configuration
             vllm_args_list = [
@@ -391,17 +404,18 @@ def _apply_kueue_configuration(manifest: dict[str, Any]) -> None:
     Can be enabled by setting runtime.kserve_use_kueue config.
     """
     # Check if kueue annotations should be enabled
-    enable_kueue = config.project.get_config("runtime.kserve_use_kueue", False)
+    enable_kueue = config.project.get_config("runtime.kueue.enabled")
 
     if not enable_kueue:
         return
 
-    # Default kueue configuration (can be made configurable later)
+    # Configure kueue settings
+    queue_name = config.project.get_config("runtime.kueue.queue_name")
     kueue_config = {
         "enabled": True,
         "prefix": "kueue.x-k8s.io/",
-        "labels": {"queue-name": "default-queue"},
-        "annotations": {"queue-name": "default-queue"},
+        "labels": {"queue-name": queue_name},
+        "annotations": {"queue-name": queue_name},
     }
 
     # Get prefix for kueue labels/annotations

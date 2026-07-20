@@ -1,15 +1,12 @@
 __multiple: true
 
 deployment-approximate-prefix-cache:
-  runtime.selected_preset: deployment-approximate-prefix-cache
   runtime.deployment_profile: approximate-prefix-cache
 
 deployment-precise-prefix-cache:
-  runtime.selected_preset: deployment-precise-prefix-cache
   runtime.deployment_profile: precise-prefix-cache
 
 deployment-distributed-default:
-  runtime.selected_preset: deployment-distributed-default
   runtime.deployment_profile: distributed-default
 
 smoke-base:
@@ -21,7 +18,6 @@ smoke:
   extends:
     - smoke-base
     - deployment-approximate-prefix-cache
-  runtime.selected_preset: smoke
   runtime.benchmark_key: short
   platform.gateway.status_address_name: gateway-internal
 
@@ -29,23 +25,19 @@ smoke-precise:
   extends:
     - smoke-base
     - deployment-precise-prefix-cache
-  runtime.selected_preset: smoke-precise
 
 smoke-default-scheduler:
   extends:
     - smoke-base
     - deployment-distributed-default
-  runtime.selected_preset: smoke-default-scheduler
 
 benchmark-short:
   extends:
     - deployment-approximate-prefix-cache
-  runtime.selected_preset: benchmark-short
   runtime.model_name: meta-llama/Llama-3.1-8B-Instruct
   runtime.smoke_request_key: default
   runtime.benchmark_key: short
 
-# Base gpt-oss configuration that can be extended
 gpt-oss:
   runtime.model_name: openai/gpt-oss-120b
   runtime.deployment_profile: distributed-default
@@ -57,136 +49,26 @@ gpt-oss:
 gpt-oss-120b-inference-scheduling-release:
   extends:
     - gpt-oss
-  runtime.selected_preset: gpt-oss-120b-inference-scheduling-release
   runtime.benchmark_key:
     - concurrent-1k-1k
     - heavy-heterogeneous
     - multi-turn
 
-cks:
-  extends:
-    - smoke
-
-# P/D deployment profile presets
-deployment-pd-small:
-  runtime.selected_preset: deployment-pd-small
-  runtime.deployment_profile: pd-small
-
-deployment-pd-medium:
-  runtime.selected_preset: deployment-pd-medium
-  runtime.deployment_profile: pd-medium
-
-deployment-pd-large:
-  runtime.selected_preset: deployment-pd-large
-  runtime.deployment_profile: pd-large
-
-# P/D testing presets
-pd-smoke:
-  extends:
-    - smoke-base
-    - deployment-pd-small
-  runtime.selected_preset: pd-smoke
-  runtime.benchmark_key: short
-  platform.gateway.status_address_name: gateway-internal
-
-pd-smoke-medium:
-  extends:
-    - smoke-base
-    - deployment-pd-medium
-  runtime.selected_preset: pd-smoke-medium
-  runtime.benchmark_key: short
-  platform.gateway.status_address_name: gateway-internal
-
-pd-smoke-large:
-  extends:
-    - smoke-base
-    - deployment-pd-large
-  runtime.selected_preset: pd-smoke-large
-  runtime.benchmark_key: short
-  platform.gateway.status_address_name: gateway-internal
-
-pd-matrix:
-  runtime.selected_preset: pd-matrix
-  runtime.model_name:
-    - meta-llama/Llama-3.1-8B-Instruct
-    - Qwen/Qwen3-0.6B
-  runtime.deployment_profile:
-    - pd-small
-    - pd-medium
-    - pd-large
-  runtime.benchmark_key:
-    - short
-    - concurrent-1k-1k
-  runtime.smoke_request_key: default
-  platform.gateway.status_address_name: gateway-internal
-
-pd-scale-test:
-  runtime.selected_preset: pd-scale-test
-  runtime.model_name: openai/gpt-oss-120b
-  runtime.deployment_profile:
-    - pd-small
-    - pd-medium
-    - pd-large
-  runtime.benchmark_key: heavy-heterogeneous
-  runtime.smoke_request_key: default
-  model_cache.pvc.size: 300Gi
-  workloads.args:
-    request_type: text_completions
-
-# New deployment profiles
-deployment-intelligentrouting-tp4-x4:
-  runtime.selected_preset: deployment-intelligentrouting-tp4-x4
+# Test deployment profiles
+test-intelligentrouting:
   runtime.deployment_profile: intelligentrouting-tp4-x4
 
-deployment-simple-tp4-x4:
-  runtime.selected_preset: deployment-simple-tp4-x4
+test-simple:
   runtime.deployment_profile: simple-tp4-x4
 
-deployment-pd-x2-ptp4-px1-dtp4:
-  runtime.selected_preset: deployment-pd-x2-ptp4-px1-dtp4
-  runtime.deployment_profile: pd-x2-ptp4-px1-dtp4
-
-# Smoke presets for new profiles
-smoke-intelligentrouting:
-  extends:
-    - smoke-base
-    - deployment-intelligentrouting-tp4-x4
-  runtime.selected_preset: smoke-intelligentrouting
-  runtime.benchmark_key: short
-  platform.gateway.status_address_name: gateway-internal
-
-smoke-simple-tp4:
-  extends:
-    - smoke-base
-    - deployment-simple-tp4-x4
-  runtime.selected_preset: smoke-simple-tp4
-  runtime.benchmark_key: short
-  platform.gateway.status_address_name: gateway-internal
-
-smoke-pd-tp4:
-  extends:
-    - smoke-base
-    - deployment-pd-x2-ptp4-px1-dtp4
-  runtime.selected_preset: smoke-pd-tp4
-  runtime.benchmark_key: short
-  platform.gateway.status_address_name: gateway-internal
+test-pd:
+  runtime.deployment_profile: pd-d.x2-p.tp4-d.tp4-p.x1
 
 # New presets ported from other tool
-pd-flavors:
+cpt-reference-flavors:
   extends:
     - gpt-oss
-  runtime.selected_preset: pd-flavors
   runtime.deployment_profile:
-    - pd-x2-ptp4-px1-dtp4
+    - pd-d.x2-p.tp4-d.tp4-p.x1
     - intelligentrouting-tp4-x4
     - simple-tp4-x4
-
-guidellm_multiturn_eval:
-  runtime.selected_preset: guidellm_multiturn_eval
-  runtime.benchmark_key: guidellm_multiturn_eval
-  runtime.smoke_request_key: default
-
-guidellm_heterogeneous_eval:
-  runtime.selected_preset: guidellm_heterogeneous_eval
-  runtime.benchmark_key: guidellm_heterogeneous_eval
-  runtime.smoke_request_key: default

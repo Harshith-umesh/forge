@@ -1,8 +1,8 @@
 apiVersion: serving.kserve.io/v1alpha1
 kind: LLMInferenceService
 metadata:
-  name: llm-d-pd-x2-ptp4-px1-dtp4
-  namespace: forge-llm-d
+  name: llm-d-pd-d.x2-p.tp4-d.tp4-p.x1
+  namespace: forge-llm-d-qwen-qwen3-0-6b-pd-d-x2-p-tp4-d-tp4-p-x1
   annotations:
     security.opendatahub.io/enable-auth: 'false'
     prometheus.io/path: /metrics

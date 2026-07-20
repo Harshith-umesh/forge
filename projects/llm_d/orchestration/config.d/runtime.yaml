@@ -5,5 +5,12 @@ smoke_request_key: default
 benchmark_key: null
 job_name: null
 namespace_override: null
-kserve_dry_run: false
-kserve_use_kueue: false
+kserve_dry_run: true
+kueue:
+  enable: true
+  queue_name: default-queue
+router:
+  template:
+    file: manifests/scheduler_config/__router_template__.yaml
+    placeholder: __ENDPOINT_PICKER_CONFIG__
+  epp: manifests/scheduler_config

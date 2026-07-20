@@ -114,9 +114,164 @@ def deep_merge(base: Any, override: Any) -> Any:
     return merged
 
 
+def _extract_value_from_profile_name(profile_name: str, field_name: str) -> int:
+    """Extract configuration values from profile names.
+
+    Supports patterns:
+    - simple-tp4-x4: tensor_parallelism=4, replicas=4
+    - intelligentrouting-tp4-x4: tensor_parallelism=4, replicas=4
+    - pd-d.x2-p.tp4-d.tp4-p.x1: prefill_pods=1, decode_pods=2, tensor_parallelism=4
+
+    Args:
+        profile_name: The deployment profile name
+        field_name: The field to extract (tensor_parallelism, replicas, prefill_pods, decode_pods)
+
+    Returns:
+        Extracted integer value
+
+    Raises:
+        ValueError: If the pattern is not recognized or value cannot be extracted
+    """
+    # P/D pattern: pd-d.x2-p.tp4-d.tp4-p.x1
+    if profile_name.startswith("pd-"):
+        # P/D naming: pd-d.x{decode_pods}-p.tp{tensor_parallelism}-d.tp{decode_tensor_parallelism}-p.x{prefill_pods}
+        # Extract different components
+        if field_name == "tensor_parallelism":
+            # Look for p.tp4 pattern (prefill tensor_parallelism)
+            match = re.search(r"p\.tp(\d+)", profile_name)
+            if match:
+                return int(match.group(1))
+            # Fallback: look for any tp pattern
+            match = re.search(r"tp(\d+)", profile_name)
+            if match:
+                return int(match.group(1))
+        elif field_name == "prefill_pods":
+            # Look for p.x1 pattern
+            match = re.search(r"p\.x(\d+)", profile_name)
+            if match:
+                return int(match.group(1))
+        elif field_name == "decode_pods":
+            # Look for d.x2 pattern
+            match = re.search(r"d\.x(\d+)", profile_name)
+            if match:
+                return int(match.group(1))
+    else:
+        # Standard patterns: simple-tp4-x4, intelligentrouting-tp4-x4
+        if field_name == "tensor_parallelism":
+            # Look for tp4 pattern
+            match = re.search(r"tp(\d+)", profile_name)
+            if match:
+                return int(match.group(1))
+        elif field_name == "replicas":
+            # Look for x4 pattern
+            match = re.search(r"x(\d+)", profile_name)
+            if match:
+                return int(match.group(1))
+
+    raise ValueError(f"Could not extract {field_name} from profile name: {profile_name}")
+
+
+def _resolve_from_name_values(profile_name: str, profile_data: dict[str, Any]) -> dict[str, Any]:
+    """Resolve FROM_NAME placeholders in profile configuration with values from profile name.
+
+    Args:
+        profile_name: The deployment profile name to extract values from
+        profile_data: The profile configuration that may contain FROM_NAME placeholders
+
+    Returns:
+        Profile configuration with FROM_NAME placeholders resolved to actual values
+    """
+    resolved = copy.deepcopy(profile_data)
+
+    def resolve_value(obj: Any, path: str = "") -> Any:
+        if isinstance(obj, dict):
+            result = {}
+            for key, value in obj.items():
+                current_path = f"{path}.{key}" if path else key
+                result[key] = resolve_value(value, current_path)
+            return result
+        elif isinstance(obj, list):
+            return [resolve_value(item, path) for item in obj]
+        elif obj == "FROM_NAME":
+            # Determine which field to extract based on the path
+            field_name = path.split(".")[-1]  # Get the last part of the path
+            try:
+                return _extract_value_from_profile_name(profile_name, field_name)
+            except ValueError as e:
+                logger.warning(f"Failed to extract {field_name} from {profile_name}: {e}")
+                return obj  # Return the original FROM_NAME if extraction fails
+        else:
+            return obj
+
+    return resolve_value(resolved)
+
+
 def _load_yaml(path: Path) -> Any:
     with path.open(encoding="utf-8") as handle:
         return yaml.safe_load(handle)
+
+
+def _load_scheduler_with_epp_config(
+    config_dir: Path, scheduler_manifest: str, deployment_profile: dict[str, Any]
+) -> dict[str, Any]:
+    """Load scheduler configuration using router template with EPP config replacement.
+
+    Uses configurable paths from runtime.router config.
+
+    Args:
+        config_dir: Configuration directory path
+        scheduler_manifest: Path to EPP config file (e.g., "manifests/deployments/approximate-prefix-cache.yaml")
+        deployment_profile: Resolved deployment profile for templating
+
+    Returns:
+        Scheduler data with EPP config content replacing placeholder
+    """
+
+    # Get configurable paths and placeholder
+    router_template_file = template_config.get("runtime.router.template.file")
+    router_placeholder = template_config.get("runtime.router.template.placeholder")
+    epp_config_dir = router_config.get("runtime.router.template.epp")
+
+    # Load the router template
+    router_template_path = config_dir / router_template_file
+    if not router_template_path.exists():
+        # Fallback to legacy behavior if template doesn't exist
+        raise FileNotFoundError(
+            f"Router template not found at {router_template_path}"
+        )
+
+    # Load the EPP config content
+    # Convert scheduler_manifest path to EPP config directory
+    # e.g., "manifests/deployments/approximate-prefix-cache.yaml" -> "manifests/scheduler_config/approximate-prefix-cache.yaml"
+    manifest_path = Path(scheduler_manifest)
+    epp_config_filename = manifest_path.name
+    epp_config_path = config_dir / epp_config_dir / epp_config_filename
+
+    if not epp_config_path.exists():
+        raise FileNotFoundError(
+            f"EPP config not found at {epp_config_path}"
+        )
+
+    # Load both files
+    router_template_data = _load_yaml(router_template_path)
+    epp_config_data = _load_yaml(epp_config_path)
+
+    # Replace placeholder in the parsed data structure (avoids YAML formatting issues)
+    def replace_placeholder_in_structure(obj):
+        if isinstance(obj, dict):
+            return {key: replace_placeholder_in_structure(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [replace_placeholder_in_structure(item) for item in obj]
+        elif isinstance(obj, str) and obj == router_placeholder:
+            # Convert EPP config to YAML string for the --config-text argument
+            return yaml.dump(epp_config_data, default_flow_style=False, sort_keys=False).strip()
+        else:
+            return obj
+
+    # Perform the replacement in the structure
+    replaced_data = replace_placeholder_in_structure(router_template_data)
+
+    return replaced_data
 
 
 def get_config_dir() -> Path:
@@ -130,8 +285,8 @@ def get_job_name() -> str:
     if job_name:
         return job_name
 
-    preset_name = config.project.get_config("runtime.selected_preset")
-    return f"local-{preset_name}"
+    deployment_profile = config.project.get_config("runtime.deployment_profile")
+    return f"local-{deployment_profile}"
 
 
 def get_platform_config() -> dict[str, Any]:
@@ -284,32 +439,78 @@ def get_deployment_profile_name() -> str:
     return deployment_profiles[0]
 
 
+def _resolve_template_profile(
+    profile_name: str, deployment_config: dict[str, Any]
+) -> dict[str, Any]:
+    """Resolve a profile name to a template-based configuration if no direct match exists.
+
+    Args:
+        profile_name: The deployment profile name (e.g., "simple-tp4-x4")
+        deployment_config: The full deployments configuration
+
+    Returns:
+        Template configuration to use, or raises ValueError if no template matches
+
+    Raises:
+        ValueError: If no template pattern matches the profile name
+    """
+    # Try to match profile name patterns to templates
+    if profile_name.startswith("pd-"):
+        template_name = "template__pd"
+    elif "intelligentrouting" in profile_name:
+        template_name = "template__intelligentrouting"
+    elif profile_name.startswith("simple-") or re.search(r"-tp\d+-x\d+$", profile_name):
+        template_name = "template__simple"
+    else:
+        raise ValueError(f"No template found for profile name pattern: {profile_name}")
+
+    if template_name not in deployment_config:
+        raise ValueError(f"Template {template_name} not found in deployment config")
+
+    logger.info(f"Using template {template_name} for profile {profile_name}")
+    return copy.deepcopy(deployment_config[template_name])
+
+
 def get_deployment_profile() -> dict[str, Any]:
     profile_name = get_deployment_profile_name()
     deployment_config = copy.deepcopy(config.project.get_config("deployments"))
-    profile = copy.deepcopy(deployment_config[profile_name])
+
+    # First try direct profile lookup
+    if profile_name in deployment_config:
+        profile = copy.deepcopy(deployment_config[profile_name])
+    else:
+        # Fall back to template-based resolution
+        profile = _resolve_template_profile(profile_name, deployment_config)
+
     defaults = copy.deepcopy(deployment_config.get("defaults", {}))
 
     scheduler_manifest = profile.pop("scheduler_manifest", None)
     resolved_profile = deep_merge(defaults, profile)
-    if scheduler_manifest:
-        scheduler_data = _load_yaml(get_config_dir() / scheduler_manifest)
 
-        # When use_defaults is true, use simplified scheduler template
-        use_defaults = resolved_profile.get("use_defaults", False)
-        if use_defaults:
+    # Resolve FROM_NAME placeholders with values extracted from profile name
+    resolved_profile = _resolve_from_name_values(profile_name, resolved_profile)
+
+    if scheduler_manifest:
+        RENAME THIS TO use_rhoai_defaults
+        # When use_kserve_defaults is true, use simplified scheduler template
+        use_kserve_defaults = resolved_profile.get("use_kserve_defaults", False)
+        if use_kserve_defaults:
             # Create simplified scheduler with just basic container structure
             simplified_scheduler = {
                 "scheduler": {
                     "template": {
                         "containers": [{"name": "main"}],
+                        # force the scheduler to run on a GPU node. 'gpu.present: true' not working on AKS/CKS
                         "nodeSelector": {"nvidia.com/gpu.deploy.container-toolkit": "true"},
-                        "serviceAccountName": "llm-d-privileged",
                     }
                 }
             }
             resolved_profile = deep_merge(resolved_profile, simplified_scheduler)
         else:
+            # When use_kserve_defaults is false, use __router_template__.yaml with EPP config replacement
+            scheduler_data = _load_scheduler_with_epp_config(
+                get_config_dir(), scheduler_manifest, resolved_profile
+            )
             resolved_profile = deep_merge(resolved_profile, scheduler_data)
 
     return resolved_profile
@@ -341,7 +542,8 @@ def get_scheduler_config() -> str:
 
 def is_pd_deployment() -> bool:
     """Check if current deployment profile is a P/D deployment."""
-    return bool(get_pd_config())
+    profile = get_deployment_profile()
+    return "pd_config" in profile
 
 
 def get_smoke_request() -> dict[str, Any]:

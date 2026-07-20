@@ -2,7 +2,7 @@ apiVersion: serving.kserve.io/v1alpha1
 kind: LLMInferenceService
 metadata:
   name: llm-d-intelligentrouting-tp4-x4
-  namespace: forge-llm-d
+  namespace: forge-llm-d-qwen-qwen3-0-6b-intelligentrouting-tp4-x
   annotations:
     security.opendatahub.io/enable-auth: 'false'
     prometheus.io/path: /metrics
