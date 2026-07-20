@@ -113,7 +113,10 @@ def _run_test(
     benchmark_cfg = runtime_config.get_benchmark_config()
 
     if not deployment_name:
-        deployment_name = runtime_config.derive_deployment_name(model_cfg["hf_model_id"])
+        base_name = runtime_config.derive_deployment_name(model_cfg["hf_model_id"])
+        fjob = os.environ.get("FJOB_NAME", "")
+        suffix = fjob.rsplit("-", 1)[-1] if fjob else ""
+        deployment_name = f"{base_name}-{suffix}" if suffix else base_name
 
     vllm_image = runtime_config.get_vllm_image(accelerator)
     vllm_defaults = runtime_config.get_vllm_defaults()
