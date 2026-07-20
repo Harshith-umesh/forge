@@ -3,12 +3,12 @@
 # uses the "nightly" pipeline to check for new versions on ghcr.io.
 #
 # Apply manually:
-#   oc apply -f projects/mcp_gateway/resolvers/cronjob-ghcr.yaml
+#   oc apply -f projects/mcp_gateway/nightly_resolvers/cronjob-ghcr.yaml
 apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: nightly-mcp-gateway-ghcr
-  namespace: fournos-workloads
+  namespace: psap-automation
   labels:
     fournos.dev/nightly: "true"
     fournos.dev/project: mcp-gateway

@@ -127,14 +127,19 @@ class CIApp:
         if isinstance(vault_config, list):
             return vault_config
         all_vaults: list[str] = []
-        for _category, vaults in vault_config.items():
+        for category, vaults in vault_config.items():
+            if category == "skip_phases":
+                continue
             if isinstance(vaults, list):
                 all_vaults.extend(vaults)
         return list(dict.fromkeys(all_vaults))
 
     def should_init_vaults(self, phase: str) -> bool:
-        """Return False to skip vault init for certain phases."""
-        return phase not in ("resolve-fournos-config", "receive-image", "confirm-nightly")
+        """Return False to skip vault init for resolve and phases listed in vaults.skip_phases."""
+        if phase == "resolve-fournos-config":
+            return False
+        skip_phases = config.project.get_config("vaults.skip_phases", [], print=False)
+        return phase not in skip_phases
 
     def register_extra_commands(self, group: click.Group) -> None:
         """Hook to register additional click commands on the group.
@@ -177,13 +182,9 @@ class CIApp:
     # ------------------------------------------------------------------
 
     _NIGHTLY_PHASES: dict[str, PhaseSpec] = {
-        "receive-image": PhaseSpec(
-            func="projects.core.nightly.receive_image:run",
-            help="Nightly: resolve latest available image version.",
-        ),
-        "confirm-nightly": PhaseSpec(
-            func="projects.core.nightly.confirm:run",
-            help="Nightly: check S3 for last run, create FournosJob if new version.",
+        "nightly": PhaseSpec(
+            func="projects.core.nightly.handler:run",
+            help="Nightly: check for new image version and trigger test if needed.",
         ),
     }
 

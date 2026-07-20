@@ -1,11 +1,11 @@
 # Nightly pipeline: clusterless job that checks for new image versions
 # and conditionally triggers a full test FournosJob.
 #
-# Flow: receive-image (resolve latest version) → confirm-nightly (compare with S3, create FournosJob if new)
+# Single step that resolves the latest version, compares against the last
+# tested version, and creates a FournosJob if a new version is detected.
+# Error visibility is handled via notification files in the artifact directory.
 #
 # This pipeline runs as a clusterless FournosJob (no target cluster needed).
-# Both tasks use the standard forge-step, dispatching to phases registered
-# in the project's ci.py (backed by shared handlers in projects/core/nightly/).
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
@@ -23,7 +23,7 @@ spec:
     - name: kubeconfig-secret
       type: string
   tasks:
-    - name: 00-receive-image
+    - name: 00-nightly
       taskRef:
         name: forge-step
         kind: Task
@@ -38,26 +38,6 @@ spec:
         - name: kubeconfig-secret
           value: "$(params.kubeconfig-secret)"
         - name: job-step
-          value: receive-image
+          value: nightly
         - name: job-step-name
-          value: 00__receive-image
-
-    - name: 01-confirm-nightly
-      runAfter: [00-receive-image]
-      taskRef:
-        name: forge-step
-        kind: Task
-      workspaces:
-        - name: artifacts
-          workspace: artifacts
-      params:
-        - name: fjob-name
-          value: "$(params.fjob-name)"
-        - name: fournos-workload-namespace
-          value: "$(params.fournos-workload-namespace)"
-        - name: kubeconfig-secret
-          value: "$(params.kubeconfig-secret)"
-        - name: job-step
-          value: confirm-nightly
-        - name: job-step-name
-          value: 01__confirm-nightly
+          value: 00__nightly

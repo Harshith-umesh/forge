@@ -20,6 +20,7 @@ from projects.core.dsl import (
     task,
     template,
 )
+from projects.core.dsl.control_flow import EarlyReturn
 from projects.core.dsl.utils.k8s import is_valid_k8s_name, sanitize_k8s_name
 from projects.core.library import env as env_mod
 
@@ -64,6 +65,7 @@ def run(
     gpu_count: int = None,
     gpu_type: str = None,
     clusterless: bool = False,
+    wait: bool = True,
 ):
     """
     Submit a FOURNOS job and wait for completion
@@ -207,6 +209,9 @@ def submit_fournos_job(args, ctx):
 
     # Apply the job manifest (will raise CalledProcessError with full details on failure)
     shell.run(f"oc apply -f {ctx.manifest_file}")
+
+    if not args.wait:
+        return EarlyReturn(f"Submitted FournosJob: {ctx.final_job_name} (wait=False)")
 
     return f"Successfully submitted FOURNOS job: {ctx.final_job_name}"
 

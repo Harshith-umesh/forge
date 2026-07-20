@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from pathlib import Path
 
 from projects.caliper.engine.file_export.mlflow_secrets import (
@@ -23,6 +24,9 @@ from projects.core.nightly.base_verifier import NightlyVerifier
 logger = logging.getLogger(__name__)
 
 VERSION_PATTERN = re.compile(r"-v(.+?)-\d{8}-\d{6}$")
+
+MAX_ATTEMPTS = 3
+RETRY_DELAY_SECONDS = 15
 
 
 class MLflowVerifier(NightlyVerifier):
@@ -43,29 +47,40 @@ class MLflowVerifier(NightlyVerifier):
         self.experiment = config.project.get_config(
             "caliper.export.backend.mlflow.config.experiment"
         )
-        self.workspace = config.project.get_config(
-            "caliper.export.backend.mlflow.config.workspace"
-        )
-        vault_cfg = config.project.get_config(
-            "caliper.export.backend.mlflow.secrets.vault"
-        )
+        self.workspace = config.project.get_config("caliper.export.backend.mlflow.config.workspace")
+        vault_cfg = config.project.get_config("caliper.export.backend.mlflow.secrets.vault")
         self.secret_name = vault_cfg["name"]
         self.secret_file = vault_cfg["mlflow_secret"]
 
-    def _fetch_last_version(self) -> str:
+    def get_last_tested_version(self) -> str:
         connection = self._load_connection()
+        if not connection:
+            return ""
 
-        with mlflow_connection_env(connection):
-            return self._query_latest_run()
+        last_error = None
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            try:
+                with mlflow_connection_env(connection):
+                    return self._query_latest_run()
+            except Exception as e:
+                last_error = e
+                if attempt < MAX_ATTEMPTS:
+                    logger.warning(
+                        "MLflow attempt %d/%d failed: %s. Retrying in %ds...",
+                        attempt,
+                        MAX_ATTEMPTS,
+                        e,
+                        RETRY_DELAY_SECONDS,
+                    )
+                    time.sleep(RETRY_DELAY_SECONDS)
+        raise RuntimeError(f"MLflow verifier failed after {MAX_ATTEMPTS} attempts") from last_error
 
     def _load_connection(self) -> dict:
         secrets_dir = Path(os.environ.get("FOURNOS_SECRETS", "/var/run/secrets/fournos"))
         secret_path = secrets_dir / self.secret_name / self.secret_file
 
         if not secret_path.exists():
-            logger.warning(
-                "MLflow secret not found at expected path, assuming no previous run"
-            )
+            logger.warning("MLflow secret not found at expected path, assuming no previous run")
             return {}
 
         data = load_mlflow_secrets_yaml(secret_path)

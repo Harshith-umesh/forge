@@ -12,6 +12,8 @@ vaults:
   - psap-forge-mlflow-export
   prepare: []
   test: []
+  skip_phases:
+  - nightly
 
 notifications:
   slack:

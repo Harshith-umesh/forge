@@ -10,10 +10,14 @@ No authentication needed for public packages (anonymous token).
 from __future__ import annotations
 
 import json
+import logging
+import time
 import urllib.error
 import urllib.request
 
 from projects.core.nightly.base_receiver import ImageReceiver
+
+logger = logging.getLogger(__name__)
 
 REPO = "Kuadrant/mcp-gateway"
 IMAGE = "kuadrant/mcp-gateway"
@@ -21,11 +25,32 @@ COMMITS_URL = f"https://api.github.com/repos/{REPO}/commits?per_page=20"
 TOKEN_URL = f"https://ghcr.io/token?service=ghcr.io&scope=repository:{IMAGE}:pull"
 MANIFEST_URL = f"https://ghcr.io/v2/{IMAGE}/manifests/"
 
+MAX_ATTEMPTS = 3
+RETRY_DELAY_SECONDS = 10
+
 
 class GHCRReceiver(ImageReceiver):
     """Find the latest mcp-gateway commit with a published ghcr.io image."""
 
     NAME = "ghcr"
+
+    def get_latest_version(self) -> str:
+        last_error = None
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            try:
+                return self._fetch_version()
+            except urllib.error.URLError as e:
+                last_error = e
+                if attempt < MAX_ATTEMPTS:
+                    logger.warning(
+                        "GHCR attempt %d/%d failed: %s. Retrying in %ds...",
+                        attempt,
+                        MAX_ATTEMPTS,
+                        e,
+                        RETRY_DELAY_SECONDS,
+                    )
+                    time.sleep(RETRY_DELAY_SECONDS)
+        raise RuntimeError(f"GHCR receiver failed after {MAX_ATTEMPTS} attempts") from last_error
 
     def _fetch_version(self) -> str:
         token = self._get_ghcr_token()
@@ -57,7 +82,7 @@ class GHCRReceiver(ImageReceiver):
             MANIFEST_URL + tag,
             headers={
                 "Accept": "application/vnd.oci.image.index.v1+json, "
-                          "application/vnd.docker.distribution.manifest.v2+json",
+                "application/vnd.docker.distribution.manifest.v2+json",
                 "Authorization": f"Bearer {token}",
             },
         )

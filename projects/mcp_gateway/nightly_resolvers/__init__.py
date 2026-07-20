@@ -49,8 +49,7 @@ def get_receiver() -> ImageReceiver:
     cls = _receivers.get(source)
     if cls is None:
         raise ValueError(
-            f"Unknown source '{source}' for mcp_gateway. "
-            f"Available: {list(_receivers.keys())}"
+            f"Unknown source '{source}' for mcp_gateway. Available: {list(_receivers.keys())}"
         )
     return cls()
 
