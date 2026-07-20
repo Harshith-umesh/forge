@@ -222,3 +222,102 @@ def send_regression_notification(
         dry_run=dry_run,
         notification_vault=notification_vault,
     )
+
+
+def send_failure_notification(
+    *,
+    error: str,
+    model: str = "",
+    accelerator: str = "",
+    job_id: str = "",
+    slack_user: str = "",
+    webhook_vault: str | None = None,
+    notification_vault: str | None = None,
+    dry_run: bool = False,
+    tp: str = "",
+    dp: str = "",
+    version: str = "",
+    workload_keys: list[str] | None = None,
+    cluster: str = "",
+) -> bool:
+    """Send a Slack alert when the RHAIIS pipeline fails.
+
+    Args:
+        error: Error message or traceback summary
+        model: Model name for display
+        accelerator: Accelerator name for display
+        job_id: FournosJob name
+        slack_user: Slack user ID to @-mention
+        webhook_vault: Vault containing slack-webhook-url file
+        notification_vault: Fallback vault for Bot-Token Slack credentials
+        dry_run: Log only, don't send
+        tp: Tensor parallelism size
+        dp: Data parallelism size
+        version: vLLM / RHAIIS version string
+        workload_keys: List of workload profile keys
+        cluster: Cluster name the job ran on
+
+    Returns:
+        True if notification sent successfully
+    """
+    from projects.core.notifications.send import (
+        _get_webhook_url,
+        _send_via_webhook,
+        send_notification,
+    )
+
+    if slack_user and re.match(r"^[UW][A-Z0-9]+$", slack_user):
+        user_line = f"*Triggered by:* <@{slack_user}>\n"
+    elif slack_user:
+        user_line = f"*Triggered by:* {slack_user}\n"
+    else:
+        user_line = ""
+
+    parallelism_parts = []
+    if tp:
+        parallelism_parts.append(f"TP={tp}")
+    if dp:
+        parallelism_parts.append(f"DP={dp}")
+    parallelism_line = f"*Parallelism:* {', '.join(parallelism_parts)}\n" if parallelism_parts else ""
+
+    profiles_line = ""
+    if workload_keys:
+        profiles_line = f"*Workloads:* {', '.join(workload_keys)}\n"
+
+    cluster_line = f"*Cluster:* {cluster}\n" if cluster else ""
+    version_line = f"*Version:* {version}\n" if version else ""
+
+    error_text = error if len(error) <= 500 else error[:500] + "..."
+
+    message = (
+        f":x: *RHAIIS Pipeline Failed*\n"
+        f"{user_line}"
+        f"*Job:* `{job_id}`\n"
+        f"*Model:* {model}\n"
+        f"*Accelerator:* {accelerator}\n"
+        f"{parallelism_line}"
+        f"{version_line}"
+        f"{cluster_line}"
+        f"{profiles_line}"
+        f"*Error:*\n```{error_text}```"
+    )
+
+    if dry_run:
+        logger.info("DRY RUN failure notification:\n%s", message)
+        return True
+
+    webhook_url = None
+    if webhook_vault:
+        webhook_url = _get_webhook_url(webhook_vault)
+
+    if webhook_url:
+        blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": message}}]
+        return _send_via_webhook(webhook_url, blocks)
+
+    return send_notification(
+        message,
+        github=False,
+        slack=True,
+        dry_run=dry_run,
+        notification_vault=notification_vault,
+    )
