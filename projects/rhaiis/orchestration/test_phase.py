@@ -136,7 +136,7 @@ def _run_test(
     run_uuid = _cfg.project.get_config("tests.rhaiis.run_uuid", "") or str(_uuid_mod.uuid4())
     logger.info("Run UUID for this job: %s", run_uuid)
 
-    import os, subprocess
+    import subprocess
     fjob_name = os.environ.get("FJOB_NAME", "")
     fjob_ns = os.environ.get("FOURNOS_WORKLOAD_NAMESPACE", "psap-automation")
     if fjob_name:
@@ -618,7 +618,6 @@ def _run_standalone_analysis(
     except Exception:
         logger.warning("Standalone analysis failed", exc_info=True)
     finally:
-        import os
         if consolidated_path and os.path.exists(consolidated_path):
             os.unlink(consolidated_path)
         if current_csv_path and os.path.exists(current_csv_path):
@@ -705,7 +704,6 @@ def _run_regression_check(
     except Exception:
         logger.warning("Regression analysis failed; continuing", exc_info=True)
     finally:
-        import os
         if consolidated_path and os.path.exists(consolidated_path):
             os.unlink(consolidated_path)
 

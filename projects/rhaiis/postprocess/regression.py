@@ -5,7 +5,37 @@ from __future__ import annotations
 import logging
 import re
 
+import projects.core.notifications.slack.api as slack_api
+from projects.core.library import vault
+
 logger = logging.getLogger(__name__)
+
+
+RHAIIS_SLACK_CHANNEL_ID = "C0B9T6JUW74"
+
+
+def _send_via_topsail_bot(message: str, *, notification_vault: str | None = None, channel_id: str | None = None) -> bool:
+    """Send a Slack message using the topsail bot token from the forge notifications vault."""
+    vault_name = notification_vault or "psap-forge-notifications"
+    try:
+        token_path = vault.get_vault_content_path(vault_name, "topsail-bot.slack-token")
+    except Exception:
+        logger.warning("Cannot resolve topsail bot token from vault %s", vault_name)
+        return False
+
+    if not token_path or not token_path.exists():
+        logger.warning("topsail-bot.slack-token not found in vault %s", vault_name)
+        return False
+
+    token = token_path.read_text().strip()
+    client = slack_api.init_client(token)
+    if not client:
+        logger.error("Failed to init Slack client with topsail bot token")
+        return False
+
+    _, ok = slack_api.send_message(client, message=message, channel_id=channel_id)
+    return ok
+
 
 PROFILE_MAP = {
     (1000, 1000): "profile1",
@@ -105,12 +135,6 @@ def send_regression_notification(
     Returns:
         True if notification sent successfully
     """
-    from projects.core.notifications.send import (
-        _get_webhook_url,
-        _send_via_webhook,
-        send_notification,
-    )
-
     status = analysis_result.get("status")
     if status == "skipped":
         reason = analysis_result.get("reason", "unknown")
@@ -207,21 +231,7 @@ def send_regression_notification(
         logger.info("DRY RUN regression notification:\n%s", message)
         return True
 
-    webhook_url = None
-    if webhook_vault:
-        webhook_url = _get_webhook_url(webhook_vault)
-
-    if webhook_url:
-        blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": message}}]
-        return _send_via_webhook(webhook_url, blocks)
-
-    return send_notification(
-        message,
-        github=False,
-        slack=True,
-        dry_run=dry_run,
-        notification_vault=notification_vault,
-    )
+    return _send_via_topsail_bot(message, notification_vault=notification_vault or webhook_vault, channel_id=RHAIIS_SLACK_CHANNEL_ID)
 
 
 def send_failure_notification(
@@ -260,12 +270,6 @@ def send_failure_notification(
     Returns:
         True if notification sent successfully
     """
-    from projects.core.notifications.send import (
-        _get_webhook_url,
-        _send_via_webhook,
-        send_notification,
-    )
-
     if slack_user and re.match(r"^[UW][A-Z0-9]+$", slack_user):
         user_line = f"*Triggered by:* <@{slack_user}>\n"
     elif slack_user:
@@ -306,18 +310,4 @@ def send_failure_notification(
         logger.info("DRY RUN failure notification:\n%s", message)
         return True
 
-    webhook_url = None
-    if webhook_vault:
-        webhook_url = _get_webhook_url(webhook_vault)
-
-    if webhook_url:
-        blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": message}}]
-        return _send_via_webhook(webhook_url, blocks)
-
-    return send_notification(
-        message,
-        github=False,
-        slack=True,
-        dry_run=dry_run,
-        notification_vault=notification_vault,
-    )
+    return _send_via_topsail_bot(message, notification_vault=notification_vault or webhook_vault, channel_id=RHAIIS_SLACK_CHANNEL_ID)
