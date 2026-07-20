@@ -1,5 +1,5 @@
 nightly:
-  cluster: "smoke-cluster"
+  cluster: "forge-smoke-testing"
   version_key: "infrastructure.mcp_gateway_version"
   pipeline: "fournos-full"
   preset: "demo"
