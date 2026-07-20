@@ -1,3 +1,10 @@
+nightly:
+  cluster: "smoke-cluster"
+  version_key: "infrastructure.mcp_gateway_version"
+  pipeline: "fournos-full"
+  preset: "demo"
+  owner: "ashtakb"
+
 vaults:
   all: []
   all-optional:

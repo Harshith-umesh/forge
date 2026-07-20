@@ -6,10 +6,12 @@ resources:
   - task-forge-step.yaml
   - pipeline-full.yaml
   - pipeline-launcher.yaml
+  - pipeline-nightly.yaml
   - pipeline-prepare-only.yaml
   - pipeline-prepare-test.yaml
   - pipeline-replot.yaml
   - pipeline-test-only.yaml
+
 commonLabels:
   app.kubernetes.io/name: forge-on-fournos
   app.kubernetes.io/component: workflows

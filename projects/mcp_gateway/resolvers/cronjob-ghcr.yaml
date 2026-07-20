@@ -1,0 +1,50 @@
+# CronJob to trigger the nightly pipeline for mcp_gateway (GHCR source).
+# Runs daily at 2:00 AM UTC. Creates a clusterless FournosJob that
+# uses the "nightly" pipeline to check for new versions on ghcr.io.
+#
+# Apply manually:
+#   oc apply -f projects/mcp_gateway/resolvers/cronjob-ghcr.yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nightly-mcp-gateway-ghcr
+  namespace: fournos-workloads
+  labels:
+    fournos.dev/nightly: "true"
+    fournos.dev/project: mcp-gateway
+    fournos.dev/source: ghcr
+spec:
+  schedule: "0 2 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          serviceAccountName: fournos
+          restartPolicy: Never
+          containers:
+            - name: submit
+              image: bitnami/kubectl:latest
+              command: ["sh", "-c"]
+              args:
+                - |
+                  cat <<'EOF' | oc apply -f -
+                  apiVersion: fournos.dev/v1
+                  kind: FournosJob
+                  metadata:
+                    generateName: nightly-mcp-gateway-
+                    namespace: fournos-workloads
+                  spec:
+                    clusterless: true
+                    exclusive: false
+                    pipeline: "nightly"
+                    env:
+                      NIGHTLY_SOURCE: "ghcr"
+                    executionEngine:
+                      forge:
+                        project: "mcp_gateway"
+                        args: []
+                  EOF
+                  echo "Nightly FournosJob created for mcp_gateway (ghcr)"
