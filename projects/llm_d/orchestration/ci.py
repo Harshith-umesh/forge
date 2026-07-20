@@ -121,10 +121,17 @@ def preflight(ctx) -> int:
 @agent_review_on_failure
 def test(ctx) -> int:
     """Test phase - Execute the main testing logic."""
+    from projects.llm_d.orchestration import runtime_config
+
     # Trigger config review analysis asynchronously (don't block test execution)
     trigger_config_review_for_ci(env.BASE_ARTIFACT_DIR, async_mode=True)
 
-    return test_toolbox_run()
+    exit_code = 0
+    for run_spec in runtime_config.get_run_specs():
+        with runtime_config.activate_run_spec(run_spec):
+            with env.NextArtifactDir(run_spec.artifact_dirname):
+                exit_code = max(exit_code, test_toolbox_run())
+    return exit_code
 
 
 @main.command()

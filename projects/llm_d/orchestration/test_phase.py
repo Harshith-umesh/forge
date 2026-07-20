@@ -40,11 +40,8 @@ def create_test_labels() -> None:
         "deployment_profile": deployment_profile,
     }
 
-    # Add guidellm configuration information
     if benchmark_keys:
-        labels["guidellm_loadshape"] = (
-            benchmark_keys[0] if len(benchmark_keys) == 1 else benchmark_keys
-        )
+        labels["guidellm_loadshape"] = benchmark_keys[0]
 
     write_test_labels(env.ARTIFACT_DIR, labels)
     logger.info("Created test labels: %s", labels)
@@ -247,6 +244,10 @@ def _build_inference_service_manifest() -> Path:
     deployment_profile = runtime_config.get_deployment_profile()
     model_cache = runtime_config.get_model_cache_config()
 
+    benchmark_overrides = runtime_config.get_benchmark_deployment_overrides()
+    if benchmark_overrides:
+        deployment_profile = runtime_config.deep_merge(deployment_profile, benchmark_overrides)
+
     # Build the InferenceService manifest
     manifest = render_inference_service_from_parts(
         config_dir=config_dir,
@@ -292,26 +293,26 @@ def run_smoke_request(*, endpoint_url: str) -> dict[str, object]:
 
 def run_guidellm_benchmark(*, endpoint_url: str) -> None:
     namespace = runtime_config.get_namespace()
-    benchmark_configs = runtime_config.get_benchmark_configs()
+    benchmark = runtime_config.get_benchmark_config()
 
-    if not benchmark_configs:
-        return  # Skip if benchmark is disabled
+    if benchmark is None:
+        return
 
-    for benchmark_key, benchmark in benchmark_configs:
-        guidellm_args = build_guidellm_args(benchmark)
-        if not any(arg.startswith("--processor=") for arg in guidellm_args):
-            guidellm_args.append(f"--processor={runtime_config.get_model_name()}")
-        artifact_name = f"benchmark_{slugify_identifier(benchmark_key, max_length=48)}"
-        with env.NextArtifactDir(artifact_name):
-            run_guidellm_benchmark_command.run(
-                endpoint_url=endpoint_url,
-                name=benchmark.get("job_name"),
-                namespace=namespace,
-                image=benchmark.get("image"),
-                timeout=benchmark.get("timeout_seconds"),
-                pvc_size=benchmark.get("pvc_size"),
-                guidellm_args=guidellm_args,
-            )
+    benchmark_key = runtime_config.get_benchmark_keys()[0]
+    guidellm_args = build_guidellm_args(benchmark)
+    if not any(arg.startswith("--processor=") for arg in guidellm_args):
+        guidellm_args.append(f"--processor={runtime_config.get_model_name()}")
+    artifact_name = f"benchmark_{slugify_identifier(benchmark_key, max_length=48)}"
+    with env.NextArtifactDir(artifact_name):
+        run_guidellm_benchmark_command.run(
+            endpoint_url=endpoint_url,
+            name=benchmark.get("job_name"),
+            namespace=namespace,
+            image=benchmark.get("image"),
+            timeout=benchmark.get("timeout_seconds"),
+            pvc_size=benchmark.get("pvc_size"),
+            guidellm_args=guidellm_args,
+        )
 
 
 def capture_inference_service_state() -> None:
@@ -350,18 +351,12 @@ def cleanup_test_resources() -> None:
     inference_service = platform["inference_service"]
     smoke = platform["smoke"]
 
-    # Narrow cleanup (no broad sweep): cover every benchmark job name. Benchmarks
-    # typically share a single job_name, so this dedupes to one call; when
-    # benchmarking is disabled, run once with None so the IS/smoke cleanup still
-    # runs. oc delete is idempotent across iterations.
-    benchmark_job_names = runtime_config.get_benchmark_job_names() or [None]
-    for benchmark_job_name in benchmark_job_names:
-        cleanup_test_resources_command.run(
-            namespace=namespace,
-            inference_service_name=inference_service["name"],
-            smoke_pod_name=smoke["pod_name"],
-            benchmark_job_name=benchmark_job_name,
-        )
+    cleanup_test_resources_command.run(
+        namespace=namespace,
+        inference_service_name=inference_service["name"],
+        smoke_pod_name=smoke["pod_name"],
+        benchmark_job_name=runtime_config.get_benchmark_job_name(),
+    )
 
 
 def capture_namespace_events_after_test(

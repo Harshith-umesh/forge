@@ -28,6 +28,8 @@ class RunSpec:
     model_slug: str
     deployment_profile_name: str
     deployment_profile_slug: str
+    benchmark_key: str | None
+    benchmark_slug: str | None
     namespace: str
     artifact_dirname: str
     namespace_is_managed: bool
@@ -99,14 +101,14 @@ def _normalize_string_or_list(value: Any, field_name: str) -> list[str]:
     return [value] if value else []
 
 
-def _deep_merge(base: Any, override: Any) -> Any:
+def deep_merge(base: Any, override: Any) -> Any:
     if not isinstance(base, dict) or not isinstance(override, dict):
         return copy.deepcopy(override)
 
     merged = copy.deepcopy(base)
     for key, value in override.items():
         if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
-            merged[key] = _deep_merge(merged[key], value)
+            merged[key] = deep_merge(merged[key], value)
         else:
             merged[key] = copy.deepcopy(value)
     return merged
@@ -235,7 +237,7 @@ def _resolve_benchmark_config(benchmark_name: str) -> dict[str, Any]:
     benchmark_args = benchmark.get("args", {})
     workload_args = workload_defaults.get("args", {})
     if workload_args:
-        benchmark["args"] = _deep_merge(workload_args, benchmark_args)
+        benchmark["args"] = deep_merge(workload_args, benchmark_args)
 
     return benchmark
 
@@ -253,22 +255,20 @@ def get_benchmark_config() -> dict[str, Any] | None:
     return _resolve_benchmark_config(benchmark_keys[0])
 
 
-def get_benchmark_configs() -> list[tuple[str, dict[str, Any]]]:
-    return [
-        (benchmark_key, _resolve_benchmark_config(benchmark_key))
-        for benchmark_key in get_benchmark_keys()
-    ]
+def get_benchmark_deployment_overrides() -> dict[str, Any]:
+    """Return deployment overrides from the active benchmark config, if any."""
+    benchmark = get_benchmark_config()
+    if benchmark is None:
+        return {}
+    return benchmark.get("deployment_overrides", {})
 
 
-def get_benchmark_job_names() -> list[str]:
-    """Distinct k8s benchmark job names for the active run, in order.
-
-    A single benchmark_key collapses to one name; multiple benchmarks that
-    share a default job_name dedupe to one entry. Empty when benchmarking
-    is disabled, so cleanup paths can treat it uniformly.
-    """
-    all_names = [benchmark.get("job_name") for _, benchmark in get_benchmark_configs()]
-    return list(dict.fromkeys(name for name in all_names if name))
+def get_benchmark_job_name() -> str | None:
+    """The k8s benchmark job name for the active run, or None when benchmarking is disabled."""
+    benchmark = get_benchmark_config()
+    if benchmark is None:
+        return None
+    return benchmark.get("job_name")
 
 
 def get_deployment_profile_name() -> str:
@@ -291,10 +291,10 @@ def get_deployment_profile() -> dict[str, Any]:
     defaults = copy.deepcopy(deployment_config.get("defaults", {}))
 
     scheduler_manifest = profile.pop("scheduler_manifest", None)
-    resolved_profile = _deep_merge(defaults, profile)
+    resolved_profile = deep_merge(defaults, profile)
     if scheduler_manifest:
         scheduler_data = _load_yaml(get_config_dir() / scheduler_manifest)
-        resolved_profile = _deep_merge(resolved_profile, scheduler_data)
+        resolved_profile = deep_merge(resolved_profile, scheduler_data)
 
     return resolved_profile
 
@@ -312,6 +312,10 @@ def get_run_specs() -> list[RunSpec]:
         _get_runtime_value("deployment_profile"),
         "runtime.deployment_profile",
     )
+    benchmark_keys = _normalize_string_or_list(
+        _get_runtime_value("benchmark_key"),
+        "runtime.benchmark_key",
+    )
 
     if not model_names:
         raise ValueError("runtime.model_name must be set to a model name or list of model names")
@@ -320,25 +324,37 @@ def get_run_specs() -> list[RunSpec]:
             "runtime.deployment_profile must be set to a deployment profile or list of profiles"
         )
 
-    combinations = list(product(model_names, profile_names))
+    if benchmark_keys:
+        benchmark_entries = [
+            (key, slugify_identifier(key, max_length=24)) for key in benchmark_keys
+        ]
+    else:
+        benchmark_entries = [(None, None)]
+
+    combinations = list(product(model_names, profile_names, benchmark_entries))
     base_namespace = _derive_base_namespace()
     namespace_max_length = get_platform_config()["cluster"]["namespace"]["max_length"]
     # Compute base managed state once (ignores per-spec overrides)
     namespace_is_managed = get_namespace_is_managed()
     run_specs: list[RunSpec] = []
 
-    for model_name, profile_name in combinations:
+    for model_name, profile_name, (bench_key, bench_slug) in combinations:
         model_slug = get_model_slug(model_name)
         profile_slug = slugify_identifier(profile_name, max_length=24)
         if len(combinations) == 1:
             namespace = base_namespace
             artifact_dirname = "llmd_run"
         else:
+            ns_parts = [base_namespace, model_slug, profile_slug]
+            dir_parts = ["llmd_run", profile_slug, model_slug]
+            if bench_slug is not None:
+                ns_parts.append(bench_slug)
+                dir_parts.append(bench_slug)
             namespace = truncate_k8s_name(
-                f"{base_namespace}-{model_slug}-{profile_slug}",
+                "-".join(ns_parts),
                 max_length=namespace_max_length,
             )
-            artifact_dirname = f"llmd_run_{profile_slug}_{model_slug}"
+            artifact_dirname = "_".join(dir_parts)
 
         run_specs.append(
             RunSpec(
@@ -346,6 +362,8 @@ def get_run_specs() -> list[RunSpec]:
                 model_slug=model_slug,
                 deployment_profile_name=profile_name,
                 deployment_profile_slug=profile_slug,
+                benchmark_key=bench_key,
+                benchmark_slug=bench_slug,
                 namespace=namespace,
                 artifact_dirname=artifact_dirname,
                 namespace_is_managed=namespace_is_managed,
@@ -364,12 +382,14 @@ def activate_run_spec(run_spec: RunSpec):
         "model_name": _get_runtime_value("model_name"),
         "deployment_profile": _get_runtime_value("deployment_profile"),
         "namespace_override": _get_runtime_value("namespace_override"),
+        "benchmark_key": _get_runtime_value("benchmark_key"),
     }
     prev_managed_override = _namespace_is_managed_override
 
     config.project.set_config("runtime.model_name", run_spec.model_name)
     config.project.set_config("runtime.deployment_profile", run_spec.deployment_profile_name)
     config.project.set_config("runtime.namespace_override", run_spec.namespace)
+    config.project.set_config("runtime.benchmark_key", run_spec.benchmark_key)
     _namespace_is_managed_override = run_spec.namespace_is_managed
     try:
         yield
@@ -377,6 +397,7 @@ def activate_run_spec(run_spec: RunSpec):
         config.project.set_config("runtime.model_name", saved["model_name"])
         config.project.set_config("runtime.deployment_profile", saved["deployment_profile"])
         config.project.set_config("runtime.namespace_override", saved["namespace_override"])
+        config.project.set_config("runtime.benchmark_key", saved["benchmark_key"])
         _namespace_is_managed_override = prev_managed_override
 
 
