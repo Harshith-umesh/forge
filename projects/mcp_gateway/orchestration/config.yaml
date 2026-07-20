@@ -1,7 +1,7 @@
 nightly:
   cluster: "forge-smoke-testing"
   version_key: "infrastructure.mcp_gateway_version"
-  pipeline: "fournos-full"
+  pipeline: "forge-full"
   preset: "demo"
   owner: "ashtakb"
 
