@@ -6,7 +6,15 @@ from pathlib import Path
 
 import yaml
 
-from projects.core.dsl import always, entrypoint, execute_tasks, on_failure, retry, task
+from projects.core.dsl import (
+    EarlyReturn,
+    always,
+    entrypoint,
+    execute_tasks,
+    on_failure,
+    retry,
+    task,
+)
 from projects.core.dsl.utils import write_text
 from projects.core.dsl.utils.k8s import (
     oc,
@@ -28,6 +36,7 @@ def run(
     namespace: str,
     inference_service_manifest_path: str,
     gateway_status_address_name: str = "gateway-external",
+    dry_run: bool = False,
 ) -> str:
     """
     Deploy an LLMInferenceService and wait for its endpoint.
@@ -36,41 +45,34 @@ def run(
         namespace: Namespace used by llm_d
         inference_service_manifest_path: Path to the InferenceService YAML manifest file
         gateway_status_address_name: Gateway status address name for endpoint resolution
+        dry_run: If True, only prepare the manifest without deploying
     """
 
-    # Load manifest to extract the service name
-    manifest = load_yaml(Path(inference_service_manifest_path))
-    inference_service_name = manifest["metadata"]["name"]
+    ctx = execute_tasks(locals())
 
-    # Pass only the required arguments to avoid including manifest content in logs
-    task_args = {
-        "namespace": namespace,
-        "inference_service_manifest_path": inference_service_manifest_path,
-        "inference_service_name": inference_service_name,
-        "gateway_status_address_name": gateway_status_address_name,
-    }
-    context = execute_tasks(task_args)
+    if dry_run:
+        return ctx.src_manifest_path
 
     # Ensure endpoint_url is available
-    endpoint_url = getattr(context, "endpoint_url", None)
+    endpoint_url = getattr(ctx, "endpoint_url", None)
     if not endpoint_url:
         raise RuntimeError("Failed to resolve gateway endpoint URL after deployment")
-
-    # Log service description for visibility
-    service_description = getattr(context, "service_description", None)
-    if service_description:
-        print(f"Deployed: {service_description}")
 
     return endpoint_url
 
 
 @task
 def copy_manifest_to_src(args, ctx):
-    """Copy inference service manifest to src directory for inspection and use"""
+    """Copy inference service manifest to src directory and extract service name"""
     import shutil
 
     # Get the original manifest path
     original_path = Path(args.inference_service_manifest_path)
+
+    # Load manifest to extract the service name
+    manifest = load_yaml(original_path)
+    ctx.inference_service_name = manifest["metadata"]["name"]
+    ctx.selector = f"app.kubernetes.io/name={ctx.inference_service_name}"
 
     # Ensure the src directory exists
     src_dir = args.artifact_dir / "src"
@@ -83,14 +85,22 @@ def copy_manifest_to_src(args, ctx):
     # Store the src path in context for other tasks to use
     ctx.src_manifest_path = str(src_path)
 
-    return f"Copied manifest from {original_path} to {src_path}"
+    return f"Copied manifest from {original_path} to {src_path} (service: {ctx.inference_service_name})"
+
+
+@task
+def check_dry_run(args, ctx):
+    """Check if dry-run mode is enabled and return early if so"""
+    if args.dry_run:
+        return EarlyReturn(f"Dry-run completed: Prepared manifest for {ctx.inference_service_name}")
+    return "Proceeding with full deployment"
 
 
 @task
 def delete_existing_service(args, ctx):
     """Delete existing LLMInferenceService"""
 
-    name = args.inference_service_name
+    name = ctx.inference_service_name
     oc(
         "delete",
         "llminferenceservice",
@@ -100,8 +110,7 @@ def delete_existing_service(args, ctx):
         "--ignore-not-found=true",
         check=False,
     )
-    ctx.service_name = name
-    ctx.selector = f"app.kubernetes.io/name={name}"
+
     return f"Deleted existing LLMInferenceService {name}"
 
 
@@ -110,13 +119,11 @@ def delete_existing_service(args, ctx):
 def wait_old_pods_gone(args, ctx):
     """Wait for old llm-d pods to disappear"""
 
-    # Use service name and selector from context (if set) or create from args
-    service_name = getattr(ctx, "service_name", args.inference_service_name)
-    selector = getattr(ctx, "selector", f"app.kubernetes.io/name={service_name}")
-
-    pods = oc_get_json("pods", namespace=args.namespace, selector=selector, ignore_not_found=True)
+    pods = oc_get_json(
+        "pods", namespace=args.namespace, selector=ctx.selector, ignore_not_found=True
+    )
     if not pods or not pods.get("items"):
-        return f"Old pods gone for {service_name}"
+        return f"Old pods gone for {ctx.inference_service_name}"
     return False  # Retry
 
 
@@ -130,7 +137,7 @@ def apply_inference_service(args, ctx):
     # Load and apply the manifest from src
     manifest = load_yaml(Path(src_manifest_path))
     oc_apply(src_manifest_path, manifest)
-    return f"Applied LLMInferenceService manifest from {src_manifest_path} for {ctx.service_name}"
+    return f"Applied LLMInferenceService manifest from {src_manifest_path} for {ctx.inference_service_name}"
 
 
 @on_failure(on_wait_pods_appear_failure)
@@ -139,13 +146,11 @@ def apply_inference_service(args, ctx):
 def wait_pods_appear(args, ctx):
     """Wait for llm-d pods to appear"""
 
-    # Use service name and selector from context (if set) or create from args
-    service_name = getattr(ctx, "service_name", args.inference_service_name)
-    selector = getattr(ctx, "selector", f"app.kubernetes.io/name={service_name}")
-
-    pods = oc_get_json("pods", namespace=args.namespace, selector=selector, ignore_not_found=True)
+    pods = oc_get_json(
+        "pods", namespace=args.namespace, selector=ctx.selector, ignore_not_found=True
+    )
     if pods and pods.get("items"):
-        return f"Pods appeared for {service_name}"
+        return f"Pods appeared for {ctx.inference_service_name}"
     return False  # Retry
 
 
@@ -154,13 +159,18 @@ def wait_pods_appear(args, ctx):
 def capture_llmisv_description(args, ctx):
     """Capture LLMISV description with events and status for failure analysis"""
 
+    if args.dry_run:
+        return "Dry-run, nothing to do"
+
     try:
         # Ensure artifacts directory exists
         artifacts_dir = args.artifact_dir / "artifacts"
         artifacts_dir.mkdir(parents=True, exist_ok=True)
 
-        # Use service name from args (available) or context (if set)
-        service_name = getattr(ctx, "service_name", args.inference_service_name)
+        # Use LLMInferenceService name from context
+        service_name = getattr(ctx, "inference_service_name", None)
+        if not service_name:
+            return "No service name available"
 
         # Capture LLMISV description
         result = oc(
@@ -188,21 +198,25 @@ def capture_llmisv_description(args, ctx):
 def capture_replicaset_description(args, ctx):
     """Capture ReplicaSet description for pod creation failure analysis"""
 
+    if args.dry_run:
+        return "Dry-run, nothing to do"
+
     try:
         # Ensure artifacts directory exists
         artifacts_dir = args.artifact_dir / "artifacts"
         artifacts_dir.mkdir(parents=True, exist_ok=True)
 
-        # Use service name from args (available) or context (if set)
-        service_name = getattr(ctx, "service_name", args.inference_service_name)
-        selector = getattr(ctx, "selector", f"app.kubernetes.io/name={service_name}")
+        # Use LLMInferenceService name from context
+        service_name = getattr(ctx, "inference_service_name", None)
+        if not service_name:
+            return "No service name available"
 
         # Get replicasets for the service
         rs_result = oc(
             "get",
             "replicaset",
             "-l",
-            selector,
+            ctx.selector,
             "-n",
             args.namespace,
             "-o",
@@ -216,16 +230,18 @@ def capture_replicaset_description(args, ctx):
         if rs_result.stdout.strip():
             # Describe each replicaset
             for rs_name in rs_result.stdout.strip().split("\n"):
-                if rs_name.strip():
-                    rs_desc_result = oc(
-                        "describe",
-                        rs_name.strip(),
-                        "-n",
-                        args.namespace,
-                        log_stdout=False,
-                        check=False,
-                    )
-                    replicaset_descriptions.append(rs_desc_result.stdout)
+                if not rs_name.strip():
+                    continue
+
+                rs_desc_result = oc(
+                    "describe",
+                    rs_name.strip(),
+                    "-n",
+                    args.namespace,
+                    log_stdout=False,
+                    check=False,
+                )
+                replicaset_descriptions.append(rs_desc_result.stdout)
 
         # Save all replicaset descriptions
         rs_desc_path = artifacts_dir / "replicaset_description.txt"
@@ -245,7 +261,7 @@ def capture_replicaset_description(args, ctx):
 def query_service_status(args, ctx):
     """Query the status of the LLMInferenceService"""
 
-    service_name = getattr(ctx, "service_name", args.inference_service_name)
+    service_name = ctx.inference_service_name
 
     # Query only the Ready condition status
     result = oc(
@@ -272,7 +288,7 @@ def query_service_status(args, ctx):
 def query_service_message(args, ctx):
     """Query detailed message from LLMInferenceService"""
 
-    service_name = getattr(ctx, "service_name", args.inference_service_name)
+    service_name = ctx.inference_service_name
 
     # Query the Ready condition details
     result = oc(
@@ -309,8 +325,7 @@ def query_service_message(args, ctx):
 def wait_service_ready(args, ctx):
     """Wait for LLMInferenceService to be ready"""
 
-    service_name = getattr(ctx, "service_name", args.inference_service_name)
-    selector = getattr(ctx, "selector", f"app.kubernetes.io/name={service_name}")
+    service_name = ctx.inference_service_name
 
     # Query the current status and show diagnostic info
     result = oc(
@@ -329,7 +344,7 @@ def wait_service_ready(args, ctx):
         "get",
         "pods",
         "-l",
-        selector,
+        ctx.selector,
         "-n",
         args.namespace,
         log_stdout=True,  # Show pod status in logs
@@ -365,7 +380,7 @@ def resolve_endpoint_task(args, ctx):
 
     endpoint_url = try_resolve_endpoint_url(
         namespace=args.namespace,
-        inference_service_name=args.inference_service_name,
+        inference_service_name=ctx.inference_service_name,
         gateway_status_address_name=args.gateway_status_address_name,
     )
     if endpoint_url:
@@ -373,19 +388,6 @@ def resolve_endpoint_task(args, ctx):
         write_text(args.artifact_dir / "artifacts" / "endpoint.url", f"{endpoint_url}\n")
         return f"Endpoint resolved: {endpoint_url}"
     return False  # Retry
-
-
-@task
-def deploy_llmisvc_task(args, ctx):
-    """Deploy the llm_d inference service and resolve its endpoint"""
-
-    # All work is done by the individual tasks
-    service_info = getattr(
-        ctx, "service_description", f"LLM Service '{args.inference_service_name}'"
-    )
-    return (
-        f"LLMInferenceService deployment completed: {service_info} - Endpoint: {ctx.endpoint_url}"
-    )
 
 
 def try_resolve_endpoint_url(
