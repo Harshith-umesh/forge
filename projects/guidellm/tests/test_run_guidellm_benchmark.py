@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from projects.guidellm.toolbox.run_guidellm_benchmark import build_guidellm_args
+from projects.guidellm.toolbox.run_guidellm_benchmark.main import _wait_attempts
 from projects.guidellm.toolbox.run_guidellm_benchmark.utils import (
     expand_guidellm_runs,
     render_guidellm_job_from_parts,
@@ -114,6 +115,7 @@ def test_render_guidellm_job_from_parts_uses_shell_for_multi_run_benchmarks() ->
         name="guidellm-benchmark",
         image="ghcr.io/vllm-project/guidellm:v0.5.4",
         endpoint_url="https://example.test/llm-d",
+        timeout_seconds=3600,
         guidellm_args=[
             "--backend-type=openai_http",
             "--rate-type=concurrent",
@@ -124,6 +126,7 @@ def test_render_guidellm_job_from_parts_uses_shell_for_multi_run_benchmarks() ->
     )
 
     container = manifest["spec"]["template"]["spec"]["containers"][0]
+    assert manifest["spec"]["activeDeadlineSeconds"] == 3600
     assert container["command"] == ["/bin/sh", "-lc"]
     script = container["args"][0]
     assert "--rate=32" in script
@@ -142,6 +145,7 @@ def test_render_guidellm_job_from_parts_keeps_plain_rates_as_single_guidellm_run
         name="guidellm-benchmark",
         image="ghcr.io/vllm-project/guidellm:v0.5.4",
         endpoint_url="https://example.test/llm-d",
+        timeout_seconds=3600,
         guidellm_args=[
             "--backend-type=openai_http",
             "--rate-type=concurrent",
@@ -163,6 +167,10 @@ def test_render_guidellm_job_from_parts_keeps_plain_rates_as_single_guidellm_run
         "--data=prompt_tokens=1000,output_tokens=1000",
         "--max-seconds=600",
     ]
+
+
+def test_wait_attempts_cover_the_job_timeout_and_status_grace_period() -> None:
+    assert _wait_attempts(3600) == 367
 
 
 def test_build_guidellm_args_renders_list_values() -> None:

@@ -87,11 +87,15 @@ def test_smoke_presets_inherit_deployment_modes(preset: str, expected_deployment
 def test_benchmark_workloads_are_available() -> None:
     _init_project_config()
 
+    short = core_config.project.get_config("workloads.benchmarks.short", print=False)
     concurrent = core_config.project.get_config(
         "workloads.benchmarks.concurrent-1k-1k", print=False
     )
     heavy = core_config.project.get_config("workloads.benchmarks.heavy-heterogeneous", print=False)
     multi_turn = core_config.project.get_config("workloads.benchmarks.multi-turn", print=False)
+
+    for benchmark in (short, concurrent, heavy, multi_turn):
+        assert benchmark["timeout_seconds"] == 3600
 
     assert concurrent["args"]["rate"] == [300, 200, 100, 50, 1]
     assert heavy["args"]["max_seconds"] == 600
@@ -140,6 +144,7 @@ def test_guidellm_benchmark_uses_original_model_name_as_processor(
     monkeypatch.setattr(test_phase.run_guidellm_benchmark_command, "run", _fake_run)
     test_phase.run_guidellm_benchmark(endpoint_url="https://example.test/llm-d")
 
+    assert captured["timeout"] == 3600
     guidellm_args = captured["guidellm_args"]
     assert isinstance(guidellm_args, list)
     assert "--processor=openai/gpt-oss-120b" in guidellm_args

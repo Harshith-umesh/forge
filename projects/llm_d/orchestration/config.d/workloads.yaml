@@ -16,7 +16,7 @@ benchmarks:
       max_model_len: 4096
 
   short:
-    timeout_seconds: 900
+    timeout_seconds: 3600
     outputs: json
     args:
       backend_type: openai_http
@@ -27,6 +27,7 @@ benchmarks:
       data: prompt_tokens=256,output_tokens=128
 
   concurrent-1k-1k:
+    timeout_seconds: 3600
     args:
       backend_type: openai_http
       rate_type: concurrent
