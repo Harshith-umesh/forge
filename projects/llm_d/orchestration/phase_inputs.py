@@ -21,7 +21,6 @@ class PrepareModelCacheInputs:
     artifact_dir: Path
     preset_name: str
     namespace: str
-    namespace_is_managed: bool
     model_key: str
     model: dict[str, Any]
     model_cache: dict[str, Any]
@@ -33,7 +32,6 @@ class PrepareInputs:
     config_dir: Path
     preset_name: str
     namespace: str
-    namespace_is_managed: bool
     platform: dict[str, Any]
     model_key: str
     model: dict[str, Any]
@@ -83,7 +81,6 @@ def write_prepare_inputs_from_prepare(inputs: PrepareInputs) -> Path:
             "config_dir": str(inputs.config_dir),
             "preset_name": inputs.preset_name,
             "namespace": inputs.namespace,
-            "namespace_is_managed": inputs.namespace_is_managed,
             "platform": inputs.platform,
             "model_key": inputs.model_key,
             "model": inputs.model,
@@ -125,7 +122,6 @@ def load_prepare_model_cache_inputs(path: str | Path) -> PrepareModelCacheInputs
         artifact_dir=Path(payload["artifact_dir"]),
         preset_name=payload["preset_name"],
         namespace=payload["namespace"],
-        namespace_is_managed=payload["namespace_is_managed"],
         model_key=payload["model_key"],
         model=payload["model"],
         model_cache=payload["model_cache"],
@@ -137,7 +133,6 @@ def build_prepare_model_cache_inputs(
     artifact_dir: str | Path,
     preset_name: str,
     namespace: str,
-    namespace_is_managed: bool,
     model_key: str,
     model: dict[str, Any],
     model_cache: dict[str, Any],
@@ -146,7 +141,6 @@ def build_prepare_model_cache_inputs(
         artifact_dir=Path(artifact_dir),
         preset_name=preset_name,
         namespace=namespace,
-        namespace_is_managed=namespace_is_managed,
         model_key=model_key,
         model=model,
         model_cache=model_cache,
@@ -160,7 +154,6 @@ def load_prepare_inputs(path: str | Path) -> PrepareInputs:
         config_dir=Path(payload["config_dir"]),
         preset_name=payload["preset_name"],
         namespace=payload["namespace"],
-        namespace_is_managed=payload["namespace_is_managed"],
         platform=payload["platform"],
         model_key=payload["model_key"],
         model=payload["model"],
@@ -175,7 +168,6 @@ def build_prepare_inputs(
     config_dir: str | Path,
     preset_name: str,
     namespace: str,
-    namespace_is_managed: bool,
     platform: dict[str, Any],
     model_key: str,
     model: dict[str, Any],
@@ -187,7 +179,6 @@ def build_prepare_inputs(
         config_dir=Path(config_dir),
         preset_name=preset_name,
         namespace=namespace,
-        namespace_is_managed=namespace_is_managed,
         platform=platform,
         model_key=model_key,
         model=model,
@@ -274,7 +265,6 @@ def prepare_model_cache_inputs_from_prepare(inputs: PrepareInputs) -> PrepareMod
         artifact_dir=inputs.artifact_dir,
         preset_name=inputs.preset_name,
         namespace=inputs.namespace,
-        namespace_is_managed=inputs.namespace_is_managed,
         model_key=inputs.model_key,
         model=inputs.model,
         model_cache=inputs.model_cache,
@@ -290,7 +280,6 @@ def write_prepare_model_cache_inputs_from_prepare(inputs: PrepareInputs) -> Path
             "artifact_dir": str(cache_inputs.artifact_dir),
             "preset_name": cache_inputs.preset_name,
             "namespace": cache_inputs.namespace,
-            "namespace_is_managed": cache_inputs.namespace_is_managed,
             "model_key": cache_inputs.model_key,
             "model": cache_inputs.model,
             "model_cache": cache_inputs.model_cache,
