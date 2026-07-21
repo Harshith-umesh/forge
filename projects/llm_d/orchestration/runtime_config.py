@@ -161,6 +161,11 @@ def _extract_value_from_profile_name(profile_name: str, field_name: str) -> int:
             match = re.search(r"p\.tp(\d+)", profile_name)
             if match:
                 return int(match.group(1))
+        elif field_name == "decode_tensor_parallelism":
+            # Look for d.tp4 pattern (decode tensor_parallelism)
+            match = re.search(r"d\.tp(\d+)", profile_name)
+            if match:
+                return int(match.group(1))
     else:
         # Standard patterns: simple-tp4-x4, intelligentrouting-tp4-x4
         if field_name == "tensor_parallelism":
@@ -200,7 +205,17 @@ def _resolve_from_name_values(profile_name: str, profile_data: dict[str, Any]) -
             return [resolve_value(item, path) for item in obj]
         elif obj == "FROM_NAME":
             # Determine which field to extract based on the path
-            field_name = path.split(".")[-1]  # Get the last part of the path
+            path_parts = path.split(".")
+            field_name = path_parts[-1]  # Get the last part of the path
+
+            # Map field names for P/D deployments
+            if len(path_parts) >= 2 and path_parts[-2] in ("prefill", "decode"):
+                container_type = path_parts[-2]  # prefill or decode
+                if field_name == "replicas":
+                    field_name = f"{container_type}_pods"
+                elif field_name == "tensor_parallelism":
+                    field_name = f"{container_type}_tensor_parallelism"
+
             try:
                 return _extract_value_from_profile_name(profile_name, field_name)
             except ValueError as e:
