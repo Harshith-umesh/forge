@@ -5,8 +5,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from projects.core.dsl import shell
 from projects.core.dsl.utils import slugify_identifier
+from projects.core.dsl.utils.k8s import oc
 from projects.core.library import config, env
 from projects.core.library.postprocess import run_and_postprocess, write_test_labels
 from projects.core.library.run import SignalInterrupt
@@ -26,6 +29,42 @@ from projects.llm_d.orchestration.utils import write_yaml
 from projects.llm_d.toolbox.cleanup_test_resources import main as cleanup_test_resources_command
 
 logger = logging.getLogger(__name__)
+
+
+def ensure_kueue_local_queue() -> None:
+    """Create LocalQueue when kueue is enabled."""
+    enable_kueue = config.project.get_config("runtime.kueue.enabled")
+    if not enable_kueue:
+        return
+
+    queue_name = config.project.get_config("runtime.kueue.queue_name")
+    manifest_path = config.project.get_config("runtime.kueue.local_queue_manifest")
+    namespace = runtime_config.get_namespace()
+
+    logger.info("Creating LocalQueue: %s", queue_name)
+
+    # Read and parse the YAML template
+    config_dir = runtime_config.get_config_dir()
+    template_file = config_dir / manifest_path
+
+    with template_file.open(encoding="utf-8") as f:
+        local_queue_manifest = yaml.safe_load(f)
+
+    # Update the fields
+    local_queue_manifest["metadata"]["name"] = queue_name
+    local_queue_manifest["metadata"]["namespace"] = namespace
+    local_queue_manifest["spec"]["clusterQueue"] = queue_name
+
+    # Write manifest to manifests directory and apply
+    manifests_dir = env.ARTIFACT_DIR / "manifests"
+    manifests_dir.mkdir(parents=True, exist_ok=True)
+    manifest_file = manifests_dir / f"{queue_name}-localqueue.yaml"
+
+    write_yaml(manifest_file, local_queue_manifest)
+
+    # Apply the manifest
+    oc("apply", "-f", str(manifest_file))
+    logger.info("LocalQueue %s created successfully", queue_name)
 
 
 def create_test_labels() -> None:
@@ -118,6 +157,9 @@ def do_test() -> int:
         ensure_namespace(
             namespace, labels=config.project.get_config("platform.cluster.namespace.labels")
         )
+
+        # Ensure LocalQueue exists when kueue is enabled
+        ensure_kueue_local_queue()
 
     endpoint_url: str | None = None
     primary_exc: tuple[type[BaseException], BaseException, Any] | None = None

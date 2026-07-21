@@ -407,11 +407,18 @@ def _apply_kueue_configuration(manifest: dict[str, Any]) -> None:
             scheduler_template["metadata"] = {}
         if "annotations" not in scheduler_template["metadata"]:
             scheduler_template["metadata"]["annotations"] = {}
+        if "labels" not in scheduler_template["metadata"]:
+            scheduler_template["metadata"]["labels"] = {}
 
         # Apply the same Kueue annotations to the scheduler pod template
         for annotation_key, annotation_value in kueue_annotations.items():
             full_annotation_key = f"{kueue_prefix}{annotation_key}"
             scheduler_template["metadata"]["annotations"][full_annotation_key] = annotation_value
+
+        # Apply the same Kueue labels to the scheduler pod template
+        for label_key, label_value in kueue_labels.items():
+            full_label_key = f"{kueue_prefix}{label_key}"
+            scheduler_template["metadata"]["labels"][full_label_key] = label_value
 
         # Update the scheduler template back to the data structure
         manifest["spec"]["router"]["scheduler"]["template"] = scheduler_template
@@ -437,3 +444,15 @@ def _apply_kueue_configuration(manifest: dict[str, Any]) -> None:
     manifest["metadata"]["annotations"][f"{kueue_prefix}pod-group-total-count"] = str(
         pod_group_total_count
     )
+
+    # Add required pod-group-name label using the ISVC name
+    pod_group_name = manifest["metadata"]["name"]
+    manifest["metadata"]["labels"][f"{kueue_prefix}pod-group-name"] = pod_group_name
+
+    # Also add pod-group-name label to scheduler template if it exists
+    if has_scheduler:
+        scheduler_template = manifest["spec"]["router"]["scheduler"].get("template", {})
+        if "metadata" in scheduler_template and "labels" in scheduler_template["metadata"]:
+            scheduler_template["metadata"]["labels"][f"{kueue_prefix}pod-group-name"] = (
+                pod_group_name
+            )
