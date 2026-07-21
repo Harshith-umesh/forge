@@ -103,6 +103,12 @@ def init(daily_artifact_dir=False):
         artifact_dir.mkdir(parents=True, exist_ok=True)
         os.environ["ARTIFACT_DIR"] = str(artifact_dir)
 
+        # Create or update forge_last symlink
+        forge_last_link = env_forge_base_dir / "forge_last"
+        if forge_last_link.exists() or forge_last_link.is_symlink():
+            forge_last_link.unlink()
+        forge_last_link.symlink_to(artifact_dir.name)
+
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
     # Set BASE_ARTIFACT_DIR to the initial value (immutable)
