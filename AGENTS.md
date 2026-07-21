@@ -6,7 +6,10 @@ FORGE is a CI/CD testing framework that orchestrates Kubernetes workloads on Ope
 It uses a Python DSL to define tasks, apply manifests, and collect artifacts for debugging.
 
 Key paths:
-- `projects/` — individual project toolboxes (install scripts, test harnesses)
+- `projects/` — individual project test harnesses
+- `projects/NAME/orchestration` — upper layer of the test harness (config, prepare, test, cleanup)
+- `projects/NAME/toolbox` — lower layer of the test harness (toolbox of scripts altering the state of the cluster, using the DSL language)
+- `projects/NAME/test` — unit testing of the test harness
 - `projects/core/dsl/` — shared DSL (task execution, k8s utilities, shell helpers)
 - `fournos/gitops/` — Tekton pipelines and GitOps base workflows
 - `docs/` — project documentation
