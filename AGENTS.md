@@ -41,6 +41,12 @@ Key paths:
    Treat everything under `ARTIFACT_DIR` as if it will be published on the internet.
    Only write non-sensitive operational data (CRs, logs, pod descriptions, events).
 
+6. **Use the vault module.**
+    Use the project `projects.core.library.vault` module to access the secrets, stored in files. Consider all the content of these files as secret.
+    
+7. **Never pass secrets via environment variables**
+    For transparency and post-mortem troubleshooting, the environment variables are saved to disk at multiple locations. Do not use environment variables to pass a secret between two components. There might be few exceptions to this rule (MLFlow, AWS), but they must be handled with care.
+
 ### Safe Patterns
 
 ```python
