@@ -391,9 +391,14 @@ def cleanup_test_resources() -> None:
     inference_service = platform["inference_service"]
     smoke = platform["smoke"]
 
+    # Build the actual inference service name (includes deployment profile)
+    base_name = inference_service["name"]
+    deployment_profile_name = runtime_config.get_deployment_profile_name()
+    actual_service_name = f"{base_name}-{deployment_profile_name}"
+
     cleanup_test_resources_command.run(
         namespace=namespace,
-        inference_service_name=inference_service["name"],
+        inference_service_name=actual_service_name,
         smoke_pod_name=smoke["pod_name"],
         benchmark_job_name=runtime_config.get_benchmark_job_name(),
     )
