@@ -4,10 +4,10 @@ deployment_profile: approximate-prefix-cache
 smoke_request_key: default
 benchmark_key: null
 job_name: null
-namespace_override: null
-kserve_dry_run: true
+namespace: forge-llm-d
+kserve_dry_run: false
 kueue:
-  enable: true
+  enabled: false
   queue_name: default-queue
 router:
   template:

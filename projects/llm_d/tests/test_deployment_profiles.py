@@ -53,6 +53,7 @@ def _test_preset_generates_expected_llmisvc(preset: str, tmp_path: Path):
         yaml.safe_dump(
             {
                 "runtime.kserve_dry_run": True,
+                "runtime.namespace_override": "forge-llm-d",
             },
             sort_keys=True,
         ),
@@ -201,37 +202,17 @@ def _find_generated_llmisvcs(artifact_dir: Path) -> list[dict[str, Path]]:
     for deploy_dir in deploy_llmisvc_dirs:
         llmisvc_path = deploy_dir / "src" / "llminferenceservice.yaml"
         if llmisvc_path.exists():
-            # Extract profile name from the directory structure
-            # Pattern: .../__llmd_run_{profile_name}_{model_slug}/.../__deploy_llmisvc
-            parent_path = (
-                deploy_dir.parent.parent.name
-            )  # e.g., "001__llmd_run_pd-d-x2-p-tp4-d-tp4-p-x1_qwen-qwen3-0-6b"
-            if "__llmd_run_" in parent_path:
-                # Extract the part after __llmd_run_
-                run_part = parent_path.split("__llmd_run_", 1)[1]
+            # Read the manifest and extract profile name from annotations
+            with llmisvc_path.open("r", encoding="utf-8") as f:
+                manifest = yaml.safe_load(f)
 
-                # Split by underscore to separate profile from model
-                parts = run_part.split("_")
+            ANNOTATION = "forge.openshift.io/deployment-profile"
+            profile_name = manifest.get("metadata", {}).get("annotations", {}).get(ANNOTATION)
 
-                # Find where the model name starts (models typically start with specific patterns)
-                model_start_idx = len(parts)
-                for i, part in enumerate(parts):
-                    if part.startswith(("qwen", "meta", "openai", "llama")):
-                        model_start_idx = i
-                        break
+            if not profile_name:
+                raise ValueError(f"Annotation '{ANNOTATION}' missing in {llmisvc_path}")
 
-                # Profile name is everything before the model
-                if model_start_idx > 0:
-                    profile_parts = parts[:model_start_idx]
-                    profile_name = "-".join(profile_parts)
-                else:
-                    # Fallback: use entire run part minus likely model
-                    profile_name = "-".join(parts[:-1]) if len(parts) > 1 else parts[0]
-
-                deployments.append({"profile_name": profile_name, "manifest_path": llmisvc_path})
-            else:
-                # Fallback: use directory name
-                deployments.append({"profile_name": "unknown", "manifest_path": llmisvc_path})
+            deployments.append({"profile_name": profile_name, "manifest_path": llmisvc_path})
 
     return deployments
 

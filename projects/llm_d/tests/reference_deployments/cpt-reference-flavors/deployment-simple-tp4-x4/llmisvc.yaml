@@ -2,22 +2,20 @@ apiVersion: serving.kserve.io/v1alpha1
 kind: LLMInferenceService
 metadata:
   name: llm-d-simple-tp4-x4
-  namespace: forge-llm-d-qwen-qwen3-0-6b-simple-tp4-x4
+  namespace: forge-llm-d
   annotations:
     security.opendatahub.io/enable-auth: 'false'
     prometheus.io/path: /metrics
     prometheus.io/port: '8000'
+    forge.openshift.io/deployment-profile: simple-tp4-x4
   labels:
     app.kubernetes.io/managed-by: forge
     forge.openshift.io/project: llm_d
 spec:
   replicas: 4
   model:
-    uri: pvc://llm-d-model-qwen-qwen3-0-6b-fe62ee7991/model
-    name: qwen-qwen3-0-6b
-  router:
-    route: {}
-    gateway: {}
+    uri: pvc://llm-d-model-openai-gpt-oss-120b-7ab79ddecd/model
+    name: openai-gpt-oss-120b
   template:
     tolerations:
     - key: nvidia.com/gpu
@@ -52,4 +50,4 @@ spec:
       env:
       - name: VLLM_ADDITIONAL_ARGS
         value: --max-model-len=4096 --gpu-memory-utilization=0.92 --trust-remote-code
-          --no-enable-log-requests --enable-prefix-caching --tensor-parallel-size=4
+          --no-enable-log-requests --enable-prefix-caching

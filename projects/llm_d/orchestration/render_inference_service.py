@@ -77,11 +77,15 @@ def render_inference_service_from_parts(
     manifest["metadata"]["namespace"] = namespace
     manifest["metadata"].setdefault("labels", {})
     manifest["metadata"]["labels"].update(
-        {
-            "app.kubernetes.io/managed-by": "forge",
-            "forge.openshift.io/project": "llm_d",
-        }
+        config.project.get_config("deployments.defaults.labels") or {}
     )
+
+    # Add deployment profile name as annotation for testing
+    manifest["metadata"].setdefault("annotations", {})
+    if deployment_profile_name:
+        manifest["metadata"]["annotations"]["forge.openshift.io/deployment-profile"] = (
+            deployment_profile_name
+        )
 
     if model_name.startswith("oci://"):
         source_uri = model_name
@@ -120,13 +124,13 @@ def render_inference_service_from_parts(
 
 
 def _build_serving_resources(deployment_profile: dict[str, Any]) -> dict[str, Any]:
-    tensor_parallelism = str(deployment_profile["tensor_parallelism"])
+    tensor_parallelism = deployment_profile["tensor_parallelism"]
     profile_resources = deployment_profile.get("resources", {})
     rendered_resources: dict[str, Any] = {}
 
     for bound in ("requests", "limits"):
         source = profile_resources.get(bound, {})
-        rendered_bound = {"nvidia.com/gpu": tensor_parallelism}
+        rendered_bound = {"nvidia.com/gpu": str(tensor_parallelism)}
         for resource_name in ("cpu", "memory"):
             value = source.get(resource_name)
             if value not in (None, ""):
@@ -157,6 +161,26 @@ def _has_cli_arg(args: list[str], option_name: str) -> bool:
     return any(arg == bare or arg.startswith(prefix) for arg in args)
 
 
+def _build_vllm_additional_args(
+    deployment_profile: dict[str, Any],
+) -> str:
+    """Build VLLM_ADDITIONAL_ARGS string based on deployment profile configuration.
+
+    Args:
+        deployment_profile: The deployment profile configuration
+
+    Returns:
+        String suitable for VLLM_ADDITIONAL_ARGS environment variable
+    """
+
+    vllm_default_args = _build_vllm_args(
+        config.project.get_config("deployments.defaults.vllm_extra.args")
+    )
+    vllm_deploy_args = _build_vllm_args(deployment_profile.get("vllm_extra.args", {}))
+
+    return " ".join(vllm_default_args + vllm_deploy_args)
+
+
 def _render_standard_deployment(
     manifest: dict[str, Any],
     deployment_profile: dict[str, Any],
@@ -166,10 +190,6 @@ def _render_standard_deployment(
     # Check if this is intelligent routing (scheduler_manifest exists)
     scheduler = deployment_profile.get("scheduler")
     has_scheduler_manifest = "scheduler_manifest" in deployment_profile
-    is_intelligent_routing = scheduler is not None and has_scheduler_manifest
-
-    # Update service name for intelligent routing or use_kserve_defaults
-    current_name = manifest["metadata"]["name"]
 
     manifest["metadata"]["name"] = f"llm-d-{deployment_profile_name}"
 
@@ -180,50 +200,13 @@ def _render_standard_deployment(
     if deployment_profile.get("serving_image"):
         serving_container["image"] = deployment_profile["serving_image"]
 
-    # Configure VLLM args based on deployment type and use_kserve_defaults flag
-    tensor_parallelism = str(deployment_profile["tensor_parallelism"])
-    use_kserve_defaults = deployment_profile.get("use_kserve_defaults", False)
+    vllm_additional_args = _build_vllm_additional_args(deployment_profile)
 
-    if use_kserve_defaults:
-        # Use VLLM_ADDITIONAL_ARGS environment variable when use_kserve_defaults is set
-        vllm_args = _build_vllm_args(deployment_profile.get("vllm_args", {}))
-        if not _has_cli_arg(vllm_args, "tensor-parallel-size"):
-            vllm_args.append(f"--tensor-parallel-size={tensor_parallelism}")
+    # Add environment variable (don't set generic env vars or args)
+    if "env" not in serving_container:
+        serving_container["env"] = []
 
-        vllm_additional_args = " ".join(vllm_args)
-
-        # Add environment variable (don't set generic env vars or args)
-        if "env" not in serving_container:
-            serving_container["env"] = []
-        serving_container["env"].append(
-            {"name": "VLLM_ADDITIONAL_ARGS", "value": vllm_additional_args}
-        )
-    elif is_intelligent_routing:
-        # Use environment variables for intelligent routing
-        vllm_args_list = [
-            f"--tensor-parallel-size={tensor_parallelism}",
-            "--disable-uvicorn-access-log",
-            "--enable-prefix-caching",
-            "--uvicorn-log-level=debug",
-            "--trust-remote-code",
-            "--gpu-memory-utilization=0.92",
-            "--max-model-len 40960",
-        ]
-        vllm_additional_args = " ".join(vllm_args_list)
-
-        # Add or update environment variables
-        if "env" not in serving_container:
-            serving_container["env"] = []
-        serving_container["env"].append(
-            {"name": "VLLM_ADDITIONAL_ARGS", "value": vllm_additional_args}
-        )
-    else:
-        # Use CLI args for basic deployments
-        vllm_args = _build_vllm_args(deployment_profile.get("vllm_args", {}))
-        if not _has_cli_arg(vllm_args, "tensor-parallel-size"):
-            vllm_args.append(f"--tensor-parallel-size={tensor_parallelism}")
-        if vllm_args:
-            serving_container["args"] = vllm_args
+    serving_container["env"].append({"name": "VLLM_ADDITIONAL_ARGS", "value": vllm_additional_args})
 
     # Configure router/scheduler
     has_scheduler_key = "scheduler" in deployment_profile
@@ -243,24 +226,6 @@ def _render_standard_deployment(
                 deployment_profile["router_image"]
             )
 
-        # Enhance scheduler for intelligent routing
-        if is_intelligent_routing:
-            # Ensure template structure exists
-            if "template" not in manifest["spec"]["router"]["scheduler"]:
-                manifest["spec"]["router"]["scheduler"]["template"] = {
-                    "containers": [{"name": "main"}]
-                }
-
-            scheduler_template = manifest["spec"]["router"]["scheduler"]["template"]
-
-            # Add nodeSelector and serviceAccountName (if not already set by runtime_config.py)
-            if "nodeSelector" not in scheduler_template:
-                scheduler_template["nodeSelector"] = {
-                    "nvidia.com/gpu.deploy.container-toolkit": "true"
-                }
-            if "serviceAccountName" not in scheduler_template:
-                scheduler_template["serviceAccountName"] = "llm-d-privileged"
-
     return manifest
 
 
@@ -270,131 +235,111 @@ def _render_pd_deployment(
     deployment_profile_name: str | None = None,
 ) -> dict[str, Any]:
     """Render P/D (Prefill/Decode) deployment configuration."""
+    from .runtime_config import get_decode_pod_count, get_prefill_pod_count
 
-    # Update service name to include deployment profile for P/D
-    current_name = manifest["metadata"]["name"]
-    if current_name == "llm-d" and deployment_profile_name:  # Only modify if it's the default name
-        manifest["metadata"]["name"] = f"llm-d-{deployment_profile_name}"
-
-    # Set main replicas to 2 for P/D
-    manifest["spec"]["replicas"] = 2
+    # Set manifest name with deployment profile
+    manifest["metadata"]["name"] = f"llm-d-{deployment_profile_name}"
 
     # Configure prefill section
     manifest["spec"]["prefill"] = {
-        "replicas": 2,
-        "template": _build_pd_pod_template(deployment_profile, is_prefill=True),
+        "replicas": get_prefill_pod_count(),
+        "template": _build_pd_pod_template(
+            deployment_profile, deployment_profile_name, is_prefill=True
+        ),
     }
 
     # Configure main template (decode)
-    manifest["spec"]["template"] = _build_pd_pod_template(deployment_profile, is_prefill=False)
-
-    # Simplified router for P/D
-    manifest["spec"]["router"] = {
-        "scheduler": {"template": {"containers": [{"name": "main"}]}},
-        "route": {},
-        "gateway": {},
-    }
+    manifest["spec"]["replicas"] = get_decode_pod_count()
+    manifest["spec"]["template"] = _build_pd_pod_template(
+        deployment_profile, deployment_profile_name, is_prefill=False
+    )
 
     return manifest
 
 
 def _build_pd_pod_template(
-    deployment_profile: dict[str, Any], is_prefill: bool = False
+    deployment_profile: dict[str, Any],
+    deployment_profile_name: str | None = None,
+    is_prefill: bool = False,
 ) -> dict[str, Any]:
     """Build pod template for P/D deployment."""
-    tensor_parallelism = str(deployment_profile["tensor_parallelism"])
-    use_kserve_defaults = deployment_profile.get("use_kserve_defaults", False)
 
-    # Build VLLM environment variable configuration
-    if use_kserve_defaults:
-        # Use deployment profile's vllm_args when use_kserve_defaults is set
-        vllm_args = _build_vllm_args(deployment_profile.get("vllm_args", {}))
-        if not _has_cli_arg(vllm_args, "tensor-parallel-size"):
-            vllm_args.append(f"--tensor-parallel-size={tensor_parallelism}")
-        vllm_additional_args = " ".join(vllm_args)
+    # Get P/D extra configuration from deployments config
+
+    pd_vllm_extra = config.project.get_config("deployments.pd.vllm_extra")
+
+    # Build VLLM args with correct tensor parallelism
+
+    if is_prefill and deployment_profile_name:
+        # For prefill pods, use prefill tensor parallelism
+        from .runtime_config import _extract_value_from_profile_name
+
+        prefill_tp = _extract_value_from_profile_name(
+            deployment_profile_name, "prefill_tensor_parallelism"
+        )
+        # Create modified profile with prefill tensor parallelism
+        prefill_profile = copy.deepcopy(deployment_profile)
+        prefill_profile["tensor_parallelism"] = prefill_tp
+        base_vllm_args = _build_vllm_additional_args(prefill_profile)
     else:
-        # Use P/D-specific configuration when use_kserve_defaults is false
-        if is_prefill:
-            # Prefill configuration
-            vllm_args_list = [
-                "--disable-uvicorn-access-log",
-                "--block-size 128",
-                '--kv-transfer-config \'{"kv_connector":"NixlConnector", "kv_role":"kv_both"}\'',
-                f"--tensor-parallel-size={tensor_parallelism}",
-                "--disable-uvicorn-access-log",  # Appears twice in prefill
-                "--enable-prefix-caching",
-                "--uvicorn-log-level=debug",
-                "--trust-remote-code",
-                "--gpu-memory-utilization=0.92",
-                "--max-model-len=40960",
-            ]
-        else:
-            # Decode configuration
-            vllm_args_list = [
-                "--block-size 128",
-                '--kv-transfer-config \'{"kv_connector":"NixlConnector", "kv_role":"kv_both"}\'',
-                f"--tensor-parallel-size={tensor_parallelism}",
-                "--disable-uvicorn-access-log",
-                "--enable-prefix-caching",
-                "--uvicorn-log-level=debug",
-                "--trust-remote-code",
-                "--gpu-memory-utilization=0.92",
-                "--max-model-len 40960",  # Space instead of equals for decode
-            ]
-        vllm_additional_args = " ".join(vllm_args_list)
+        # For decode pods, use main tensor parallelism
+        base_vllm_args = _build_vllm_additional_args(deployment_profile)
 
+    # Add P/D extra args
+
+    pd_extra_args = pd_vllm_extra.get("args", [])
+    all_vllm_args = base_vllm_args.split() + pd_extra_args
+    vllm_additional_args = " ".join(all_vllm_args)
+
+    # Build base environment variables
+    base_env = [
+        {"name": "VLLM_ADDITIONAL_ARGS", "value": vllm_additional_args},
+    ]
+
+    # Add P/D extra environment variables
+    pd_extra_env = pd_vllm_extra.get("env", [])
+    all_env = base_env + copy.deepcopy(pd_extra_env)
+
+    # Build base resources with correct tensor parallelism
+    if is_prefill and deployment_profile_name:
+        # For prefill pods, use prefill tensor parallelism
+        from .runtime_config import _extract_value_from_profile_name
+
+        try:
+            prefill_tp = _extract_value_from_profile_name(
+                deployment_profile_name, "prefill_tensor_parallelism"
+            )
+            # Create modified profile with prefill tensor parallelism
+            prefill_profile = copy.deepcopy(deployment_profile)
+            prefill_profile["tensor_parallelism"] = prefill_tp
+            base_resources = _build_serving_resources(prefill_profile)
+        except ValueError:
+            # Fallback to main tensor parallelism if extraction fails
+            base_resources = _build_serving_resources(deployment_profile)
+    else:
+        # For decode pods, use main tensor parallelism
+        base_resources = _build_serving_resources(deployment_profile)
+
+    # Add P/D extra resources to both requests and limits
+    pd_resources = config.project.get_config("deployments.pd.resources")
+
+    for bound in ("requests", "limits"):
+        if bound not in base_resources:
+            base_resources[bound] = {}
+        base_resources[bound].update(pd_resources)
+
+    # Build container configuration
     container = {
         "name": "main",
-        "env": [
-            {"name": "VLLM_ADDITIONAL_ARGS", "value": vllm_additional_args},
-            {
-                "name": "VLLM_NIXL_SIDE_CHANNEL_HOST",
-                "valueFrom": {"fieldRef": {"apiVersion": "v1", "fieldPath": "status.podIP"}},
-            },
-            {"name": "UCX_IB_GID_INDEX", "value": "3"},
-        ],
-        "livenessProbe": {
-            "failureThreshold": 1000,
-            "httpGet": {"path": "/health", "port": 8000, "scheme": "HTTPS"},
-            "initialDelaySeconds": 900,
-            "periodSeconds": 60,
-            "timeoutSeconds": 60,
-        },
-        "readinessProbe": {
-            "failureThreshold": 10000,
-            "httpGet": {"path": "/health", "port": 8000, "scheme": "HTTPS"},
-            "initialDelaySeconds": 60,
-            "periodSeconds": 30,
-            "successThreshold": 1,
-            "timeoutSeconds": 30,
-        },
-        "resources": {
-            "limits": {"dra.llm-d.io/gpu-nic-pair": tensor_parallelism},
-            "requests": {
-                "cpu": "4",
-                "dra.llm-d.io/gpu-nic-pair": tensor_parallelism,
-                "memory": "64Gi",
-            },
-        },
-        "securityContext": {"capabilities": {"add": ["IPC_LOCK", "SYS_RAWIO"]}},
-        "startupProbe": {
-            "failureThreshold": 150,
-            "httpGet": {"path": "/health", "port": 8000, "scheme": "HTTPS"},
-            "periodSeconds": 10,
-            "successThreshold": 1,
-            "timeoutSeconds": 1,
-        },
+        "resources": base_resources,
+        "env": all_env,
     }
 
-    template = {"serviceAccountName": "llm-d-privileged", "containers": [container]}
+    # Add serving image if specified
+    if deployment_profile.get("serving_image"):
+        container["image"] = deployment_profile["serving_image"]
 
-    # Add tolerations only to main template (decode), not prefill
-    if not is_prefill:
-        template["tolerations"] = [
-            {"effect": "NoSchedule", "key": "nvidia.com/gpu", "operator": "Exists"}
-        ]
-
-    return template
+    return {"containers": [container]}
 
 
 def _apply_kueue_configuration(manifest: dict[str, Any]) -> None:
