@@ -180,8 +180,8 @@ def deploy_inference_service() -> str:
     platform = runtime_config.get_platform_config()
     gateway = platform["gateway"]
 
-    # Check if dry-run mode is enabled early
-    dry_run = config.project.get_config("runtime.kserve.dry_run", False)
+    dry_run = config.project.get_config("runtime.kserve.dry_run")
+    wait_readiness = config.project.get_config("runtime.kserve.wait_readiness")
 
     # Step 1: Ensure model cache is ready (skip in dry-run)
     if not dry_run:
@@ -190,7 +190,7 @@ def deploy_inference_service() -> str:
         logger.info("Skipping model cache preparation - dry-run mode enabled")
 
     # Step 2: Wait for the serving control plane to settle before creating the service.
-    if not dry_run:
+    if not dry_run and wait_readiness:
         rhoai_namespace = platform["rhoai"]["namespace"]
         wait_kserve_ready.run(namespace=rhoai_namespace)
 

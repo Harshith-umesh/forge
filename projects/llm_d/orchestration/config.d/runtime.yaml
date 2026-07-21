@@ -7,6 +7,7 @@ job_name: null
 namespace: forge-llm-d
 kserve:
   dry_run: false
+  wait_readiness: true
 kueue:
   enabled: false
   queue_name: default-queue
