@@ -119,10 +119,20 @@ def delete_existing_service(args, ctx):
 def wait_old_pods_gone(args, ctx):
     """Wait for old llm-d pods to disappear"""
 
-    pods = oc_get_json(
-        "pods", namespace=args.namespace, selector=ctx.selector, ignore_not_found=True
+    result = oc(
+        "get",
+        "pods",
+        "-n",
+        args.namespace,
+        "-l",
+        ctx.selector,
+        "--ignore-not-found=true",
+        "--no-headers",
+        check=False,
     )
-    if not pods or not pods.get("items"):
+
+    # Check if output is empty (no pods found)
+    if not result.stdout.strip():
         return f"Old pods gone for {ctx.inference_service_name}"
     return False  # Retry
 
