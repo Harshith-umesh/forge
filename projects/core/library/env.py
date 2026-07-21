@@ -98,7 +98,14 @@ def init(daily_artifact_dir=False):
     else:
         env_forge_base_dir = pathlib.Path(os.environ.get("FORGE_BASE_DIR", "/tmp"))
 
-        artifact_dir = env_forge_base_dir / f"forge_{time.strftime('%Y%m%d-%H%M')}"
+        # Try base format first, add seconds if directory exists
+        base_name = f"forge_{time.strftime('%Y%m%d-%H%M')}"
+        artifact_dir = env_forge_base_dir / base_name
+
+        if artifact_dir.exists():
+            # Directory exists, add seconds to make it unique
+            unique_name = f"forge_{time.strftime('%Y%m%d-%H%M-%S')}"
+            artifact_dir = env_forge_base_dir / unique_name
 
         artifact_dir.mkdir(parents=True, exist_ok=True)
         os.environ["ARTIFACT_DIR"] = str(artifact_dir)
