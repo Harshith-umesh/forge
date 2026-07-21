@@ -119,9 +119,9 @@ def _run_test(
         if suffix:
             # KServe hostname: {name}-predictor-{namespace} must be <= 63 chars
             ns = runtime_config.get_namespace()
-            max_name_len = 63 - len(f"-predictor-{ns}")
-            full_name = f"{base_name}-{suffix}"
-            deployment_name = full_name[:max_name_len].rstrip("-")
+            max_base = 63 - len(f"-predictor-{ns}") - len(suffix) - 1
+            truncated_base = base_name[:max_base].rstrip("-")
+            deployment_name = f"{truncated_base}-{suffix}"
         else:
             deployment_name = base_name
 
