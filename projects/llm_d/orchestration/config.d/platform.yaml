@@ -5,6 +5,10 @@ cluster:
     - feature.node.kubernetes.io/pci-10de.present
     - feature.node.kubernetes.io/pci-0302_10de.present
     - feature.node.kubernetes.io/pci-0300_10de.present
+  namespace:
+    labels:
+      app.kubernetes.io/managed-by: forge
+      forge.openshift.io/project: llm_d"
 
 operators:
   openshift-cert-manager-operator:

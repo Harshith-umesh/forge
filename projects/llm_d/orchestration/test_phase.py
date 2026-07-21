@@ -116,11 +116,7 @@ def do_test() -> int:
     if not dry_run:
         # Ensure namespace exists before starting any deployments
         ensure_namespace(
-            namespace,
-            labels={
-                "app.kubernetes.io/managed-by": "forge",
-                "forge.openshift.io/project": "llm_d",
-            },
+            namespace, labels=config.project.get_config("platform.cluster.namespace.labels")
         )
 
     endpoint_url: str | None = None
