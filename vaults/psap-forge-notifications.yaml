@@ -12,8 +12,3 @@ content:
   topsail-bot.slack-token:
     description: |
       Token to send slack notification from the TOPSAIL-bot
-  slack-webhook-url:
-    description: |
-      Plain-text file containing a Slack Incoming Webhook URL
-      for regression/comparison alerts.
-      Example: https://hooks.slack.com/services/T.../B.../...

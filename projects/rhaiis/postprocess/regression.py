@@ -107,7 +107,6 @@ def send_regression_notification(
     accelerator: str = "",
     job_id: str = "",
     slack_user: str = "",
-    webhook_vault: str | None = None,
     notification_vault: str | None = None,
     dry_run: bool = False,
     report_url: str = "",
@@ -116,17 +115,13 @@ def send_regression_notification(
 ) -> bool:
     """Send regression/improvement Slack notification from analysis results.
 
-    Uses a webhook URL (from *webhook_vault*) when available, falling
-    back to the Bot-Token path (from *notification_vault*).
-
     Args:
         analysis_result: Output from run_regression_analysis()
         model: Model name for display
         accelerator: Accelerator name for display
         job_id: Job identifier
         slack_user: Slack user ID (e.g. U01ABC123) to @-mention, or display name
-        webhook_vault: Vault containing slack-webhook-url file
-        notification_vault: Fallback vault for Bot-Token Slack credentials
+        notification_vault: Vault containing topsail-bot.slack-token
         dry_run: Log only, don't send
         report_url: Optional presigned URL to an agent analysis report
         tp: Tensor parallelism size for display
@@ -231,7 +226,7 @@ def send_regression_notification(
         logger.info("DRY RUN regression notification:\n%s", message)
         return True
 
-    return _send_via_topsail_bot(message, notification_vault=notification_vault or webhook_vault, channel_id=RHAIIS_SLACK_CHANNEL_ID)
+    return _send_via_topsail_bot(message, notification_vault=notification_vault, channel_id=RHAIIS_SLACK_CHANNEL_ID)
 
 
 def send_failure_notification(
@@ -241,7 +236,6 @@ def send_failure_notification(
     accelerator: str = "",
     job_id: str = "",
     slack_user: str = "",
-    webhook_vault: str | None = None,
     notification_vault: str | None = None,
     dry_run: bool = False,
     tp: str = "",
@@ -258,8 +252,7 @@ def send_failure_notification(
         accelerator: Accelerator name for display
         job_id: FournosJob name
         slack_user: Slack user ID to @-mention
-        webhook_vault: Vault containing slack-webhook-url file
-        notification_vault: Fallback vault for Bot-Token Slack credentials
+        notification_vault: Vault containing topsail-bot.slack-token
         dry_run: Log only, don't send
         tp: Tensor parallelism size
         dp: Data parallelism size
@@ -310,4 +303,4 @@ def send_failure_notification(
         logger.info("DRY RUN failure notification:\n%s", message)
         return True
 
-    return _send_via_topsail_bot(message, notification_vault=notification_vault or webhook_vault, channel_id=RHAIIS_SLACK_CHANNEL_ID)
+    return _send_via_topsail_bot(message, notification_vault=notification_vault, channel_id=RHAIIS_SLACK_CHANNEL_ID)
