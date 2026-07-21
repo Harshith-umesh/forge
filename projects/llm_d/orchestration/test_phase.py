@@ -144,7 +144,7 @@ def do_test() -> int:
         except SignalInterrupt:
             primary_exc = sys.exc_info()
         finally:
-            do_finalizers = True
+            do_finalizers = config.project.get_config("runtime.run_test_finalizers")
             if primary_exc and isinstance(primary_exc[1], SignalInterrupt):
                 logging.warning("Caught a SignalInterrupt, skipping the finalizers")
                 do_finalizers = False

@@ -15,3 +15,5 @@ router:
     file: manifests/scheduler_config/__router_template__.yaml
     placeholder: __ENDPOINT_PICKER_CONFIG__
   epp: manifests/scheduler_config
+
+run_test_finalizers: true
