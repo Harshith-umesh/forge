@@ -35,7 +35,7 @@ def run(
     *,
     namespace: str,
     inference_service_manifest_path: str,
-    gateway_status_address_name: str = "gateway-external",
+    gateway_status_address_name: str | None = "gateway-external",
     dry_run: bool = False,
 ) -> str:
     """
@@ -387,16 +387,25 @@ def resolve_endpoint_task(args, ctx):
         ctx.endpoint_url = endpoint_url
         write_text(args.artifact_dir / "artifacts" / "endpoint.url", f"{endpoint_url}\n")
         return f"Endpoint resolved: {endpoint_url}"
-    return False  # Retry
+    return False, "No endpoint URL available"
 
 
 def try_resolve_endpoint_url(
-    *, namespace: str, inference_service_name: str, gateway_status_address_name: str
+    *, namespace: str, inference_service_name: str, gateway_status_address_name: str | None
 ) -> str | None:
     payload = oc_get_json("llminferenceservice", name=inference_service_name, namespace=namespace)
 
     for address in payload.get("status", {}).get("addresses", []):
-        if address.get("name") == gateway_status_address_name and address.get("url"):
+        # When gateway_status_address_name is None, return the first address with a URL and append port 8000
+        if gateway_status_address_name is None:
+            if address.get("url"):
+                url = address["url"]
+                # Append port 8000 when not using gateway if no port is already specified
+                if ":" not in url.split("/")[-1]:  # Check if no port in the hostname part
+                    url = f"{url}:8000"
+                return url
+        # Otherwise, match by name
+        elif address.get("name") == gateway_status_address_name and address.get("url"):
             return address["url"]
     return None
 
