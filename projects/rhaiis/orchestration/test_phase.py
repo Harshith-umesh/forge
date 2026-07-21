@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import os
-import traceback
 import uuid as _uuid_mod
 
 from projects.core.library import env
@@ -13,43 +12,6 @@ logger = logging.getLogger(__name__)
 
 _K8S_NAME_MAX = 63
 
-
-def _send_pipeline_failure_alert(
-    exc: Exception,
-    *,
-    model_key: str,
-    workload_keys: list[str],
-) -> None:
-    """Best-effort Slack alert when the pipeline fails."""
-    try:
-        from projects.core.library import config as _cfg
-        from projects.rhaiis.postprocess.regression import send_failure_notification
-
-        model_cfg = runtime_config.get_model(model_key)
-        accelerator = runtime_config.get_accelerator()
-        gpu_type = runtime_config.get_gpu_type(accelerator) or accelerator
-        cluster_tag = _cfg.project.get_config("rhaiis.cluster_tag", "")
-        vllm_args = runtime_config.merge_vllm_args(
-            runtime_config.get_vllm_defaults(),
-            model_cfg,
-            runtime_config.get_workload(workload_keys[0]),
-        )
-
-        send_failure_notification(
-            error=traceback.format_exception_only(type(exc), exc)[-1].strip(),
-            model=model_cfg.get("hf_model_id", model_key),
-            accelerator=f"{gpu_type}_{cluster_tag}".upper() if cluster_tag else gpu_type.upper(),
-            job_id=os.environ.get("FJOB_NAME", ""),
-            slack_user=_cfg.project.get_config("tests.rhaiis.slack_user", ""),
-            notification_vault="psap-forge-notifications",
-            tp=str(vllm_args.get("tensor-parallel-size", "")),
-            dp=str(vllm_args.get("data-parallel-size", "")),
-            version=_cfg.project.get_config("tests.rhaiis.version", ""),
-            workload_keys=workload_keys,
-            cluster=cluster_tag,
-        )
-    except Exception:
-        logger.warning("Failed to send pipeline failure alert", exc_info=True)
 
 
 def _guidellm_job_name(prefix: str, workload_key: str, deployment_name: str) -> str:
@@ -92,7 +54,8 @@ def do_test(
                 deployment_name=deployment_name,
             )
     except Exception as exc:
-        _send_pipeline_failure_alert(exc, model_key=model_key, workload_keys=workload_keys)
+        from projects.rhaiis.orchestration.notifications import send_pipeline_failure_alert
+        send_pipeline_failure_alert(exc, model_key=model_key, workload_keys=workload_keys)
         raise
 
 
@@ -168,7 +131,8 @@ def _run_test(
     if not run_benchmark and not profiler_enabled:
         logger.info("run_benchmark=false and profiler=false, running standalone analysis only")
         try:
-            _run_standalone_analysis(
+            from projects.rhaiis.orchestration.analysis import run_standalone_analysis
+            run_standalone_analysis(
                 model_cfg, accelerator_key, vllm_args,
                 run_uuid=run_uuid, restrict_profiles=workload_keys or None,
             )
@@ -180,6 +144,10 @@ def _run_test(
     wait_guidellm_benchmark_task._retry_config["attempts"] = max(1, benchmark_timeout // 10)
 
     try:
+        isvc_labels = {"opendatahub.io/dashboard": "true"}
+        if profiler_enabled:
+            isvc_labels["vllm-profiler/enabled"] = "true"
+
         logger.info("Deploying %s to %s/%s", model_cfg["hf_model_id"], namespace, deployment_name)
         deploy_kserve_isvc(
             deployment_name=deployment_name,
@@ -196,6 +164,7 @@ def _run_test(
             storage_pvc=deploy_cfg.get("storage_pvc", ""),
             image_pull_secret=deploy_cfg.get("image_pull_secret", ""),
             service_account_name=deploy_cfg.get("service_account_name", ""),
+            labels=isvc_labels,
         )
 
         logger.info("Waiting for InferenceService to be ready")
@@ -336,7 +305,8 @@ def _run_workload_benchmark(
     if not run_benchmark:
         logger.info("run_benchmark=false, skipping main benchmark")
         try:
-            _run_standalone_analysis(model_cfg, accelerator_key, vllm_args, run_uuid=run_uuid)
+            from projects.rhaiis.orchestration.analysis import run_standalone_analysis
+            run_standalone_analysis(model_cfg, accelerator_key, vllm_args, run_uuid=run_uuid)
         except Exception:
             logger.warning("Standalone analysis failed; continuing", exc_info=True)
     else:
@@ -526,11 +496,13 @@ def _generate_and_sync_dashboard_csv(
 
     from projects.rhaiis.postprocess.s3_dashboard import sync_csv_to_s3
 
+    s3_cfg = config.project.get_config("rhaiis.s3", {})
     sync_result = sync_csv_to_s3(
         csv_path,
-        s3_bucket=csv_dashboard_cfg.get("s3_bucket", "psap-dashboard-data"),
-        s3_key=csv_dashboard_cfg.get("s3_key", "staging/rhaiis-dashboard/consolidated_dashboard.csv"),
-        vault_name=csv_dashboard_cfg.get("vault", "psap-forge-dashboard-s3"),
+        s3_bucket=s3_cfg.get("bucket", ""),
+        s3_key=csv_dashboard_cfg.get("s3_key", ""),
+        vault_name=s3_cfg.get("vault", ""),
+        credentials_file=s3_cfg.get("credentials_file", "aws.credentials"),
         dry_run=config.project.get_config("caliper.export.dry_run", False),
     )
     logger.info("Dashboard CSV sync result: %s", sync_result)
@@ -539,276 +511,9 @@ def _generate_and_sync_dashboard_csv(
     if not compare_version:
         return
 
-    _run_regression_check(csv_path, compare_version, version, model_cfg, accelerator, run_uuid=run_uuid, vllm_args=vllm_args)
+    from projects.rhaiis.orchestration.analysis import run_regression_check
+    run_regression_check(csv_path, compare_version, version, model_cfg, accelerator, run_uuid=run_uuid, vllm_args=vllm_args)
 
-
-def _run_standalone_analysis(
-    model_cfg: dict,
-    accelerator_key: str,
-    vllm_args: dict,
-    *,
-    run_uuid: str = "",
-    restrict_profiles: list[str] | None = None,
-) -> None:
-    """Run regression check + agent analysis using existing S3 data (no new benchmark)."""
-    import tempfile
-    from pathlib import Path
-
-    from projects.caliper.cli.s3_export import create_s3_client, get_aws_credentials
-    from projects.core.library import config
-
-    agent_cfg = config.project.get_config("rhaiis.agent_analysis", {})
-    if not agent_cfg.get("enabled", False):
-        logger.info("Standalone analysis skipped: agent_analysis not enabled")
-        return
-
-    version = config.project.get_config("tests.rhaiis.version", "")
-    compare_version = config.project.get_config("tests.rhaiis.compare_version", "")
-    if not version or not compare_version:
-        logger.info("Standalone analysis skipped: version or compare_version not configured")
-        return
-
-    csv_dashboard_cfg = config.project.get_config("caliper.postprocess.csv_dashboard", {})
-    s3_bucket = csv_dashboard_cfg.get("s3_bucket", "psap-dashboard-data")
-    s3_key = csv_dashboard_cfg.get("s3_key", "staging/rhaiis-dashboard/consolidated_dashboard.csv")
-    vault_name = csv_dashboard_cfg.get("vault", "psap-forge-dashboard-s3")
-
-    credentials_path = get_aws_credentials(vault_name, "aws.credentials")
-    if not credentials_path:
-        logger.warning("AWS credentials not available, skipping standalone analysis")
-        return
-
-    # CSV stores just the chip family (e.g. "H200"), not the full accelerator_key with cluster tag
-    accelerator = accelerator_key.split("_")[0].upper() if "_" in accelerator_key else accelerator_key.upper()
-
-    consolidated_path = None
-    current_csv_path = None
-    try:
-        import pandas as pd
-
-        s3 = create_s3_client(credentials_path)
-        with tempfile.NamedTemporaryFile(mode="w+b", suffix=".csv", delete=False) as tmp:
-            consolidated_path = tmp.name
-        s3.download_file(s3_bucket, s3_key, consolidated_path)
-
-        df = pd.read_csv(consolidated_path, on_bad_lines="warn")
-        for col in df.columns:
-            if df[col].dtype == object:
-                df[col] = df[col].str.strip()
-
-        model_id = model_cfg.get("hf_model_id", "")
-        tp = str(vllm_args.get("tensor-parallel-size", 1))
-
-        current_rows = df[
-            (df["version"] == version)
-            & (df["model"] == model_id)
-            & (df["accelerator"] == accelerator)
-            & (df["TP"].fillna(-1).astype(float).astype(int).astype(str) == tp)
-        ]
-
-        if current_rows.empty:
-            logger.warning(
-                "No data found in S3 for version=%s, model=%s, accelerator=%s, TP=%s",
-                version, model_id, accelerator, tp,
-            )
-            return
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as tmp:
-            current_csv_path = tmp.name
-            current_rows.to_csv(tmp, index=False)
-
-        logger.info("Standalone analysis: found %d rows for version=%s", len(current_rows), version)
-        _run_regression_check(
-            current_csv_path, compare_version, version, model_cfg, accelerator,
-            run_uuid=run_uuid, restrict_profiles=restrict_profiles, vllm_args=vllm_args,
-        )
-    except Exception:
-        logger.warning("Standalone analysis failed", exc_info=True)
-    finally:
-        if consolidated_path and os.path.exists(consolidated_path):
-            os.unlink(consolidated_path)
-        if current_csv_path and os.path.exists(current_csv_path):
-            os.unlink(current_csv_path)
-
-
-def _run_regression_check(
-    csv_path,
-    compare_version: str,
-    current_version: str,
-    model_cfg: dict,
-    accelerator: str,
-    *,
-    run_uuid: str = "",
-    restrict_profiles: list[str] | None = None,
-    vllm_args: dict | None = None,
-) -> None:
-    import tempfile
-    from pathlib import Path
-
-    from projects.caliper.cli.s3_export import create_s3_client, get_aws_credentials
-    from projects.caliper.engine.kpi.analyze import run_regression_analysis
-    from projects.core.library import config
-    from projects.rhaiis.postprocess.regression import METRICS, PROFILE_MAP
-
-    csv_dashboard_cfg = config.project.get_config("caliper.postprocess.csv_dashboard", {})
-    s3_bucket = csv_dashboard_cfg.get("s3_bucket", "psap-dashboard-data")
-    s3_key = csv_dashboard_cfg.get("s3_key", "staging/rhaiis-dashboard/consolidated_dashboard.csv")
-    vault_name = csv_dashboard_cfg.get("vault", "psap-forge-dashboard-s3")
-
-    credentials_path = get_aws_credentials(vault_name, "aws.credentials")
-    if not credentials_path:
-        logger.warning("AWS credentials not available, skipping regression analysis")
-        return
-
-    consolidated_path = None
-    try:
-        s3 = create_s3_client(credentials_path)
-        with tempfile.NamedTemporaryFile(mode="w+b", suffix=".csv", delete=False) as tmp:
-            consolidated_path = tmp.name
-        s3.download_file(s3_bucket, s3_key, consolidated_path)
-    except Exception as e:
-        logger.warning("Could not download consolidated CSV for regression check: %s", e)
-        return
-
-    try:
-        output_file = Path(env.ARTIFACT_DIR) / "regression_analysis.json"
-        analysis = run_regression_analysis(
-            current_csv_path=Path(str(csv_path)),
-            consolidated_csv_path=Path(consolidated_path),
-            compare_version=compare_version,
-            current_version=current_version,
-            output_file=output_file,
-            profile_map=PROFILE_MAP,
-            metrics=METRICS,
-            restrict_profiles=restrict_profiles,
-        )
-
-        if analysis.get("regression_count", 0) > 0 or analysis.get("improvement_count", 0) > 0:
-            report_url = ""
-            agent_cfg = config.project.get_config("rhaiis.agent_analysis", {})
-            if agent_cfg.get("enabled", False):
-                report_url = _run_agent_analysis(
-                    analysis, model_cfg, accelerator,
-                    current_version, compare_version, run_uuid,
-                    severity_threshold=agent_cfg.get("severity_threshold", 10),
-                )
-
-            from projects.rhaiis.postprocess.regression import send_regression_notification
-
-            _vllm = vllm_args or {}
-            send_regression_notification(
-                analysis,
-                model=model_cfg.get("hf_model_id", ""),
-                accelerator=accelerator,
-                job_id=run_uuid,
-                slack_user=config.project.get_config("tests.rhaiis.slack_user", ""),
-                notification_vault="psap-forge-notifications",
-                report_url=report_url,
-                tp=str(_vllm.get("tensor-parallel-size", "")),
-                dp=str(_vllm.get("data-parallel-size", "")),
-            )
-    except Exception:
-        logger.warning("Regression analysis failed; continuing", exc_info=True)
-    finally:
-        if consolidated_path and os.path.exists(consolidated_path):
-            os.unlink(consolidated_path)
-
-
-def _run_agent_analysis(
-    analysis: dict,
-    model_cfg: dict,
-    accelerator: str,
-    current_version: str,
-    compare_version: str,
-    run_uuid: str,
-    *,
-    severity_threshold: int = 10,
-) -> str:
-    """Request AI agent analysis for severe regressions. Returns report URL or empty string."""
-    from pathlib import Path
-
-    from projects.core.library import config
-    from projects.rhaiis.postprocess.agent import (
-        AGENT_SEVERITY_THRESHOLD,
-        build_pr_followup_prompt,
-        check_agent_connectivity,
-        markdown_to_html,
-        request_agent_analysis,
-        send_followup,
-    )
-
-    agent_cfg = config.project.get_config("rhaiis.agent_analysis", {})
-    agent_url = agent_cfg.get("url", "")
-    if not agent_url:
-        logger.warning("Agent analysis enabled but no URL configured (rhaiis.agent_analysis.url)")
-        return ""
-
-    threshold = severity_threshold or AGENT_SEVERITY_THRESHOLD
-    severe = [r for r in analysis.get("regressions", []) if abs(r["pct_diff"]) > threshold]
-    if not severe:
-        logger.info("No severe regressions (>%d%%), skipping agent analysis", threshold)
-        return ""
-
-    ok, detail = check_agent_connectivity(agent_url)
-    if not ok:
-        logger.warning("Agent not reachable, skipping analysis: %s", detail)
-        return ""
-
-    tp = str(model_cfg.get("vllm_args", {}).get("tensor-parallel-size", 1))
-    model = model_cfg.get("hf_model_id", "")
-    improvements = analysis.get("improvements", [])
-
-    agent_response = request_agent_analysis(
-        model=model,
-        accelerator=accelerator,
-        current_version=current_version,
-        compare_version=compare_version,
-        tp=tp,
-        severe_regressions=severe,
-        job_id=run_uuid,
-        improvements=improvements if improvements else None,
-        agent_url=agent_url,
-    )
-    if not agent_response:
-        return ""
-
-    pr_prompt = build_pr_followup_prompt(current_version, compare_version)
-    pr_analysis = send_followup(message=pr_prompt, job_id=run_uuid, agent_url=agent_url)
-    if pr_analysis:
-        agent_response = f"{agent_response}\n\n---\n\n## Related Pull Requests\n\n{pr_analysis}"
-
-    html_content = markdown_to_html(
-        agent_response, run_uuid, model, current_version, compare_version,
-    )
-    html_path = Path(env.ARTIFACT_DIR) / f"agent_analysis_{run_uuid}.html"
-    html_path.write_text(html_content, encoding="utf-8")
-    logger.info("Agent analysis saved to %s", html_path)
-
-    try:
-        from projects.caliper.cli.s3_export import create_s3_client, get_aws_credentials
-
-        csv_dashboard_cfg = config.project.get_config("caliper.postprocess.csv_dashboard", {})
-        vault_name = csv_dashboard_cfg.get("vault", "psap-forge-dashboard-s3")
-        credentials_path = get_aws_credentials(vault_name, "aws.credentials")
-        if credentials_path:
-            s3 = create_s3_client(credentials_path)
-            s3_bucket = "psap-dashboard-data"
-            s3_key = f"reports/rhaiis/{run_uuid}_analysis.html"
-            s3.upload_file(
-                str(html_path), s3_bucket, s3_key,
-                ExtraArgs={"ContentType": "text/html"},
-            )
-            report_url = s3.generate_presigned_url(
-                "get_object",
-                Params={"Bucket": s3_bucket, "Key": s3_key},
-                ExpiresIn=2592000,
-            )
-            logger.info("Agent analysis uploaded to S3, presigned URL generated")
-            return report_url
-    except Exception:
-        logger.warning("Failed to upload agent analysis to S3; continuing", exc_info=True)
-
-    return ""
 
 
 def _upload_predictor_log(run_uuid: str) -> None:
@@ -824,13 +529,14 @@ def _upload_predictor_log(run_uuid: str) -> None:
         logger.info("No predictor pod log found under %s, skipping upload", env.ARTIFACT_DIR)
         return
 
-    csv_dashboard_cfg = config.project.get_config("caliper.postprocess.csv_dashboard", {})
-    vault_name = csv_dashboard_cfg.get("vault", "psap-forge-dashboard-s3")
+    s3_cfg = config.project.get_config("rhaiis.s3", {})
 
     result = upload_predictor_log_to_s3(
         log_path,
         run_uuid=run_uuid,
-        vault_name=vault_name,
+        s3_bucket=s3_cfg.get("bucket", ""),
+        vault_name=s3_cfg.get("vault", ""),
+        credentials_file=s3_cfg.get("credentials_file", "aws.credentials"),
         dry_run=config.project.get_config("caliper.export.dry_run", False),
     )
     logger.info("Predictor log upload result: %s", result)
@@ -1020,6 +726,7 @@ def _upload_profiler_traces(
         profile_labels = _infer_profile_labels_from_traces(trace_files)
         logger.info("Inferred profile labels from trace filenames: %s", profile_labels)
 
+    s3_cfg = config.project.get_config("rhaiis.s3", {})
     result = upload_profiler_traces_to_s3(
         traces_dir,
         model_name=model_cfg.get("hf_model_id", ""),
@@ -1027,9 +734,10 @@ def _upload_profiler_traces(
         tp_size=int(vllm_args.get("tensor-parallel-size", 1)),
         version=version,
         profile_labels=profile_labels,
-        s3_bucket=profiler_cfg.get("s3_bucket", "psap-dashboard-data"),
-        s3_prefix=profiler_cfg.get("s3_prefix", "pytorch-profiles/rhaiis"),
-        vault_name=profiler_cfg.get("vault", "psap-forge-dashboard-s3"),
+        s3_bucket=s3_cfg.get("bucket", ""),
+        s3_prefix=profiler_cfg.get("s3_prefix", ""),
+        vault_name=s3_cfg.get("vault", ""),
+        credentials_file=s3_cfg.get("credentials_file", "aws.credentials"),
         dry_run=config.project.get_config("caliper.export.dry_run", False),
     )
     logger.info("Profiler trace upload result: %s", result)

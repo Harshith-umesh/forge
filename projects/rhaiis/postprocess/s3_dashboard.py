@@ -13,16 +13,13 @@ logger = logging.getLogger(__name__)
 def sync_csv_to_s3(
     csv_path: Path,
     *,
-    s3_bucket: str = "psap-dashboard-data",
-    s3_key: str = "staging/rhaiis-dashboard/consolidated_dashboard.csv",
-    vault_name: str = "psap-forge-dashboard-s3",
+    s3_bucket: str,
+    s3_key: str,
+    vault_name: str,
     credentials_file: str = "aws.credentials",
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    """Download consolidated CSV from S3, append new rows, re-upload.
-
-    Ported from model-furnace's ModelValidator._sync_csv_to_s3().
-    """
+    """Download consolidated CSV from S3, append new rows, re-upload."""
     try:
         import pandas as pd
     except ImportError:
@@ -42,7 +39,7 @@ def sync_csv_to_s3(
     try:
         s3 = create_s3_client(credentials_path)
 
-        with tempfile.NamedTemporaryFile(mode="w+b", suffix=".csv", delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
             consolidated_path = tmp.name
 
         try:
@@ -87,15 +84,14 @@ def upload_profiler_traces_to_s3(
     tp_size: int,
     version: str,
     profile_labels: list[str],
-    s3_bucket: str = "psap-dashboard-data",
-    s3_prefix: str = "pytorch-profiles/rhaiis",
-    vault_name: str = "psap-forge-dashboard-s3",
+    s3_bucket: str,
+    s3_prefix: str,
+    vault_name: str,
     credentials_file: str = "aws.credentials",
     dry_run: bool = False,
 ) -> dict[str, Any]:
     """Upload profiler traces to S3.
 
-    Ported from model-furnace's ModelValidator._upload_profiler_traces_to_s3().
     Path: s3://{bucket}/{prefix}/{accel}/{model}/tp{N}/{version}/{profile_label}/
     """
     if not traces_dir.exists():
@@ -168,8 +164,8 @@ def upload_predictor_log_to_s3(
     log_path: Path,
     *,
     run_uuid: str,
-    s3_bucket: str = "psap-dashboard-data",
-    vault_name: str = "psap-forge-dashboard-s3",
+    s3_bucket: str,
+    vault_name: str,
     credentials_file: str = "aws.credentials",
     dry_run: bool = False,
 ) -> dict[str, Any]:

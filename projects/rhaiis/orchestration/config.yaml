@@ -29,6 +29,15 @@ tests:
     compare_version: ""
     slack_user: ""
 
+rhaiis:
+  s3:
+    bucket: psap-dashboard-data
+    vault: psap-forge-dashboard-s3
+    credentials_file: aws.credentials
+  profiler:
+    enabled: false
+    s3_prefix: pytorch-profiles/rhaiis
+
 caliper:
   postprocess:
     enabled: true
@@ -45,9 +54,7 @@ caliper:
         output: kpis.json
     csv_dashboard:
       enabled: false
-      s3_bucket: psap-dashboard-data
       s3_key: staging/rhaiis-dashboard/consolidated_dashboard.csv
-      vault: psap-forge-dashboard-s3
     analyze:
       enabled: false
       historical_kpis: historical_kpis
