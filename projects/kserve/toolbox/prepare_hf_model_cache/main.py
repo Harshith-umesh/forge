@@ -35,7 +35,6 @@ logger = logging.getLogger("TOOLBOX")
 def run(
     *,
     namespace: str,
-    namespace_is_managed: bool,
     model_key: str,
     model_uri: str,
     pvc_size: str,
@@ -54,7 +53,6 @@ def run(
 
     Args:
         namespace: Namespace where the workload runs
-        namespace_is_managed: Whether namespace lifecycle is managed by llm_d
         model_key: Selected model key
         model_uri: HuggingFace model URI (hf://...)
         pvc_size: Size of the PVC to create
@@ -111,13 +109,6 @@ def build_cache_spec(args, ctx):
         "oci_registry_auth_secret_name": None,
         "oci_registry_auth_secret_key": None,
     }
-
-    if args.namespace_is_managed:
-        logger.warning(
-            "Model cache PVC %s lives in managed namespace %s. Namespace cleanup will remove it; cache reuse requires a stable namespace override.",
-            cache_spec["pvc_name"],
-            cache_spec["namespace"],
-        )
 
     ctx.cache_spec = cache_spec
     ctx.hf_secret_created = False
