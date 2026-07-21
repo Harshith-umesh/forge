@@ -44,6 +44,9 @@ import click
     "--dry-run", is_flag=True, help="Show what would be uploaded without actually uploading"
 )
 @click.option("-v", "--verbose", is_flag=True, help="Show detailed progress information")
+@click.option(
+    "--status-file", type=click.Path(path_type=Path), help="YAML file to write operation status"
+)
 @click.pass_context
 def s3_export_cmd(
     ctx: click.Context,
@@ -60,16 +63,24 @@ def s3_export_cmd(
     aws_credentials_file: str,
     dry_run: bool,
     verbose: bool,
+    status_file: Path | None,
 ) -> None:
     """Upload postprocess artifacts to S3."""
+    import yaml
+
+    status_data = {"success": False}
+
     try:
         # Validate that at least one file/directory is provided
         if not any([kpis_file, csv_file, ai_data_dir, analysis_file]):
+            error_msg = "At least one file or directory must be specified"
+            status_data = {"success": False, "error": error_msg}
             click.echo("❌ Error: At least one file or directory must be specified", err=True)
             click.echo(
                 "   Use --kpis-file, --csv-file, --ai-data-dir, or --analysis-file", err=True
             )
-            sys.exit(1)
+            if not status_file:
+                sys.exit(1)
 
         # Import S3 functions
         from projects.caliper.cli.s3_export import run_s3_export_with_explicit_paths
@@ -116,7 +127,6 @@ def s3_export_cmd(
             ai_data_dir=ai_data_dir,
             analysis_file=analysis_file,
             bucket=bucket,
-            prefix=prefix,
             instance=instance,
             directory=directory,
             upload_id=upload_id,
@@ -126,10 +136,18 @@ def s3_export_cmd(
         )
 
         if result["status"] == "success":
+            status_data = {
+                "success": True,
+                "exported_path": result.get("exported_path", ""),
+                "uploaded_files": result.get("uploaded_files", 0),
+                "total_files": result.get("total_files", 0),
+                "dry_run": dry_run,
+            }
             if dry_run:
                 click.echo("✅ Dry run completed - see upload plan")
                 if "dry_run_file" in result:
                     click.echo(f"📋 Upload plan saved to: {result['dry_run_file']}")
+                    status_data["dry_run_file"] = result["dry_run_file"]
             else:
                 click.echo("✅ S3 export completed successfully")
                 if "uploaded_files" in result:
@@ -138,9 +156,31 @@ def s3_export_cmd(
             if verbose and "exported_path" in result:
                 click.echo(f"🌍 S3 location: {result['exported_path']}")
         else:
-            click.echo(f"❌ S3 export failed: {result.get('error', 'unknown error')}", err=True)
-            sys.exit(1)
+            error_msg = result.get("error", "unknown error")
+            status_data = {"success": False, "error": error_msg}
+            click.echo(f"❌ S3 export failed: {error_msg}", err=True)
+            if not status_file:
+                sys.exit(1)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
+        import traceback
+
+        full_traceback = traceback.format_exc()
+        status_data = {"success": False, "error": str(e), "traceback": full_traceback}
         click.echo(f"❌ S3 export failed: {e}", err=True)
-        sys.exit(2)
+        click.echo(f"Full traceback:\n{full_traceback}", err=True)
+        if not status_file:
+            sys.exit(2)
+    finally:
+        # Write status file if requested
+        if status_file:
+            try:
+                with open(status_file, "w", encoding="utf-8") as f:
+                    yaml.dump(status_data, f, default_flow_style=False)
+            except Exception as status_err:
+                click.echo(f"Failed to write status file {status_file}: {status_err}", err=True)
+                sys.exit(4)
+
+    # Exit with error code if operation failed
+    if not status_data.get("success", False):
+        sys.exit(3)

@@ -1,5 +1,21 @@
 # LLM-D Orchestration Changelog
 
+## 2026-07-16 - Preset Configuration Support
+
+### Configuration Management
+- **Preset CLI Option**: Added `--preset` flag to CI entrypoint for preset configuration before execution
+  - **Multiple Presets**: Supports multiple preset values via repeated `--preset` flags
+  - **Early Initialization**: Sets preset configuration during environment initialization, before config loading
+  - **Variables Override Integration**: Uses framework helper to generate proper override files
+
+### Files Modified
+- `projects/llm_d/orchestration/ci.py` - Added `--presets` CLI option and initialization logic
+
+### Benefits
+- **Flexible Testing**: Enables running same test suite with different preset configurations
+- **Command-Line Control**: Provides runtime preset selection without modifying configuration files
+- **Framework Integration**: Leverages core configuration override system for consistent behavior
+
 ## 2026-06-26 - Orchestration & Cleanup Improvements
 
 ### New Features

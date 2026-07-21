@@ -1,0 +1,77 @@
+# Single-step pipeline: run only (no prepare, no cleanup).
+# Use on pre-configured clusters where setup/teardown is handled externally.
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: forge-launcher
+  annotations:
+    fournos.dev/resolve-image: image-registry.openshift-image-registry.svc:5000/${NAMESPACE}/forge-core:latest
+spec:
+  workspaces:
+    - name: artifacts
+  params:
+    - name: fjob-name
+      type: string
+    - name: fournos-workload-namespace
+      type: string
+    - name: kubeconfig-secret
+      type: string
+  tasks:
+    - name: 00-preflight
+      taskRef:
+        name: forge-step
+        kind: Task
+      workspaces:
+        - name: artifacts
+          workspace: artifacts
+      params:
+        - name: fjob-name
+          value: "$(params.fjob-name)"
+        - name: fournos-workload-namespace
+          value: "$(params.fournos-workload-namespace)"
+        - name: kubeconfig-secret
+          value: "$(params.kubeconfig-secret)"
+        - name: job-step
+          value: preflight
+        - name: job-step-name
+          value: 00__preflight
+
+    - name: 01-launcher
+      runAfter: [00-preflight]
+      taskRef:
+        name: forge-step
+        kind: Task
+      workspaces:
+        - name: artifacts
+          workspace: artifacts
+      params:
+        - name: fjob-name
+          value: "$(params.fjob-name)"
+        - name: fournos-workload-namespace
+          value: "$(params.fournos-workload-namespace)"
+        - name: kubeconfig-secret
+          value: "$(params.kubeconfig-secret)"
+        - name: job-step
+          value: launcher
+        - name: job-step-name
+          value: 01__launcher
+
+  finally:
+    - name: 02-export-artifacts
+      taskRef:
+        name: forge-step
+        kind: Task
+      workspaces:
+        - name: artifacts
+          workspace: artifacts
+      params:
+        - name: fjob-name
+          value: "$(params.fjob-name)"
+        - name: fournos-workload-namespace
+          value: "$(params.fournos-workload-namespace)"
+        - name: kubeconfig-secret
+          value: "$(params.kubeconfig-secret)"
+        - name: job-step
+          value: export-artifacts
+        - name: job-step-name
+          value: 02__export-artifacts

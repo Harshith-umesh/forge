@@ -25,14 +25,13 @@ from projects.core.library import vault as vault_lib
 logger = logging.getLogger(__name__)
 
 
-def list_s3_objects(s3_client, bucket: str, prefix: str, max_objects: int = 1000) -> list[dict]:
+def list_s3_objects(s3_client, bucket: str, prefix: str) -> list[dict]:
     """List objects in S3 bucket with given prefix.
 
     Args:
         s3_client: Configured boto3 S3 client
         bucket: S3 bucket name
         prefix: S3 key prefix to filter objects
-        max_objects: Maximum number of objects to return
 
     Returns:
         List of S3 object metadata dictionaries
@@ -41,9 +40,8 @@ def list_s3_objects(s3_client, bucket: str, prefix: str, max_objects: int = 1000
         objects = []
         paginator = s3_client.get_paginator("list_objects_v2")
 
-        for page in paginator.paginate(
-            Bucket=bucket, Prefix=prefix, PaginationConfig={"MaxItems": max_objects}
-        ):
+        # List ALL objects first - don't limit listing, limit downloads after filtering
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
             if "Contents" in page:
                 for obj in page["Contents"]:
                     objects.append(
@@ -221,7 +219,7 @@ def run_s3_import_with_explicit_params(
 
     Args:
         bucket: S3 bucket name
-        prefix: S3 prefix path (full path including s3.prefix/instance/directory)
+        prefix: S3 prefix path (full path including instance/directory)
         output_dir: Path to output directory for downloaded files
         vault: Vault name containing AWS credentials
         aws_credentials_file: AWS credentials file within vault
@@ -273,15 +271,9 @@ def run_s3_import_with_explicit_params(
             }
 
         # List S3 objects (even in dry run mode to show what would be downloaded)
-        objects = list_s3_objects(s3_client, bucket, import_s3_prefix, max_downloads)
+        objects = list_s3_objects(s3_client, bucket, import_s3_prefix)
 
         logger.info(f"Found {len(objects)} total objects in s3://{bucket}/{import_s3_prefix}")
-        if objects:
-            logger.info("Sample object keys:")
-            for i, obj in enumerate(objects[:5]):  # Show first 5 objects
-                logger.info(f"  {i + 1}: {obj['key']}")
-            if len(objects) > 5:
-                logger.info(f"  ... and {len(objects) - 5} more objects")
 
         # Filter objects based on parameters
         logger.info(
@@ -298,6 +290,14 @@ def run_s3_import_with_explicit_params(
 
         download_objects = filter_objects_for_download(objects, FilterConfig())
         logger.info(f"After filtering: {len(download_objects)} objects match the import filters")
+
+        # Sort by last_modified timestamp in descending order (most recent first)
+        download_objects.sort(key=lambda obj: obj["last_modified"], reverse=True)
+
+        # Apply max_downloads limit after filtering to get the most relevant files
+        if len(download_objects) > max_downloads:
+            logger.info(f"Limiting downloads to first {max_downloads} matching files")
+            download_objects = download_objects[:max_downloads]
 
         if not download_objects:
             logger.warning("No objects match the import filters")

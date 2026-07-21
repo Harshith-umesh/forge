@@ -278,16 +278,13 @@ def run_postprocess_after_test(
     artifact_root_path = Path(artifact_root).resolve() if artifact_root is not None else None
 
     with env.NextArtifactDir("postprocessing"):
-        workspace = Path(env.ARTIFACT_DIR).resolve()
         logger.info(
-            "Running Caliper postprocess (artifacts=%s, workspace=%s, test_phase=%s)",
+            "Running Caliper postprocess (artifacts=%s, test_phase=%s)",
             artifact_root_path,
-            workspace,
             test_outcome.phase if test_outcome else "SUCCESS",
         )
         status = run_orchestration_postprocess(
             artifact_dir=artifact_root_path,
-            visualize_output_dir=workspace,
             test_outcome=test_outcome,
         )
         logger.info(
@@ -415,11 +412,13 @@ def run_orchestration_postprocess(
 def postprocess_command(_ctx, artifact_dir: Path, output_dir: Path):
     """Run the post-processing pipeline."""
 
-    status = run_orchestration_postprocess(
-        artifact_dir=artifact_dir,
-        test_outcome=TestPhaseOutcome("NOT_AVAILABLE"),
-        visualize_output_dir=output_dir,
-    )
+    # Set ARTIFACT_DIR temporarily so config resolution works with user's output directory
+    with env.TempArtifactDir(output_dir):
+        status = run_orchestration_postprocess(
+            artifact_dir=artifact_dir,
+            test_outcome=TestPhaseOutcome("NOT_AVAILABLE"),
+            visualize_output_dir=None,  # Let config resolution handle it
+        )
     logger.info("Caliper postprocess status:\n" + yaml.dump(status, indent=2))
 
     # Check success flag and return appropriate exit code

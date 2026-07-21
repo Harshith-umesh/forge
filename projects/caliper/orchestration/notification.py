@@ -27,6 +27,7 @@ class PostprocessStepResult:
     uploaded_files: int | None = None
     downloaded_files: int | None = None
     failed_files: int | None = None
+    log_file: str | None = None  # relative path to step log file
 
 
 @dataclass
@@ -76,7 +77,19 @@ def format_postprocess_status_notification(
 
         for step_name, step_result in sorted_steps:
             step_emoji = _get_step_emoji(step_result.status)
-            lines.append(f"- {step_emoji} **{step_name}**: `{step_result.status}`")
+
+            # Create step name as link to log file if available
+            if step_result.log_file and get_file_link:
+                try:
+                    log_url = get_file_link(step_result.log_file)
+                    step_name_display = f"[**{step_name}**]({log_url})"
+                except Exception:
+                    # Fallback to plain text if link generation fails
+                    step_name_display = f"**{step_name}**"
+            else:
+                step_name_display = f"**{step_name}**"
+
+            lines.append(f"- {step_emoji} {step_name_display}: `{step_result.status}`")
 
             # Add step message if available (but not for warning/failed steps to avoid duplication)
             if step_result.message and step_result.status not in ("warning", "failed", "failure"):
@@ -208,7 +221,9 @@ def format_postprocess_status_notification(
                 step_result, "paths", None
             )
             if file_paths and get_file_link:
-                lines.extend(_format_step_file_links(step_name, file_paths, get_file_link))
+                lines.extend(
+                    _format_step_file_links(step_name, file_paths, get_file_link, step_result)
+                )
 
     return "\n".join(lines) if lines else ""
 
@@ -253,7 +268,7 @@ def _get_step_emoji(status: str) -> str:
 
 
 def _format_step_file_links(
-    step_name: str, file_paths: list[str], get_file_link: callable
+    step_name: str, file_paths: list[str], get_file_link: callable, step_result=None
 ) -> list[str]:
     """Format file paths as clickable links using the provided callback.
 
@@ -261,6 +276,7 @@ def _format_step_file_links(
         step_name: Name of the step
         file_paths: List of relative file paths
         get_file_link: Callback function to generate URLs from file paths
+        step_result: Step result object containing additional metadata (optional)
 
     Returns:
         List of formatted link strings
@@ -270,6 +286,9 @@ def _format_step_file_links(
 
     lines = []
 
+    # Check if we need to combine output_dir with file paths (e.g., for visualize step)
+    output_dir = getattr(step_result, "output_dir", None) if step_result else None
+
     # Group files by type for better organization
     file_groups = _group_files_by_type(file_paths)
 
@@ -277,7 +296,13 @@ def _format_step_file_links(
     for file_type, files in file_groups.items():
         for file_path in files:
             try:
-                file_url = get_file_link(file_path)
+                # Combine output_dir with file_path if available
+                if output_dir:
+                    full_path = f"{output_dir}/{file_path}"
+                else:
+                    full_path = file_path
+
+                file_url = get_file_link(full_path)
                 file_name = _get_display_name(file_path)
                 emoji = "📊" if file_type == "visualization" else "📄"
                 lines.append(f"  - {emoji} [{file_name}]({file_url})")
@@ -377,6 +402,7 @@ def parse_postprocess_result(status_data: dict) -> PostprocessResult | None:
                             uploaded_files=step_data.get("uploaded_files"),
                             downloaded_files=step_data.get("downloaded_files"),
                             failed_files=step_data.get("failed_files"),
+                            log_file=step_data.get("log_file"),
                         )
 
     return PostprocessResult(

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import json
 from pathlib import Path
 
 import pytest
@@ -12,6 +14,7 @@ from projects.llm_d.orchestration import runtime_config, test_phase
 from projects.llm_d.orchestration.render_inference_service import (
     render_inference_service_from_parts,
 )
+from projects.rhoai.library import deploy as rhoai_deploy
 
 PROJECT_ORCHESTRATION_DIR = Path(__file__).resolve().parents[1] / "orchestration"
 
@@ -162,10 +165,31 @@ def test_release_preset_expands_benchmark_list_and_merges_workload_args() -> Non
         "multi-turn",
     ]
 
-    benchmark_configs = dict(runtime_config.get_benchmark_configs())
-    assert benchmark_configs["concurrent-1k-1k"]["args"]["request_type"] == "text_completions"
-    assert benchmark_configs["heavy-heterogeneous"]["args"]["request_type"] == "text_completions"
-    assert benchmark_configs["multi-turn"]["args"]["request_type"] == "text_completions"
+    run_specs = runtime_config.get_run_specs()
+    for run_spec in run_specs:
+        with runtime_config.activate_run_spec(run_spec):
+            benchmark = runtime_config.get_benchmark_config()
+            assert benchmark["args"]["request_type"] == "text_completions"
+
+
+def test_release_preset_produces_3_run_specs() -> None:
+    _init_project_config()
+
+    core_config.project.apply_preset("gpt-oss-120b-inference-scheduling-release")
+
+    run_specs = runtime_config.get_run_specs()
+
+    assert len(run_specs) == 3
+    assert [spec.benchmark_key for spec in run_specs] == [
+        "concurrent-1k-1k",
+        "heavy-heterogeneous",
+        "multi-turn",
+    ]
+    assert all(spec.model_name == "openai/gpt-oss-120b" for spec in run_specs)
+    assert all(spec.deployment_profile_name == "distributed-default" for spec in run_specs)
+
+    namespaces = [spec.namespace for spec in run_specs]
+    assert len(namespaces) == len(set(namespaces))
 
 
 def test_ci_init_uses_framework_project_args_preset_and_keeps_var_overrides() -> None:
@@ -198,6 +222,327 @@ def test_ci_init_uses_project_default_preset_when_no_explicit_preset_is_provided
     assert runtime_config.get_benchmark_keys() == ["short"]
 
 
+def test_list_vaults_only_includes_rhoai_custom_catalog_vaults_for_custom_catalog_runs() -> None:
+    _init_project_config()
+
+    core_config.project.set_config("platform.rhoai.custom_catalog.enabled", False)
+    assert "psap-rhoai-rc" not in llmd_ci.list_vaults()
+    assert "psap-forge-staging-image-pull" not in llmd_ci.list_vaults()
+
+    core_config.project.set_config("platform.rhoai.custom_catalog.enabled", True)
+    assert "psap-rhoai-rc" in llmd_ci.list_vaults()
+    assert "psap-forge-staging-image-pull" in llmd_ci.list_vaults()
+
+
+def test_prepare_phase_adds_rhoai_custom_catalog_vaults_only_for_custom_catalog_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _init_project_config()
+
+    calls: list[dict[str, object]] = []
+
+    def _fake_init(**kwargs):
+        calls.append(kwargs)
+
+    monkeypatch.setattr(llmd_ci.vault, "init", _fake_init)
+
+    core_config.project.set_config("platform.rhoai.custom_catalog.enabled", False)
+    llmd_ci.init_vaults_for_phase("prepare")
+
+    core_config.project.set_config("platform.rhoai.custom_catalog.enabled", True)
+    llmd_ci.init_vaults_for_phase("prepare")
+
+    assert "psap-rhoai-rc" not in calls[0]["optional_vaults"]
+    assert "psap-forge-staging-image-pull" not in calls[0]["optional_vaults"]
+    assert "psap-rhoai-rc" in calls[1]["optional_vaults"]
+    assert "psap-forge-staging-image-pull" in calls[1]["optional_vaults"]
+
+
+def test_prepare_rhoai_operator_runs_registry_setup_before_custom_catalog_deployment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _init_project_config()
+
+    platform = {
+        "operators": {
+            "rhcl-operator": {
+                "package": "rhcl-operator",
+                "namespace": "openshift-operators",
+                "source": "redhat-operators",
+                "channel": "stable",
+            },
+            "rhods-operator": {
+                "package": "rhods-operator",
+                "namespace": "redhat-ods-operator",
+                "source": "redhat-operators",
+                "channel": "stable-3.x",
+            },
+        },
+        "rhoai": {
+            "custom_catalog": {
+                "enabled": True,
+                "name": "rhoai-catalog-dev",
+                "namespace": "openshift-marketplace",
+                "image": "quay.io/rhoai/rhoai-fbc-fragment@sha256:test",
+                "display_name": "Red Hat OpenShift AI",
+                "publisher": "RHOAI Development Catalog",
+                "pull_secret": {
+                    "vault": {
+                        "name": "psap-rhoai-rc",
+                        "content": "rhoai_rc.secret",
+                    }
+                },
+                "staging_pull_secret": {
+                    "vault": {
+                        "name": "psap-forge-staging-image-pull",
+                        "content": ".dockerconfigjson",
+                    }
+                },
+            },
+            "namespace": "redhat-ods-applications",
+            "datasciencecluster_name": "default-dsc",
+            "components": ["kserve"],
+            "required_crds_before_dsc": ["datascienceclusters.datasciencecluster.opendatahub.io"],
+            "required_crds_after_dsc": ["llminferenceservices.serving.kserve.io"],
+        },
+    }
+
+    calls: list[object] = []
+
+    monkeypatch.setattr(
+        rhoai_deploy, "prepare_rhcl_operator", lambda platform: calls.append("rhcl")
+    )
+    monkeypatch.setattr(
+        rhoai_deploy,
+        "prepare_rhoai_pull_secret",
+        lambda custom_catalog: calls.append(("pull", custom_catalog.image)),
+    )
+    monkeypatch.setattr(
+        rhoai_deploy,
+        "deploy_rhoai_custom_catalog",
+        lambda custom_catalog: calls.append(("catalog", custom_catalog.publisher)),
+    )
+    monkeypatch.setattr(
+        rhoai_deploy,
+        "ensure_operator_subscription",
+        lambda operator_spec: calls.append(("sub", operator_spec["package"])),
+    )
+    monkeypatch.setattr(
+        rhoai_deploy,
+        "ensure_required_crds_before_dsc",
+        lambda rhoai: calls.append("crds"),
+    )
+
+    rhoai_deploy.prepare_rhoai_operator(
+        platform=platform,
+        rhoai=platform["rhoai"],
+        icsp_applier=lambda: calls.append("icsp"),
+    )
+
+    assert calls == [
+        "rhcl",
+        ("pull", "quay.io/rhoai/rhoai-fbc-fragment@sha256:test"),
+        "icsp",
+        ("catalog", "RHOAI Development Catalog"),
+        ("sub", "rhods-operator"),
+        "crds",
+    ]
+
+
+def test_custom_catalog_pull_secret_path_uses_explicit_vault_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, str] = {}
+
+    def _fake_get_vault_content_path(vault_name: str, content_name: str):
+        captured["vault_name"] = vault_name
+        captured["content_name"] = content_name
+        return Path("/tmp/rhoai_rc.secret")
+
+    monkeypatch.setattr(rhoai_deploy.vault, "get_vault_content_path", _fake_get_vault_content_path)
+
+    path = rhoai_deploy.custom_catalog_pull_secret_path(
+        {
+            "pull_secret": {
+                "vault": {
+                    "name": "psap-rhoai-rc",
+                    "content": "rhoai_rc.secret",
+                }
+            },
+        }
+    )
+
+    assert path == Path("/tmp/rhoai_rc.secret")
+    assert captured == {
+        "vault_name": "psap-rhoai-rc",
+        "content_name": "rhoai_rc.secret",
+    }
+
+
+def test_wait_for_rhoai_pull_secret_ready_treats_empty_mcp_status_as_not_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mcp_outputs = iter(["", "True"])
+    clock = {"value": 0.0}
+
+    def _fake_monotonic() -> float:
+        value = clock["value"]
+        clock["value"] += 0.1
+        return value
+
+    def _fake_sleep(_seconds: float) -> None:
+        clock["value"] += 0.1
+
+    def _fake_oc_get_json(*args, **kwargs):
+        payload = {
+            "auths": {
+                "quay.io": {"auth": "token-a"},
+                "registry.stage.redhat.io": {"auth": "token-b"},
+            }
+        }
+        return {
+            "data": {
+                ".dockerconfigjson": base64.b64encode(json.dumps(payload).encode("utf-8")).decode(
+                    "utf-8"
+                )
+            }
+        }
+
+    def _fake_oc(*args, **kwargs):
+        if args[:2] == ("get", "mcp"):
+            return type("Result", (), {"stdout": next(mcp_outputs), "returncode": 0})()
+        raise AssertionError(f"Unexpected oc call: {args}")
+
+    monkeypatch.setattr(rhoai_deploy, "oc_get_json", _fake_oc_get_json)
+    monkeypatch.setattr(rhoai_deploy, "oc", _fake_oc)
+    monkeypatch.setattr(rhoai_deploy.time, "monotonic", _fake_monotonic)
+    monkeypatch.setattr(rhoai_deploy.time, "sleep", _fake_sleep)
+
+    rhoai_deploy.wait_for_rhoai_pull_secret_ready(timeout_seconds=1, poll_interval_seconds=0)
+
+
+def test_registries_present_accepts_parent_registry_auth_entries() -> None:
+    pull_secret = {
+        "auths": {
+            "quay.io": {"auth": "token-a"},
+            "registry.stage.redhat.io": {"auth": "token-b"},
+        }
+    }
+
+    assert rhoai_deploy._registries_present(
+        pull_secret,
+        (
+            "quay.io/rhoai",
+            "registry.stage.redhat.io/rhaii",
+            "registry.stage.redhat.io/rhaii-early-access",
+        ),
+    )
+
+
+def test_prepare_rhoai_pull_secret_merges_dockerconfigjson_registry_auths(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _init_project_config()
+
+    rc_pull_secret_path = tmp_path / "rhoai_rc.secret"
+    rc_pull_secret_path.write_text(
+        "rhoai+rhoai_external_readonly_bot:token-c",
+        encoding="utf-8",
+    )
+
+    staging_pull_secret_path = tmp_path / ".dockerconfigjson"
+    staging_pull_secret_path.write_text(
+        json.dumps(
+            {
+                "auths": {
+                    "registry.stage.redhat.io/rhaii": {"auth": "token-a"},
+                    "registry.stage.redhat.io/rhaii-early-access": {"auth": "token-b"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    current_secret = {
+        "data": {
+            ".dockerconfigjson": base64.b64encode(json.dumps({"auths": {}}).encode("utf-8")).decode(
+                "utf-8"
+            )
+        }
+    }
+    merged_payload: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        rhoai_deploy.vault,
+        "get_vault_content_path",
+        lambda vault_name, content_name: (
+            rc_pull_secret_path
+            if (vault_name, content_name) == ("psap-rhoai-rc", "rhoai_rc.secret")
+            else staging_pull_secret_path
+        ),
+    )
+    monkeypatch.setattr(rhoai_deploy, "oc_get_json", lambda *args, **kwargs: current_secret)
+
+    def _fake_oc(*args, **kwargs):
+        if args[:2] == ("set", "data"):
+            from_file = next((arg for arg in args if str(arg).startswith("--from-file=")), "")
+            payload_path = Path(from_file.rsplit("=", 1)[1])
+            merged_payload.update(json.loads(payload_path.read_text(encoding="utf-8")))
+            return type("Result", (), {"stdout": "", "returncode": 0})()
+        if args[:2] == ("registry", "login"):
+            registry = next(
+                arg.split("=", 1)[1] for arg in args if str(arg).startswith("--registry=")
+            )
+            auth_basic = next(
+                arg.split("=", 1)[1] for arg in args if str(arg).startswith("--auth-basic=")
+            )
+            temp_path = Path(
+                next(
+                    arg
+                    for arg in args
+                    if not str(arg).startswith("--") and arg != "registry" and arg != "login"
+                )
+            )
+            current = json.loads(temp_path.read_text(encoding="utf-8"))
+            current.setdefault("auths", {})[registry] = {"auth": auth_basic}
+            temp_path.write_text(json.dumps(current, indent=2, sort_keys=True), encoding="utf-8")
+            return type("Result", (), {"stdout": "", "returncode": 0})()
+        raise AssertionError(f"Unexpected oc call: {args}")
+
+    monkeypatch.setattr(rhoai_deploy, "oc", _fake_oc)
+    monkeypatch.setattr(rhoai_deploy, "wait_for_rhoai_pull_secret_ready", lambda **kwargs: None)
+
+    rhoai_deploy.prepare_rhoai_pull_secret(
+        rhoai_deploy.RhoaiCustomCatalogConfig.model_validate(
+            {
+                "enabled": True,
+                "name": "rhoai-catalog-dev",
+                "namespace": "openshift-marketplace",
+                "image": "quay.io/rhoai/rhoai-fbc-fragment@sha256:test",
+                "display_name": "Red Hat OpenShift AI",
+                "publisher": "RHOAI Development Catalog",
+                "pull_secret": {"vault": {"name": "psap-rhoai-rc", "content": "rhoai_rc.secret"}},
+                "staging_pull_secret": {
+                    "vault": {
+                        "name": "psap-forge-staging-image-pull",
+                        "content": ".dockerconfigjson",
+                    }
+                },
+            }
+        )
+    )
+
+    assert (
+        merged_payload["auths"]["quay.io/rhoai"]["auth"]
+        == "rhoai+rhoai_external_readonly_bot:token-c"
+    )
+    assert merged_payload["auths"]["registry.stage.redhat.io/rhaii"]["auth"] == "token-a"
+    assert (
+        merged_payload["auths"]["registry.stage.redhat.io/rhaii-early-access"]["auth"] == "token-b"
+    )
+
+
 def test_model_and_deployment_profile_accept_yaml_list_strings() -> None:
     _init_project_config()
 
@@ -220,6 +565,116 @@ def test_model_and_deployment_profile_accept_yaml_list_strings() -> None:
     ]
     assert run_specs[0].model_slug == "openai-gpt-oss-120b"
     assert run_specs[2].model_slug == "qwen-qwen3-0-6b"
+    # With a single benchmark_key (or null), benchmark fields reflect the scalar
+    assert all(spec.benchmark_key is not None or spec.benchmark_slug is None for spec in run_specs)
+
+
+def test_3d_matrix_with_multiple_benchmark_keys() -> None:
+    _init_project_config()
+
+    core_config.project.set_config(
+        "runtime.model_name",
+        "[openai/gpt-oss-120b, Qwen/Qwen3-0.6B]",
+    )
+    core_config.project.set_config(
+        "runtime.deployment_profile",
+        "[distributed-default, precise-prefix-cache]",
+    )
+    core_config.project.set_config(
+        "runtime.benchmark_key",
+        "[concurrent-1k-1k, multi-turn]",
+    )
+
+    run_specs = runtime_config.get_run_specs()
+
+    # 2 models x 2 profiles x 2 benchmarks = 8 specs
+    assert len(run_specs) == 8
+    assert all(spec.benchmark_key is not None for spec in run_specs)
+    assert all(spec.benchmark_slug is not None for spec in run_specs)
+
+    assert run_specs[0].model_name == "openai/gpt-oss-120b"
+    assert run_specs[0].deployment_profile_name == "distributed-default"
+    assert run_specs[0].benchmark_key == "concurrent-1k-1k"
+
+    # Verify all namespaces are unique
+    namespaces = [spec.namespace for spec in run_specs]
+    assert len(namespaces) == len(set(namespaces))
+
+    # Verify all artifact dirnames are unique
+    dirnames = [spec.artifact_dirname for spec in run_specs]
+    assert len(dirnames) == len(set(dirnames))
+
+
+def test_null_benchmark_key_produces_smoke_only_specs() -> None:
+    _init_project_config()
+
+    core_config.project.set_config("runtime.benchmark_key", None)
+
+    run_specs = runtime_config.get_run_specs()
+
+    assert len(run_specs) == 1
+    assert run_specs[0].benchmark_key is None
+    assert run_specs[0].benchmark_slug is None
+
+
+def test_single_benchmark_key_backward_compatible() -> None:
+    _init_project_config()
+
+    core_config.project.apply_preset("smoke")
+
+    run_specs = runtime_config.get_run_specs()
+
+    assert len(run_specs) == 1
+    assert run_specs[0].benchmark_key == "short"
+    assert run_specs[0].benchmark_slug == "short"
+    assert run_specs[0].artifact_dirname == "llmd_run"
+
+
+def test_activate_run_spec_sets_benchmark_key() -> None:
+    _init_project_config()
+
+    core_config.project.set_config(
+        "runtime.benchmark_key",
+        "[concurrent-1k-1k, multi-turn]",
+    )
+
+    run_specs = runtime_config.get_run_specs()
+
+    for run_spec in run_specs:
+        with runtime_config.activate_run_spec(run_spec):
+            keys = runtime_config.get_benchmark_keys()
+            assert keys == [run_spec.benchmark_key]
+            assert runtime_config.get_benchmark_config() is not None
+
+
+def test_benchmark_deployment_overrides() -> None:
+    _init_project_config()
+
+    core_config.project.set_config("runtime.benchmark_key", "concurrent-1k-1k")
+    core_config.project.config["workloads"]["benchmarks"]["concurrent-1k-1k"][
+        "deployment_overrides"
+    ] = {"vllm_args": ["--max-model-len=8192"]}
+
+    overrides = runtime_config.get_benchmark_deployment_overrides()
+    assert overrides == {"vllm_args": ["--max-model-len=8192"]}
+
+
+def test_benchmark_deployment_overrides_empty_when_not_set() -> None:
+    _init_project_config()
+
+    core_config.project.set_config("runtime.benchmark_key", "concurrent-1k-1k")
+
+    overrides = runtime_config.get_benchmark_deployment_overrides()
+    assert overrides == {}
+
+
+def test_benchmark_deployment_overrides_empty_when_no_benchmark() -> None:
+    _init_project_config()
+
+    core_config.project.set_config("runtime.benchmark_key", None)
+
+    overrides = runtime_config.get_benchmark_deployment_overrides()
+    assert overrides == {}
 
 
 def test_runtime_rejects_legacy_model_key_path() -> None:
@@ -341,12 +796,14 @@ def test_render_removes_scheduler_when_deployment_requests_null_scheduler() -> N
     assert "scheduler" not in manifest["spec"]["router"]
 
 
-def test_benchmark_job_names_collapse_shared_default() -> None:
+def test_benchmark_job_name_from_activated_spec() -> None:
     _init_project_config()
 
     core_config.project.apply_preset("gpt-oss-120b-inference-scheduling-release")
-    # Three benchmark_keys, all sharing the workload default job_name -> one entry.
-    assert runtime_config.get_benchmark_job_names() == ["guidellm-benchmark"]
+
+    for run_spec in runtime_config.get_run_specs():
+        with runtime_config.activate_run_spec(run_spec):
+            assert runtime_config.get_benchmark_job_name() == "guidellm-benchmark"
 
 
 def test_smoke_preset_benchmark_behavior() -> None:
@@ -355,7 +812,10 @@ def test_smoke_preset_benchmark_behavior() -> None:
     core_config.project.apply_preset("smoke")
     # The smoke preset enables the short benchmark
     assert runtime_config.get_benchmark_keys() == ["short"]
-    assert runtime_config.get_benchmark_job_names() == ["guidellm-benchmark"]
+
+    run_spec = runtime_config.get_run_specs()[0]
+    with runtime_config.activate_run_spec(run_spec):
+        assert runtime_config.get_benchmark_job_name() == "guidellm-benchmark"
 
 
 def test_run_spec_preserves_namespace_managed_flag() -> None:

@@ -28,28 +28,73 @@ from projects.llm_d.orchestration.prepare_sequence import run_prepare_sequence
 from projects.llm_d.orchestration.test_phase import run as test_toolbox_run
 
 logger = logging.getLogger(__name__)
+RHOAI_CUSTOM_CATALOG_VAULTS = [
+    "psap-rhoai-rc",
+    "psap-forge-staging-image-pull",
+]
 
 
-def init():
+def init(presets=None):
     """Initialize LLM-D orchestration environment"""
     env.init()
     run.init()
+
+    # Set presets configuration if provided
+    if presets:
+        config.write_variables_override(presets=presets)
+
     config.init(Path(__file__).parent)
 
 
+def list_vaults() -> list[str]:
+    """List all vaults (includes both mandatory and optional)."""
+    all_vaults = vault.phase_vault_list_all()
+    if config.project.get_config("platform.rhoai.custom_catalog.enabled", False):
+        return [*all_vaults, *RHOAI_CUSTOM_CATALOG_VAULTS]
+
+    return all_vaults
+
+
+def init_vaults_for_phase(phase: str) -> None:
+    mandatory_vaults = [
+        *config.project.get_config("vaults.all", []),
+        *config.project.get_config(f"vaults.{phase}", []),
+    ]
+    optional_vaults = [
+        *config.project.get_config("vaults.all-optional", []),
+        *config.project.get_config(f"vaults.{phase}-optional", []),
+    ]
+
+    if phase == "prepare" and config.project.get_config(
+        "platform.rhoai.custom_catalog.enabled", False
+    ):
+        optional_vaults = [*optional_vaults, *RHOAI_CUSTOM_CATALOG_VAULTS]
+
+    vault.init(mandatory_vaults=mandatory_vaults, optional_vaults=optional_vaults)
+
+
 @click.group(cls=ci_lib.HelpfulGroup)
+@click.option("--preset", multiple=True, help="Set preset configuration before starting")
 @click.pass_context
 @ci_lib.safe_ci_function
-def main(ctx):
+def main(ctx, preset):
     """LLM-D Project CI Operations for FORGE."""
     ctx.ensure_object(types.SimpleNamespace)
-    init()
+
+    presets_list = list(preset)
+    if presets_list and "," in presets_list[0]:
+        lst = presets_list.pop(0)
+        presets_list = lst.split(",") + presets_list
+
+        logger.info(f"Setting preset configuration from CLI: {presets_list}")
+
+    init(presets_list)
 
     if ctx.invoked_subcommand == "resolve-fournos-config":
         logger.info("No need to initialize the vaults for the resolve step")
         return
 
-    vault.phase_vault_init(ctx.invoked_subcommand)
+    init_vaults_for_phase(ctx.invoked_subcommand)
 
 
 @main.command()
@@ -76,10 +121,17 @@ def preflight(ctx) -> int:
 @agent_review_on_failure
 def test(ctx) -> int:
     """Test phase - Execute the main testing logic."""
+    from projects.llm_d.orchestration import runtime_config
+
     # Trigger config review analysis asynchronously (don't block test execution)
     trigger_config_review_for_ci(env.BASE_ARTIFACT_DIR, async_mode=True)
 
-    return test_toolbox_run()
+    exit_code = 0
+    for run_spec in runtime_config.get_run_specs():
+        with runtime_config.activate_run_spec(run_spec):
+            with env.NextArtifactDir(run_spec.artifact_dirname):
+                exit_code = max(exit_code, test_toolbox_run())
+    return exit_code
 
 
 @main.command()
@@ -113,6 +165,7 @@ def post_cleanup(ctx) -> int:
 main.add_command(
     create_fournos_resolve_entrypoint(
         vault_list_funcs=[
+            list_vaults,
             vault.phase_vault_list_all,
             caliper_export_list_vaults,
             caliper_export_list_optional_vaults,

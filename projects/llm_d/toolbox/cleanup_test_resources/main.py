@@ -6,7 +6,7 @@ import logging
 import subprocess
 
 from projects.core.dsl import entrypoint, execute_tasks, retry, shell, task
-from projects.core.dsl.utils.k8s import oc, oc_get_json, oc_resource_exists
+from projects.core.dsl.utils.k8s import oc, oc_get_json
 
 logger = logging.getLogger("DSL")
 
@@ -164,33 +164,36 @@ def delete_llm_d_labeled_resources(args, ctx):
 def delete_inference_service(args, ctx):
     """Delete the LLM inference service"""
 
-    _best_effort_delete(
-        "llminferenceservice",
+    result = oc(
         "delete",
         "llminferenceservice",
         args.inference_service_name,
         "-n",
         args.namespace,
         "--ignore-not-found=true",
+        "--timeout=30s",
+        check=False,
     )
+    if result.returncode != 0:
+        logger.error(
+            "Failed to delete llminferenceservice/%s (rc=%d), capturing describe",
+            args.inference_service_name,
+            result.returncode,
+        )
+        oc(
+            "describe",
+            "llminferenceservice",
+            args.inference_service_name,
+            "-n",
+            args.namespace,
+            check=False,
+        )
+        raise RuntimeError(
+            f"Failed to delete llminferenceservice/{args.inference_service_name} "
+            f"in {args.namespace} (rc={result.returncode})"
+        )
 
     return f"Deleted llminferenceservice {args.inference_service_name}"
-
-
-@retry(attempts=90, delay=10, backoff=1.0)
-@task
-def wait_for_inference_service_deletion(args, ctx):
-    """Wait for the llminferenceservice to be deleted"""
-
-    if not oc_resource_exists(
-        "llminferenceservice", args.inference_service_name, namespace=args.namespace
-    ):
-        return f"llminferenceservice/{args.inference_service_name} deleted from {args.namespace}"
-
-    return (
-        False,
-        f"Waiting for llminferenceservice/{args.inference_service_name} deletion in {args.namespace}",
-    )
 
 
 @retry(attempts=90, delay=10, backoff=1.0)
@@ -218,9 +221,15 @@ def wait_for_workload_pods_deletion(args, ctx):
 
 
 def _best_effort_delete(description: str, *oc_args: str) -> None:
-    """Best effort deletion of Kubernetes resources with timeout"""
+    """Best effort deletion of Kubernetes resources with timeout."""
     try:
-        oc(*oc_args, check=False)
+        result = oc(*oc_args, "--timeout=300s", check=False)
+        if result.returncode != 0:
+            logger.warning(
+                "Failed to delete %s (rc=%d), capturing describe", description, result.returncode
+            )
+            describe_args = tuple(a for a in oc_args if a != "delete")
+            oc("describe", *describe_args, check=False)
     except subprocess.TimeoutExpired:
         logger.warning("Timed out deleting %s: oc %s", description, " ".join(oc_args))
 

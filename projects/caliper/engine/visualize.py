@@ -89,12 +89,31 @@ def run_visualize(
         report_group=report_group,
         config=cfg,
     )
+
+    # Check if any report IDs were provided
+    if not ids:
+        raise ValueError(
+            "No report IDs provided. Use --reports with comma-separated report IDs "
+            "or --report-group with a valid visualize config file."
+        )
+
     output_dir.mkdir(parents=True, exist_ok=True)
     viz = plugin.visualize
-    return viz(
+    paths = viz(
         model,
         output_dir,
         ids,
         report_group,
         cfg,
     )
+
+    # Check for error conditions
+    if ids and not paths:
+        # Reports were requested but no files were generated
+        # This could be due to invalid plot types or other issues
+        raise ValueError(
+            f"No visualization files were generated despite requesting report IDs: {ids}. "
+            f"This may indicate unsupported plot types or other visualization errors."
+        )
+
+    return paths

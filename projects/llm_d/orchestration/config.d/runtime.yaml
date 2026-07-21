@@ -5,3 +5,4 @@ smoke_request_key: default
 benchmark_key: null
 job_name: null
 namespace_override: null
+kserve_dry_run: false

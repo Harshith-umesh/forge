@@ -1,0 +1,10 @@
+env_key: PSAP_FORGE_STAGING_IMAGE_PULL_SECRET_PATH
+description: |
+  Vault containing registry credentials for staging image pulling
+
+content:
+  .dockerconfigjson:
+    description: |
+      Docker registry auth config used to extend the cluster pull secret
+    sample: |
+      {"auths":{"registry.stage.redhat.io":{"auth":"base64-encoded-credentials"},"registry.stage.redhat.io/rhaii":{"auth":"base64-encoded-credentials"},"registry.stage.redhat.io/rhaii-early-access":{"auth":"base64-encoded-credentials"}}}

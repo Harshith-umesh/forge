@@ -783,12 +783,17 @@ def postchecks(
     """
     artifact_dir = os.environ.get("ARTIFACT_DIR")
 
+    # Build command string for display
+    command_str = f"{project} {operation}"
+    if args:
+        command_str += f" {' '.join(args)}"
+
     if not artifact_dir:
         # No artifact dir, just return simple status
         return (
-            f"✅ {project} {operation} completed successfully"
+            f"✅ {command_str} completed successfully"
             if finish_reason == FinishReason.SUCCESS
-            else f"❌ {project} {operation} failed"
+            else f"❌ {command_str} failed"
         )
 
     artifact_path = Path(artifact_dir)
@@ -821,8 +826,8 @@ def postchecks(
     if finish_reason != FinishReason.SUCCESS or (
         failures_file.exists() and failures_file.stat().st_size > 0
     ):
-        status = f"❌ Execution of '{project} {operation}' failed after{duration_str}."
+        status = f"❌ Execution of '{command_str}' failed after{duration_str}."
     else:
-        status = f"✅ Execution of '{project} {operation}' succeeded after{duration_str}."
+        status = f"✅ Execution of '{command_str}' succeeded after{duration_str}."
 
     return status
