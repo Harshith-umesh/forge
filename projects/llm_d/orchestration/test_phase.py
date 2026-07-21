@@ -50,7 +50,7 @@ def create_test_labels() -> None:
 def run() -> int:
     """Main test function that wraps do_test() with outcome postprocessing."""
 
-    dry_run = config.project.get_config("runtime.kserve_dry_run", False)
+    dry_run = config.project.get_config("runtime.kserve.dry_run", False)
     if dry_run:
         ret = do_test()
         logger.info("Kserve dry-run mode enabled - Skipping caliper post-processing")
@@ -111,7 +111,7 @@ def do_test() -> int:
     # Load minimal config needed for orchestration flow
 
     namespace = runtime_config.get_namespace()
-    dry_run = config.project.get_config("runtime.kserve_dry_run", False)
+    dry_run = config.project.get_config("runtime.kserve.dry_run", False)
 
     if not dry_run:
         # Ensure namespace exists before starting any deployments
@@ -181,7 +181,7 @@ def deploy_inference_service() -> str:
     gateway = platform["gateway"]
 
     # Check if dry-run mode is enabled early
-    dry_run = config.project.get_config("runtime.kserve_dry_run", False)
+    dry_run = config.project.get_config("runtime.kserve.dry_run", False)
 
     # Step 1: Ensure model cache is ready (skip in dry-run)
     if not dry_run:
@@ -339,7 +339,7 @@ def cleanup_test_resources() -> None:
     """Cleanup test resources using the toolbox script"""
 
     # Skip cleanup when in dry-run mode
-    dry_run = config.project.get_config("runtime.kserve_dry_run", False)
+    dry_run = config.project.get_config("runtime.kserve.dry_run", False)
     if dry_run:
         logger.info("Skipping cleanup_test_resources - dry-run mode enabled")
         return

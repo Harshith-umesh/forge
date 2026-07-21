@@ -52,8 +52,7 @@ def _test_preset_generates_expected_llmisvc(preset: str, tmp_path: Path):
     variable_overrides_path.write_text(
         yaml.safe_dump(
             {
-                "runtime.kserve_dry_run": True,
-                "runtime.namespace_override": "forge-llm-d",
+                "runtime.kserve.dry_run": True,
             },
             sort_keys=True,
         ),

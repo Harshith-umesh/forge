@@ -5,7 +5,8 @@ smoke_request_key: default
 benchmark_key: null
 job_name: null
 namespace: forge-llm-d
-kserve_dry_run: false
+kserve:
+  dry_run: false
 kueue:
   enabled: false
   queue_name: default-queue
