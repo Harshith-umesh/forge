@@ -216,7 +216,86 @@ def submit_fournos_job(args, ctx):
     return f"Successfully submitted FOURNOS job: {ctx.final_job_name}"
 
 
-@retry(attempts=3000, delay=10, backoff=1.0)
+@retry(attempts=30, delay=10, backoff=1.0)
+@task
+def wait_for_job_to_resolve(args, ctx):
+    """Wait for FOURNOS job to successfully resolve (reach Pending state)"""
+
+    # Check job status
+    status_result = shell.run(
+        f'oc get fournosjob {ctx.final_job_name} -n {args.namespace} -o jsonpath="{{.status.phase}}"',
+        check=False,
+    )
+
+    if not status_result.success:
+        # Check if it's a "not found" error (permanent failure) vs temporary error
+        if "not found" in status_result.stderr.lower():
+            raise FournosJobFailureError(
+                ctx.final_job_name,
+                "Job not found during resolve phase - may have been deleted or never created",
+                args.namespace,
+                "not_found",
+            )
+
+        # Other errors might be temporary, retry
+        logger.info(
+            f"Failed to get job status during resolve phase, retrying... (stderr: {status_result.stderr.strip()})"
+        )
+        return False  # Retry
+
+    status = status_result.stdout.strip()
+
+    if not status:
+        logger.info(f"Job {ctx.final_job_name} not processed.")
+        return False, "Not processed"  # Retry
+
+    if status == "Resolving":
+        logger.info(f"Job {ctx.final_job_name} status: {status}. Still resolving, keep waiting.")
+        return False, "Resolving"  # Retry
+
+    if status == "Stopping":
+        logger.warning(f"Job {ctx.final_job_name} status: {status}.")
+        raise FournosJobFailureError(
+            ctx.final_job_name, "Job stopped in its early stages", args.namespace
+        )
+
+    if status == "Failed":
+        # Get failure details
+        failure_result = shell.run(
+            f'oc get fournosjob {ctx.final_job_name} -n {args.namespace} -o jsonpath="{{.status.message}}"',
+            check=False,
+        )
+        failure_msg = (
+            failure_result.stdout.strip()
+            if failure_result.success
+            else "Unknown failure during resolve"
+        )
+        raise FournosJobFailureError(
+            ctx.final_job_name, f"Job failed in its early stages: {failure_msg}", args.namespace
+        )
+
+    if status in ["Admitted", "Running", "Succeeded"]:
+        # Job moved past Pending - this means resolve succeeded
+        return f"Job {ctx.final_job_name} resolved successfully (current status: {status})"
+
+    if status == "Pending":
+        return f"Job {ctx.final_job_name} successfully resolved and reached Pending state"
+
+    logger.info(f"Unknown job {ctx.final_job_name} status: {status}")
+    return False, "Unknown status"  # Unknown status, retry
+
+
+@task
+def check_early_return(args, ctx):
+    """Check for early return"""
+
+    if not args.wait:
+        return EarlyReturn(f"Fournos job successfully launched: {ctx.final_job_name} (wait=False)")
+
+    return f"Fournos job successfully launched: {ctx.final_job_name}"
+
+
+@retry(attempts=3000, delay=30, backoff=1.0)
 @task
 def wait_for_job_completion(args, ctx):
     """Wait for FOURNOS job to complete"""
