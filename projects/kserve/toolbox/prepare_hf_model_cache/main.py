@@ -286,6 +286,44 @@ def create_download_job(args, ctx):
     return f"Download job {cache_spec['download_job_name']} created"
 
 
+@retry(attempts=24, delay=5, backoff=1.0)  # 24 attempts * 5 seconds = 120 seconds (2 minutes)
+@task
+def wait_for_pods_running(args, ctx):
+    """Wait for the download job pods to start running within 2 minutes"""
+
+    if getattr(ctx, "cache_ready", False):
+        return "Skipping pod wait - cache already ready"
+
+    cache_spec = ctx.cache_spec
+    job_name = cache_spec["download_job_name"]
+    namespace = cache_spec["namespace"]
+
+    # Get pod status using plain text output
+    result = oc(
+        "get",
+        "pod",
+        "--no-headers",
+        "-l",
+        f"job-name={job_name}",
+        "-n",
+        namespace,
+        "-o",
+        "custom-columns=NAME:.metadata.name,STATUS:.status.phase",
+        check=False,
+        log_stdout=False,
+    )
+
+    if not result.stdout.strip():
+        return False  # No pods yet, retry
+
+    # Keep waiting only if "Pending" appears in the output
+    if "Pending" in result.stdout:
+        return False, "Waiting for pods to exit Pending state"
+
+    # All pods are past Pending state
+    return "All pods past Pending state"
+
+
 @retry(attempts=30, delay=30, backoff=1.0)
 @task
 def wait_for_download(args, ctx):
