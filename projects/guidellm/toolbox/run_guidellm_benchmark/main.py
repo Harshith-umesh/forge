@@ -291,6 +291,8 @@ def extract_results(args, ctx):
     """Extract GuideLLM results from copy pod"""
 
     results_dir = args.artifact_dir / "artifacts" / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    copy_pod = f"{ctx.benchmark_name}-copy"
     extracted_files: list[dict[str, str | None]] = []
     for run in ctx.guidellm_runs:
         if run.rate is None:
@@ -301,20 +303,16 @@ def extract_results(args, ctx):
             local_path = results_dir / f"benchmarks-{run.label}.json"
 
         result = oc(
-            "exec",
-            "-n",
-            ctx.target_namespace,
-            f"{ctx.benchmark_name}-copy",
-            "--",
-            "cat",
-            remote_path,
+            "cp",
+            f"{ctx.target_namespace}/{copy_pod}:{remote_path}",
+            str(local_path),
+            "-c", "copy-helper",
             check=False,
             log_stdout=False,
         )
-        if result.returncode != 0 or not result.stdout:
+        if result.returncode != 0 or not local_path.exists():
             raise RuntimeError(f"No results found for {ctx.benchmark_name} run {run.label}")
 
-        write_text(local_path, result.stdout)
         extracted_files.append(
             {
                 "label": run.label,

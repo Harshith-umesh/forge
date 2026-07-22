@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 GITHUB_APP_PEM_FILE = "topsail-bot.2024-09-18.private-key.pem"
 GITHUB_APP_CLIENT_ID_FILE = "topsail-bot.clientid"
 SLACK_TOKEN_FILE = "topsail-bot.slack-token"
-SLACK_WEBHOOK_URL_FILE = "slack-webhook-url"
 
 DEFAULT_REPO_OWNER = "openshift-psap"
 DEFAULT_REPO_NAME = "forge"
@@ -714,35 +713,6 @@ def send_cpt_notification_to_slack(secret_dir, secret_env_key, title, summary, d
 
     return not ok
 
-
-def _send_via_webhook(webhook_url: str, blocks: list[dict]) -> bool:
-    """Post a Slack message via Incoming Webhook URL."""
-    from urllib.error import URLError
-    from urllib.request import Request, urlopen
-
-    body = json.dumps({"blocks": blocks})
-    try:
-        req = Request(
-            webhook_url,
-            data=body.encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-        )
-        urlopen(req, timeout=15)  # noqa: S310
-        return True
-    except (URLError, OSError) as e:
-        logger.warning("Slack webhook POST failed: %s", e)
-        return False
-
-
-def _get_webhook_url(vault_name: str) -> str | None:
-    """Read the webhook URL from a vault file."""
-    from projects.core.library import vault as vault_lib
-
-    path = vault_lib.get_vault_content_path(vault_name, SLACK_WEBHOOK_URL_FILE)
-    if path is None or not path.exists():
-        logger.warning("Webhook URL file not found in vault %s", vault_name)
-        return None
-    return path.read_text().strip()
 
 
 def get_slack_cpt_message(summary):

@@ -1,4 +1,5 @@
 import logging
+import os
 
 from projects.core.dsl.utils.k8s import oc
 from projects.rhaiis.orchestration import runtime_config
@@ -44,12 +45,30 @@ def prepare():
             )
 
 
+def _delete_resources_by_suffix(resource_type: str, ns: str, suffix: str) -> None:
+    """Delete resources whose names contain the FJOB suffix."""
+    result = oc("get", resource_type, "-n", ns, "-o", "name", check=False, log_stdout=False)
+    if result.returncode != 0 or not result.stdout:
+        return
+    for line in result.stdout.strip().splitlines():
+        name = line.strip()
+        if suffix in name:
+            oc("delete", name, "-n", ns, "--ignore-not-found", check=False)
+
+
 def cleanup():
     ns = runtime_config.get_namespace()
     logger.info(f"Cleaning up rhaiis benchmark resources in {ns}")
 
-    oc("delete", "inferenceservice", "--all", "-n", ns, "--ignore-not-found", check=False)
-    oc("delete", "servingruntime", "--all", "-n", ns, "--ignore-not-found", check=False)
-    oc("delete", "job", "--all", "-n", ns, "--ignore-not-found", check=False)
-    oc("delete", "pod", "--all", "-n", ns, "--ignore-not-found", check=False)
+    fjob = os.environ.get("FJOB_NAME", "")
+    if fjob:
+        suffix = fjob.rsplit("-", 1)[-1]
+        for resource_type in ("inferenceservice", "servingruntime", "job", "pod", "pvc"):
+            _delete_resources_by_suffix(resource_type, ns, suffix)
+    else:
+        oc("delete", "inferenceservice", "--all", "-n", ns, "--ignore-not-found", check=False)
+        oc("delete", "servingruntime", "--all", "-n", ns, "--ignore-not-found", check=False)
+        oc("delete", "job", "--all", "-n", ns, "--ignore-not-found", check=False)
+        oc("delete", "pod", "--all", "-n", ns, "--ignore-not-found", check=False)
+
     logger.info("Cleanup complete")
