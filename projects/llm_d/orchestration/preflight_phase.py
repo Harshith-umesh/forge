@@ -3,22 +3,19 @@ from __future__ import annotations
 import logging
 
 from projects.core.dsl.utils.k8s import oc_resource_exists
+from projects.core.library import ci as ci_lib
 from projects.llm_d.orchestration import runtime_config
 
 logger = logging.getLogger(__name__)
 
 
-def run() -> int:
-    """Run preflight checks before testing phase.
-
-    Validates that required CRDs exist in the cluster:
-    - leaderworkersets.leaderworkerset.x-k8s.io
-    - llminferenceservices.serving.kserve.io
+def check_crds() -> bool:
+    """Check that required CRDs exist in the cluster.
 
     Returns:
-        0 on success, non-zero on failure
+        True if all CRDs are present, False otherwise
     """
-    logger.info("Starting preflight checks")
+    logger.info("Checking required CRDs")
 
     # Get required CRDs from platform configuration
     platform = runtime_config.get_platform_config()
@@ -36,10 +33,49 @@ def run() -> int:
             logger.info(f"CRD found: {crd_name}")
 
     if missing_crds:
-        logger.error(
-            f"Preflight check failed - missing {len(missing_crds)} required CRDs: {', '.join(missing_crds)}"
+        error_message = f"Missing {len(missing_crds)} required CRDs:\n" + "\n".join(
+            f"- {crd}" for crd in missing_crds
         )
-        return 1
+        logger.error(f"CRD check failed - {error_message}")
+        ci_lib.add_notification_file("MISSING_CRDS", error_message)
+        return False
 
-    logger.info("Preflight checks completed successfully - all required CRDs are available")
-    return 0
+    logger.info("CRD check passed - all required CRDs are available")
+    return True
+
+
+def run() -> int:
+    """Run preflight checks before testing phase.
+
+    Validates that required components exist in the cluster based on
+    platform configuration settings.
+
+    Returns:
+        0 on success, non-zero on failure
+    """
+    logger.info("Starting preflight checks")
+
+    platform = runtime_config.get_platform_config()
+    preflight_config = platform.get("preflight", {})
+
+    # Track overall success across all checks
+    all_checks_passed = True
+
+    # Run CRD checks if enabled
+    if preflight_config.get("check_crds", True):
+        if not check_crds():
+            all_checks_passed = False
+    else:
+        logger.info("CRD checks disabled by platform configuration")
+
+    # Future checks can be added here:
+    # if preflight_config.get("check_operators", True):
+    #     if not check_operators():
+    #         all_checks_passed = False
+
+    if all_checks_passed:
+        logger.info("Preflight checks completed successfully")
+        return 0
+    else:
+        logger.error("One or more preflight checks failed")
+        return 1

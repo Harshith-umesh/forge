@@ -95,3 +95,6 @@ smoke:
   client_image: quay.io/curl/curl:8.21.0
   endpoint_path: /v1/completions
   request_timeout_seconds: 60
+
+preflight:
+  check_crds: true
