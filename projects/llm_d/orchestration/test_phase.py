@@ -243,11 +243,15 @@ def deploy_inference_service() -> str:
     # Step 4: Deploy the service and wait for endpoint
     logger.info("Deploying LLMInferenceService from manifest: %s", manifest_path)
 
+    # Get scheduling wait configuration
+    wait_pods_scheduled = config.project.get_config("runtime.kserve.wait_long_scheduling")
+
     endpoint_url = deploy_llmisvc.run(
         namespace=namespace,
         inference_service_manifest_path=str(manifest_path),
         gateway_status_address_name=gateway["status_address_name"],
         dry_run=dry_run,
+        wait_pods_scheduled=wait_pods_scheduled,
     )
 
     if dry_run:
