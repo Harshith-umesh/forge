@@ -109,6 +109,7 @@ def run_finalizers(
         **kwargs,
     ):
         try:
+            # with MuteStdOut(reason=f"Finalizer: {description}"):
             callback(**kwargs)
         except Exception:
             if primary_exc is None:
@@ -122,24 +123,24 @@ def run_finalizers(
     capture_namespace_events = platform["artifacts"]["capture_namespace_events"]
 
     finalizer_exc = _run_finalizer(
-        "capture inference-service state",
+        "capturing inference-service state",
         capture_inference_service_state,
     )
     finalizer_exc = _run_finalizer(
-        "write endpoint URL",
+        "writing endpoint URL",
         write_endpoint_url,
         artifact_dir=env.ARTIFACT_DIR,
         endpoint_url=endpoint_url,
     )
     finalizer_exc = _run_finalizer(
-        "capture namespace events",
+        "capturing namespace events",
         capture_namespace_events_after_test,
         artifact_dir=env.ARTIFACT_DIR,
         namespace=namespace,
         capture_namespace_events=capture_namespace_events,
     )
     finalizer_exc = _run_finalizer(
-        "cleanup runtime resources",
+        "cleaning up runtime resources",
         cleanup_test_resources,
     )
 
