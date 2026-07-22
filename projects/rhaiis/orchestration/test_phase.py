@@ -104,6 +104,8 @@ def _run_test(
 
     from projects.core.library import config as _cfg
     version = _cfg.project.get_config("tests.rhaiis.version", "")
+    run_uuid = _cfg.project.get_config("tests.rhaiis.run_uuid", "") or str(_uuid_mod.uuid4())
+    logger.info("Run UUID for this job: %s", run_uuid)
 
     _create_test_labels(
         model_key, workload_keys[0], accelerator, vllm_args,
@@ -111,6 +113,8 @@ def _run_test(
         version=version,
         vllm_image=vllm_image,
         cluster_tag=cluster_tag,
+        accelerator_chip=gpu_type.upper(),
+        run_uuid=run_uuid,
     )
 
     from projects.guidellm.toolbox.run_guidellm_benchmark.main import (
@@ -118,9 +122,6 @@ def _run_test(
     )
     from projects.rhaiis.toolbox.deploy_kserve_isvc.main import run as deploy_kserve_isvc
     from projects.rhaiis.toolbox.wait_isvc_ready.main import run as wait_isvc_ready
-
-    run_uuid = _cfg.project.get_config("tests.rhaiis.run_uuid", "") or str(_uuid_mod.uuid4())
-    logger.info("Run UUID for this job: %s", run_uuid)
 
     import subprocess
     fjob_name = os.environ.get("FJOB_NAME", "")
@@ -376,19 +377,22 @@ def _create_test_labels(
     version: str = "",
     vllm_image: str = "",
     cluster_tag: str = "",
+    accelerator_chip: str = "",
+    run_uuid: str = "",
 ) -> None:
     _, image_tag = runtime_config.split_image_tag(vllm_image) if vllm_image else ("", "")
     runtime_args = "; ".join(f"{k}: {v}" for k, v in vllm_args.items())
     labels = {
         "model_key": model_key,
         "workload_key": workload_key,
-        "accelerator": accelerator,
+        "accelerator": accelerator_chip or accelerator,
         "tensor_parallel_size": str(vllm_args.get("tensor-parallel-size", 1)),
         "hf_model_id": hf_model_id,
         "version": version,
         "image_tag": image_tag,
         "cluster_tag": cluster_tag,
         "runtime_args": runtime_args,
+        "run_uuid": run_uuid,
     }
     write_test_labels(env.ARTIFACT_DIR, labels)
     logger.info("Created test labels: %s", labels)
