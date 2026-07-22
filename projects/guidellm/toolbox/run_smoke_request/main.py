@@ -247,6 +247,7 @@ def capture_smoke_pod_debug_info(args, ctx):
             "-o",
             "yaml",
             check=False,
+            stdout_dest=artifacts_dir / f"{ctx.pod_name}.yaml",
         )
 
         # Capture pod description
