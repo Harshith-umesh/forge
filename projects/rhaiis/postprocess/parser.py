@@ -34,12 +34,10 @@ class RhaiisParser:
 
             node = _find_node_for_record(record, nodes)
             if node:
-                extra = _extract_extra_metrics(node)
-                merged_metrics = {**record.metrics, **extra}
-                # Merge extra curves into existing performance_curves
-                existing_curves = merged_metrics.get("performance_curves", {})
-                extra_curves = extra.pop("_extra_curves", {})
+                extra_metrics, extra_curves = _extract_extra_metrics(node)
+                merged_metrics = {**record.metrics, **extra_metrics}
                 if extra_curves:
+                    existing_curves = merged_metrics.get("performance_curves", {})
                     existing_curves.update(extra_curves)
                     merged_metrics["performance_curves"] = existing_curves
                 enriched_records.append(
@@ -67,7 +65,18 @@ def _find_node_for_record(
     return None
 
 
-def _extract_extra_metrics(node: TestBaseNode) -> dict[str, Any]:
+def _bench_sort_key(bench: dict) -> float:
+    """Sort key matching GuideLLMParser: requests_per_second.successful.mean."""
+    return float(
+        bench.get("metrics", {})
+        .get("requests_per_second", {})
+        .get("successful", {})
+        .get("mean", 0)
+    )
+
+
+def _extract_extra_metrics(node: TestBaseNode) -> tuple[dict[str, Any], dict[str, list]]:
+    """Return (scalar_metrics, extra_curves) extracted from raw benchmarks.json files."""
     extra: dict[str, Any] = {}
     benchmarks_files = sorted(
         [p for p in node.artifact_paths if p.name == "benchmarks.json"
@@ -75,9 +84,8 @@ def _extract_extra_metrics(node: TestBaseNode) -> dict[str, Any]:
         key=lambda p: p.name,
     )
     if not benchmarks_files:
-        return extra
+        return extra, {}
 
-    # Collect all benchmarks across all files
     all_benchmarks: list[dict] = []
     report_metadata: dict[str, Any] = {}
     report_args: dict[str, Any] = {}
@@ -94,9 +102,12 @@ def _extract_extra_metrics(node: TestBaseNode) -> dict[str, Any]:
             report_args = data.get("args", {})
 
     if not all_benchmarks:
-        return extra
+        return extra, {}
 
-    # Extract report-level metadata
+    # Sort by request_rate to match GuideLLMParser curve ordering
+    all_benchmarks.sort(key=_bench_sort_key)
+
+    # Report-level metadata
     extra["guidellm_version"] = report_metadata.get("guidellm_version", "")
 
     data_str = ""
@@ -108,7 +119,6 @@ def _extract_extra_metrics(node: TestBaseNode) -> dict[str, Any]:
     extra["prompt_toks"] = int(float(tokens["prompt_tokens"])) if "prompt_tokens" in tokens else ""
     extra["output_toks"] = int(float(tokens["output_tokens"])) if "output_tokens" in tokens else ""
 
-    # Compute global start/end timestamps
     start_times = []
     end_times = []
     for bench in all_benchmarks:
@@ -145,8 +155,7 @@ def _extract_extra_metrics(node: TestBaseNode) -> dict[str, Any]:
     if concurrency > 0:
         extra["request_concurrency"] = concurrency
 
-    # Build per-benchmark extra curves for ALL dashboard metrics
-    # These will be merged into the existing performance_curves dict
+    # Per-benchmark extra curves — indices align with GuideLLM's sorted curves
     extra_curves: dict[str, list] = {
         "ttft_p1": [],
         "ttft_p999": [],
@@ -177,22 +186,32 @@ def _extract_extra_metrics(node: TestBaseNode) -> dict[str, Any]:
         def _pct(metric_name: str, pct: str):
             return metrics.get(metric_name, {}).get("successful", {}).get("percentiles", {}).get(pct)
 
+        def _pct_s(metric_name: str, pct: str):
+            """Percentile value converted from ms to seconds."""
+            v = _pct(metric_name, pct)
+            return v / 1000.0 if v is not None else None
+
         def _stat(metric_name: str, stat: str):
             return metrics.get(metric_name, {}).get("successful", {}).get(stat)
+
+        def _stat_s(metric_name: str, stat: str):
+            """Stat value converted from ms to seconds."""
+            v = _stat(metric_name, stat)
+            return v / 1000.0 if v is not None else None
 
         def _total_stat(metric_name: str, stat: str):
             return metrics.get(metric_name, {}).get("total", {}).get(stat)
 
         request_totals = metrics.get("request_totals", {})
 
-        extra_curves["ttft_p1"].append(_pct("time_to_first_token_ms", "p01"))
-        extra_curves["ttft_p999"].append(_pct("time_to_first_token_ms", "p999"))
-        extra_curves["ttft_mean"].append(_stat("time_to_first_token_ms", "mean"))
-        extra_curves["tpot_p1"].append(_pct("time_per_output_token_ms", "p01"))
-        extra_curves["tpot_p999"].append(_pct("time_per_output_token_ms", "p999"))
-        extra_curves["itl_p1"].append(_pct("inter_token_latency_ms", "p01"))
-        extra_curves["itl_p999"].append(_pct("inter_token_latency_ms", "p999"))
-        extra_curves["itl_mean"].append(_stat("inter_token_latency_ms", "mean"))
+        extra_curves["ttft_p1"].append(_pct_s("time_to_first_token_ms", "p01"))
+        extra_curves["ttft_p999"].append(_pct_s("time_to_first_token_ms", "p999"))
+        extra_curves["ttft_mean"].append(_stat_s("time_to_first_token_ms", "mean"))
+        extra_curves["tpot_p1"].append(_pct_s("time_per_output_token_ms", "p01"))
+        extra_curves["tpot_p999"].append(_pct_s("time_per_output_token_ms", "p999"))
+        extra_curves["itl_p1"].append(_pct_s("inter_token_latency_ms", "p01"))
+        extra_curves["itl_p999"].append(_pct_s("inter_token_latency_ms", "p999"))
+        extra_curves["itl_mean"].append(_stat_s("inter_token_latency_ms", "mean"))
         extra_curves["request_latency_min"].append(_stat("request_latency", "min"))
         extra_curves["request_latency_max"].append(_stat("request_latency", "max"))
         extra_curves["measured_rps"].append(_stat("requests_per_second", "mean"))
@@ -206,5 +225,4 @@ def _extract_extra_metrics(node: TestBaseNode) -> dict[str, Any]:
         extra_curves["errored_requests"].append(request_totals.get("errored", 0))
         extra_curves["intended_concurrency"].append(strategy.get("streams"))
 
-    extra["_extra_curves"] = extra_curves
-    return extra
+    return extra, extra_curves

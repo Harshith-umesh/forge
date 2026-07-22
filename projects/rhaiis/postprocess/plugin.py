@@ -18,6 +18,13 @@ from .parser import RhaiisParser
 
 logger = logging.getLogger(__name__)
 
+# CSV columns whose KPI values are in seconds but the dashboard expects milliseconds.
+# GuideLLM parser converts `*_ms` metrics to seconds; the old CSV pipeline kept them in ms.
+_SECONDS_TO_MS_COLUMNS = frozenset({
+    "ttft_median", "ttft_p95", "ttft_p99", "ttft_p1", "ttft_p999", "ttft_mean",
+    "tpot_median", "tpot_p95", "tpot_p99", "tpot_p1", "tpot_p999",
+    "itl_median", "itl_p95", "itl_p99", "itl_p1", "itl_p999", "itl_mean",
+})
 
 # KPI ID → dashboard CSV column name mapping (complete)
 _KPI_TO_CSV_COLUMN = {
@@ -144,6 +151,14 @@ class RhaiisPlugin(PostProcessingPlugin):
             row: dict[str, Any] = {col: "" for col in FIELDNAMES}
             # Populate all metric columns from KPI values
             row.update(metrics)
+            # Convert latency columns from seconds back to ms for dashboard compat
+            for col in _SECONDS_TO_MS_COLUMNS:
+                val = row.get(col)
+                if val not in ("", None):
+                    try:
+                        row[col] = float(val) * 1000.0
+                    except (TypeError, ValueError):
+                        pass
             # Populate metadata columns from labels
             row["run"] = run_name
             row["accelerator"] = acc
