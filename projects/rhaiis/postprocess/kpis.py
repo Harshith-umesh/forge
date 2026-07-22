@@ -115,6 +115,7 @@ class RhaiisKpiHandler:
                         "kpi_id": kpi_id,
                         "value": value,
                         "unit": unit,
+                        "run_id": r.test_base_path,
                         "run_path": r.test_base_path,
                         "timestamp": ts,
                         "labels": labels,
