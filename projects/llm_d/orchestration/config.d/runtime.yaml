@@ -8,6 +8,7 @@ namespace: forge-llm-d
 kserve:
   dry_run: false
   wait_readiness: true
+  wait_long_scheduling: false
 kueue:
   enabled: false
   queue_name: default-queue
