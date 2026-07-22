@@ -40,8 +40,8 @@ spec:
                     clusterless: true
                     exclusive: false
                     pipeline: "nightly"
-                    env:
-                      NIGHTLY_SOURCE: "ghcr"
+                    configOverrides:
+                      nightly.source: "ghcr"
                     executionEngine:
                       forge:
                         project: "mcp_gateway"

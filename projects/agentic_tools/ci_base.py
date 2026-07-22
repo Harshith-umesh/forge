@@ -127,19 +127,14 @@ class CIApp:
         if isinstance(vault_config, list):
             return vault_config
         all_vaults: list[str] = []
-        for category, vaults in vault_config.items():
-            if category == "skip_phases":
-                continue
+        for _category, vaults in vault_config.items():
             if isinstance(vaults, list):
                 all_vaults.extend(vaults)
         return list(dict.fromkeys(all_vaults))
 
     def should_init_vaults(self, phase: str) -> bool:
-        """Return False to skip vault init for resolve and phases listed in vaults.skip_phases."""
-        if phase == "resolve-fournos-config":
-            return False
-        skip_phases = config.project.get_config("vaults.skip_phases", [], print=False)
-        return phase not in skip_phases
+        """Return False to skip vault init for the resolve phase."""
+        return phase != "resolve-fournos-config"
 
     def register_extra_commands(self, group: click.Group) -> None:
         """Hook to register additional click commands on the group.

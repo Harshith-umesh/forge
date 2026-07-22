@@ -1,4 +1,14 @@
 nightly:
+  sources:
+    ghcr:
+      receiver: "projects.mcp_gateway.nightly_resolvers.ghcr_receiver.GHCRReceiver"
+      repo: "Kuadrant/mcp-gateway"
+      image: "kuadrant/mcp-gateway"
+      mlflow_experiment: "mcp-gw-cpt-ghcr"
+  verifier: "projects.caliper.orchestration.mlflow_verifier.CaliperMLflowVerifier"
+  mlflow_verifier:
+    version_pattern: "-v(.+?)-\\d{8}-\\d{6}$"
+    strip_prefix: "sha-"
   cluster: "forge-smoke-testing"
   version_key: "infrastructure.mcp_gateway_version"
   pipeline: "forge-full"
@@ -12,8 +22,6 @@ vaults:
   - psap-forge-mlflow-export
   prepare: []
   test: []
-  skip_phases:
-  - nightly
 
 notifications:
   slack:
