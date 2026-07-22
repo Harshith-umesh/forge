@@ -267,6 +267,197 @@ def capture_replicaset_description(args, ctx):
         return f"Failed to capture ReplicaSet description: {e}"
 
 
+@always
+@task
+def capture_final_llmisvc_yaml(args, ctx):
+    """Capture the final YAML state of the LLMInferenceService"""
+
+    if args.dry_run:
+        return "Dry-run, nothing to do"
+
+    try:
+        # Ensure artifacts directory exists
+        artifacts_dir = args.artifact_dir / "artifacts"
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+        # Use LLMInferenceService name from context
+        service_name = getattr(ctx, "inference_service_name", None)
+        if not service_name:
+            return "No service name available"
+
+        # Capture final YAML state
+        result = oc(
+            "get",
+            "llminferenceservice",
+            service_name,
+            "-n",
+            args.namespace,
+            "-o",
+            "yaml",
+            log_stdout=False,
+            check=False,
+        )
+
+        llmisvc_yaml_path = artifacts_dir / "llmisvc_final.yaml"
+        with open(llmisvc_yaml_path, "w", encoding="utf-8") as f:
+            f.write(result.stdout)
+
+        return f"Captured final LLMInferenceService YAML to {llmisvc_yaml_path}"
+
+    except Exception as e:
+        return f"Failed to capture final LLMInferenceService YAML: {e}"
+
+
+@always
+@task
+def capture_pod_status(args, ctx):
+    """Capture pod status for debugging"""
+
+    if args.dry_run:
+        return "Dry-run, nothing to do"
+
+    try:
+        # Ensure artifacts directory exists
+        artifacts_dir = args.artifact_dir / "artifacts"
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+        # Use selector from context
+        selector = getattr(ctx, "selector", None)
+        if not selector:
+            return "No selector available"
+
+        # Capture pod status with wide output
+        result = oc(
+            "get",
+            "pods",
+            "-l",
+            selector,
+            "-n",
+            args.namespace,
+            "-o",
+            "wide",
+            log_stdout=False,
+            check=False,
+        )
+
+        pod_status_path = artifacts_dir / "pod_status.txt"
+        with open(pod_status_path, "w", encoding="utf-8") as f:
+            f.write(result.stdout)
+
+        return f"Captured pod status to {pod_status_path}"
+
+    except Exception as e:
+        return f"Failed to capture pod status: {e}"
+
+
+@always
+@task
+def capture_pod_descriptions(args, ctx):
+    """Capture pod descriptions for debugging"""
+
+    if args.dry_run:
+        return "Dry-run, nothing to do"
+
+    try:
+        # Ensure artifacts directory exists
+        artifacts_dir = args.artifact_dir / "artifacts"
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+        # Use selector from context
+        selector = getattr(ctx, "selector", None)
+        if not selector:
+            return "No selector available"
+
+        # Get pod names
+        pod_result = oc(
+            "get",
+            "pods",
+            "-l",
+            selector,
+            "-n",
+            args.namespace,
+            "-o",
+            "jsonpath={.items[*].metadata.name}",
+            log_stdout=False,
+            check=False,
+        )
+
+        pod_names = pod_result.stdout.strip().split()
+        if not pod_names or not pod_result.stdout.strip():
+            pod_desc_path = artifacts_dir / "pod_descriptions.txt"
+            with open(pod_desc_path, "w", encoding="utf-8") as f:
+                f.write("No pods found for the service")
+            return f"No pods found, wrote empty file to {pod_desc_path}"
+
+        # Describe each pod
+        pod_descriptions = []
+        for pod_name in pod_names:
+            describe_result = oc(
+                "describe",
+                "pod",
+                pod_name,
+                "-n",
+                args.namespace,
+                log_stdout=False,
+                check=False,
+            )
+            pod_descriptions.append(
+                f"=== Description for pod: {pod_name} ===\n{describe_result.stdout}"
+            )
+
+        # Save all pod descriptions
+        pod_desc_path = artifacts_dir / "pod_descriptions.txt"
+        with open(pod_desc_path, "w", encoding="utf-8") as f:
+            f.write("\n\n".join(pod_descriptions))
+
+        return f"Captured descriptions for {len(pod_names)} pods to {pod_desc_path}"
+
+    except Exception as e:
+        return f"Failed to capture pod descriptions: {e}"
+
+
+@always
+@task
+def capture_pod_yaml(args, ctx):
+    """Capture pod YAML definitions for debugging"""
+
+    if args.dry_run:
+        return "Dry-run, nothing to do"
+
+    try:
+        # Ensure artifacts directory exists
+        artifacts_dir = args.artifact_dir / "artifacts"
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+        # Use selector from context
+        selector = getattr(ctx, "selector", None)
+        if not selector:
+            return "No selector available"
+
+        # Capture all pod YAMLs
+        result = oc(
+            "get",
+            "pods",
+            "-l",
+            selector,
+            "-n",
+            args.namespace,
+            "-o",
+            "yaml",
+            log_stdout=False,
+            check=False,
+        )
+
+        pod_yaml_path = artifacts_dir / "pod_definitions.yaml"
+        with open(pod_yaml_path, "w", encoding="utf-8") as f:
+            f.write(result.stdout)
+
+        return f"Captured pod YAML definitions to {pod_yaml_path}"
+
+    except Exception as e:
+        return f"Failed to capture pod YAML: {e}"
+
+
 @task
 def query_service_status(args, ctx):
     """Query the status of the LLMInferenceService"""
