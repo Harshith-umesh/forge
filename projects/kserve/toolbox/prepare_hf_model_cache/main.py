@@ -324,7 +324,7 @@ def wait_for_pods_running(args, ctx):
     return "All pods past Pending state"
 
 
-@retry(attempts=30, delay=30, backoff=1.0)
+@retry(attempts=120, delay=30, backoff=1.0)
 @task
 def wait_for_download(args, ctx):
     """Wait for the download job to complete"""
