@@ -104,7 +104,9 @@ def log_execution_banner(function_args: dict = None, log_file: str = None):
     logger.info("")
 
 
-def log_completion_banner(function_args: dict = None, status: str = "SUCCESS"):
+def log_completion_banner(
+    function_args: dict = None, status: str = "SUCCESS", start_time: float = None
+):
     """Log the completion banner with function info and completion status"""
     frame = inspect.currentframe()
     caller_frame = frame.f_back.f_back
@@ -118,6 +120,24 @@ def log_completion_banner(function_args: dict = None, status: str = "SUCCESS"):
     logger.info(f"| {rel_filename}")
     logger.info(f"| STATUS: {status}")
     logger.info(f"| COMMAND: {function_name}")
+
+    # Add duration if start_time is provided
+    if start_time is not None:
+        end_time = time.time()
+        duration = end_time - start_time
+        minutes, seconds = divmod(duration, 60)
+        hours, minutes = divmod(minutes, 60)
+
+        # Format duration nicely
+        if hours > 0:
+            duration_str = f"{int(hours)}h {int(minutes)}m {int(seconds)}s"
+        elif minutes > 0:
+            duration_str = f"{int(minutes)}m {int(seconds)}s"
+        else:
+            duration_str = f"{duration:.1f}s"
+
+        logger.info(f"| DURATION: {duration_str}")
+
     logger.info(f"| ARTIFACTS: {env.ARTIFACT_DIR}")
     logger.info("===============================================================================")
     logger.info("")

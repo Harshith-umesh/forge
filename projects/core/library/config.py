@@ -210,7 +210,7 @@ class Config:
 
         for key, value in values.items():
             if key == "extends":
-                for extend_name in value:
+                for extend_name in value or []:
                     self.apply_preset(extend_name)
                 continue
 

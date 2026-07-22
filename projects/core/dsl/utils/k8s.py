@@ -23,6 +23,7 @@ def oc(
     timeout_seconds: float | None = 300,
     log_stdout: bool = True,
     log_stderr: bool = True,
+    stdout_dest: Path | None = None,
 ) -> shell.CommandResult:
     """Run an oc command.
 
@@ -33,6 +34,7 @@ def oc(
         timeout_seconds: Command timeout (not supported)
         log_stdout: Log stdout to console (default True)
         log_stderr: Log stderr to console (default True)
+        stdout_dest: Optional file path to write stdout to
 
     Returns:
         CommandResult with execution details
@@ -45,6 +47,7 @@ def oc(
         shell=False,
         log_stdout=log_stdout,
         log_stderr=log_stderr,
+        stdout_dest=stdout_dest,
     )
 
 
@@ -266,6 +269,7 @@ def capture_pod_logs(*, namespace: str, output_dir: Path) -> None:
     logger.info("Capturing logs from %d pods in %s", len(pod_names), namespace)
 
     for pod_name in pod_names:
+        log_file = output_dir / f"{pod_name}.log"
         log_result = oc(
             "logs",
             pod_name,
@@ -274,11 +278,10 @@ def capture_pod_logs(*, namespace: str, output_dir: Path) -> None:
             "--all-containers=true",
             check=False,
             log_stdout=False,
+            stdout_dest=log_file,
         )
-        log_file = output_dir / f"{pod_name}.log"
-        if log_result.returncode == 0 and log_result.stdout:
-            log_file.write_text(log_result.stdout, encoding="utf-8")
-        else:
+        # If command failed and no output was written, write error info
+        if log_result.returncode != 0 and (not log_file.exists() or log_file.stat().st_size == 0):
             log_file.write_text(
                 f"(failed to collect logs: exit_code={log_result.returncode})\n"
                 f"{log_result.stderr or ''}",

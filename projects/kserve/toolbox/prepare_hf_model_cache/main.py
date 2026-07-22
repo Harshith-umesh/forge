@@ -11,7 +11,6 @@ from projects.core.dsl.utils import (
     slugify_identifier,
     truncate_k8s_name,
     write_json,
-    write_text,
     write_yaml,
 )
 from projects.core.dsl.utils.k8s import (
@@ -365,7 +364,7 @@ def capture_download_artifacts(args, ctx):
     )
 
     # Capture PVC YAML to file (not logs)
-    pvc_result = oc(
+    oc(
         "get",
         "persistentvolumeclaim",
         cache_spec["pvc_name"],
@@ -376,12 +375,11 @@ def capture_download_artifacts(args, ctx):
         "--ignore-not-found=true",
         check=False,
         log_stdout=False,
+        stdout_dest=artifact_dir / "pvc.yaml",
     )
-    if pvc_result.returncode == 0 and pvc_result.stdout:
-        write_text(artifact_dir / "pvc.yaml", pvc_result.stdout)
 
     # Capture Job YAML to file (not logs)
-    job_result = oc(
+    oc(
         "get",
         "job",
         cache_spec["download_job_name"],
@@ -392,14 +390,13 @@ def capture_download_artifacts(args, ctx):
         "--ignore-not-found=true",
         check=False,
         log_stdout=False,
+        stdout_dest=artifact_dir / "job.yaml",
     )
-    if job_result.returncode == 0 and job_result.stdout:
-        write_text(artifact_dir / "job.yaml", job_result.stdout)
 
     # Capture pod logs and YAML to files (not console)
     for pod_name in job_pod_names(cache_spec["download_job_name"], cache_spec["namespace"]):
         # Get pod YAML to file
-        pod_result = oc(
+        oc(
             "get",
             "pod",
             pod_name,
@@ -410,21 +407,19 @@ def capture_download_artifacts(args, ctx):
             "--ignore-not-found=true",
             check=False,
             log_stdout=False,
+            stdout_dest=artifact_dir / f"{pod_name}.yaml",
         )
-        if pod_result.returncode == 0 and pod_result.stdout:
-            write_text(artifact_dir / f"{pod_name}.yaml", pod_result.stdout)
 
         # Get pod logs to file
-        log_result = oc(
+        oc(
             "logs",
             pod_name,
             "-n",
             cache_spec["namespace"],
             check=False,
             log_stdout=False,
+            stdout_dest=artifact_dir / f"{pod_name}.log",
         )
-        if log_result.returncode == 0 and log_result.stdout:
-            write_text(artifact_dir / f"{pod_name}.log", log_result.stdout)
 
     return f"Artifacts captured for {cache_spec['pvc_name']}"
 

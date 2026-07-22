@@ -108,11 +108,16 @@ def _display_error_summary(e: Exception) -> None:
     for line in summary_lines:
         logger.error(line)
 
-    if env.ARTIFACT_DIR is None:
-        logging.error("env.ARTIFACT_DIR not set, cannot generate the error summary file")
-    else:
-        # Write to FAILURES file
-        _write_error_summary_to_file(summary_lines)
+    # Attempt to write to FAILURES file if environment is initialized
+    try:
+        if env.ARTIFACT_DIR is not None:
+            _write_error_summary_to_file(summary_lines)
+        else:
+            logger.warning(
+                "Environment not fully initialized - error summary displayed above but not saved to file"
+            )
+    except Exception as write_error:
+        logger.warning(f"Could not save error summary to file: {write_error}")
 
     logger.error("=" * 80)
 
