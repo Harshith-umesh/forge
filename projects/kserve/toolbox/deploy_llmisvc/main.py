@@ -16,7 +16,7 @@ from projects.core.dsl import (
     retry,
     task,
 )
-from projects.core.dsl.utils import write_text
+from projects.core.dsl.utils import slugify_identifier, write_text
 from projects.core.dsl.utils.k8s import (
     oc,
     oc_apply,
@@ -77,6 +77,17 @@ def copy_manifest_to_src(args, ctx):
     # Load manifest to extract the service name
     manifest = load_yaml(original_path)
     ctx.inference_service_name = manifest["metadata"]["name"]
+
+    # Validate that the service name is Kubernetes compliant
+    normalized_name = slugify_identifier(ctx.inference_service_name)
+    if normalized_name != ctx.inference_service_name:
+        raise ValueError(
+            f"LLMInferenceService name '{ctx.inference_service_name}' is not Kubernetes compliant. "
+            f"Expected: '{normalized_name}'. "
+            f"Names must be lowercase, contain only letters, numbers, and hyphens, "
+            f"and be 63 characters or less."
+        )
+
     ctx.selector = f"app.kubernetes.io/name={ctx.inference_service_name}"
 
     # Ensure the src directory exists
