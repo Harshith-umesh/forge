@@ -36,6 +36,11 @@ accelerator_env_vars:
   amd:
     VLLM_ROCM_USE_AITER: "1"
 
+s3:
+  bucket: psap-dashboard-data
+  vault: psap-forge-dashboard-s3
+  credentials_file: aws.credentials
+
 warmup:
   rate: 200
   max_seconds: 60
