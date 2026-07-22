@@ -11,6 +11,7 @@ from projects.rhaiis.orchestration import runtime_config
 logger = logging.getLogger(__name__)
 
 _K8S_NAME_MAX = 63
+_warnings: list[str] = []
 
 
 
@@ -29,13 +30,20 @@ def run(
     namespace: str,
     deployment_name: str | None = None,
 ) -> int:
-    return run_and_postprocess(
+    ret = run_and_postprocess(
         do_test,
         model_key=model_key,
         workload_keys=workload_keys,
         namespace=namespace,
         deployment_name=deployment_name,
     )
+
+    try:
+        _sync_postprocessed_dashboard_csv(model_key, workload_keys)
+    except Exception:
+        logger.warning("Dashboard CSV S3 sync after postprocessing failed", exc_info=True)
+
+    return ret
 
 
 def do_test(
@@ -94,7 +102,16 @@ def _run_test(
     vllm_args = runtime_config.merge_vllm_args(vllm_defaults, model_cfg, first_workload)
     env_vars = runtime_config.merge_env_vars(accelerator, model_cfg)
 
-    _create_test_labels(model_key, workload_keys[0], accelerator, vllm_args)
+    from projects.core.library import config as _cfg
+    version = _cfg.project.get_config("tests.rhaiis.version", "")
+
+    _create_test_labels(
+        model_key, workload_keys[0], accelerator, vllm_args,
+        hf_model_id=model_cfg["hf_model_id"],
+        version=version,
+        vllm_image=vllm_image,
+        cluster_tag=cluster_tag,
+    )
 
     from projects.guidellm.toolbox.run_guidellm_benchmark.main import (
         wait_guidellm_benchmark_task,
@@ -102,7 +119,6 @@ def _run_test(
     from projects.rhaiis.toolbox.deploy_kserve_isvc.main import run as deploy_kserve_isvc
     from projects.rhaiis.toolbox.wait_isvc_ready.main import run as wait_isvc_ready
 
-    from projects.core.library import config as _cfg
     run_uuid = _cfg.project.get_config("tests.rhaiis.run_uuid", "") or str(_uuid_mod.uuid4())
     logger.info("Run UUID for this job: %s", run_uuid)
 
@@ -137,8 +153,9 @@ def _run_test(
                 run_uuid=run_uuid, restrict_profiles=workload_keys or None,
             )
         except Exception:
-            logger.warning("Standalone analysis failed; continuing", exc_info=True)
-        return 0
+            logger.warning("Standalone analysis failed", exc_info=True)
+            _warnings.append("Standalone analysis failed")
+        return 1 if _warnings else 0
 
     benchmark_timeout = benchmark_cfg.get("timeout", 14400)
     wait_guidellm_benchmark_task._retry_config["attempts"] = max(1, benchmark_timeout // 10)
@@ -265,7 +282,19 @@ def _run_test(
     try:
         _upload_predictor_log(run_uuid)
     except Exception:
-        logger.warning("Predictor log upload failed; continuing", exc_info=True)
+        logger.warning("Predictor log upload failed", exc_info=True)
+        _warnings.append("Predictor log upload failed")
+
+    if _warnings:
+        logger.warning("Test completed with %d warning(s): %s", len(_warnings), "; ".join(_warnings))
+        from projects.rhaiis.orchestration.notifications import send_pipeline_warning
+        send_pipeline_warning(
+            warnings=list(_warnings),
+            model_key=model_key,
+            workload_keys=workload_keys,
+        )
+        _warnings.clear()
+        return 1
 
     return 0
 
@@ -301,14 +330,14 @@ def _run_workload_benchmark(
 
     run_benchmark = config.project.get_config("tests.rhaiis.run_benchmark", True)
 
-    main_benchmark_dir = None
     if not run_benchmark:
         logger.info("run_benchmark=false, skipping main benchmark")
         try:
             from projects.rhaiis.orchestration.analysis import run_standalone_analysis
             run_standalone_analysis(model_cfg, accelerator_key, vllm_args, run_uuid=run_uuid)
         except Exception:
-            logger.warning("Standalone analysis failed; continuing", exc_info=True)
+            logger.warning("Standalone analysis failed", exc_info=True)
+            _warnings.append(f"Standalone analysis failed for {workload_key}")
     else:
         logger.info("Running benchmark at rates=%s for workload=%s", rates, workload_key)
 
@@ -322,7 +351,6 @@ def _run_workload_benchmark(
             max_seconds=max_seconds,
         )
 
-        pre_index = env.next_artifact_index()
         run_guidellm_benchmark(
             endpoint_url=f"{endpoint_url}/v1",
             name=_guidellm_job_name("guidellm-bench", workload_key, deployment_name),
@@ -333,34 +361,34 @@ def _run_workload_benchmark(
             guidellm_args=guidellm_args,
             hf_token_secret=benchmark_cfg.get("hf_token_secret", ""),
         )
-        from pathlib import Path
-        candidates = sorted(Path(env.ARTIFACT_DIR).glob(f"{pre_index:03d}__*"))
-        if candidates:
-            main_benchmark_dir = candidates[0]
 
-    if main_benchmark_dir:
-        try:
-            _generate_psap_payload(
-                model_cfg, accelerator_key, vllm_image, vllm_args, workload_key,
-                run_uuid=run_uuid, benchmark_dir=main_benchmark_dir,
-            )
-        except Exception:
-            logger.warning("PSAP payload generation failed; continuing", exc_info=True)
-
-        try:
-            _generate_and_sync_dashboard_csv(model_cfg, accelerator_key, workload_key, vllm_args, run_uuid=run_uuid)
-        except Exception:
-            logger.warning("Dashboard CSV generation/sync failed; continuing", exc_info=True)
+    # Dashboard CSV generation and S3 sync is handled by the Caliper
+    # postprocessing pipeline (kpis_to_csv step) + _sync_postprocessed_dashboard_csv
 
 
 def _create_test_labels(
-    model_key: str, workload_key: str, accelerator: str, vllm_args: dict
+    model_key: str,
+    workload_key: str,
+    accelerator: str,
+    vllm_args: dict,
+    *,
+    hf_model_id: str = "",
+    version: str = "",
+    vllm_image: str = "",
+    cluster_tag: str = "",
 ) -> None:
+    _, image_tag = runtime_config.split_image_tag(vllm_image) if vllm_image else ("", "")
+    runtime_args = "; ".join(f"{k}: {v}" for k, v in vllm_args.items())
     labels = {
         "model_key": model_key,
         "workload_key": workload_key,
         "accelerator": accelerator,
         "tensor_parallel_size": str(vllm_args.get("tensor-parallel-size", 1)),
+        "hf_model_id": hf_model_id,
+        "version": version,
+        "image_tag": image_tag,
+        "cluster_tag": cluster_tag,
+        "runtime_args": runtime_args,
     }
     write_test_labels(env.ARTIFACT_DIR, labels)
     logger.info("Created test labels: %s", labels)
@@ -407,92 +435,30 @@ def _set_mlflow_metadata(
     logger.info("Set MLflow tags: %s", list(tags.keys()))
 
 
-def _generate_psap_payload(
-    model_cfg: dict,
-    accelerator: str,
-    vllm_image: str,
-    vllm_args: dict,
-    workload_key: str,
-    *,
-    run_uuid: str = "",
-    benchmark_dir: Path | None = None,
-) -> None:
-    from pathlib import Path
-
-    from projects.rhaiis.postprocess.parser import generate_psap_payload, write_psap_payload
-
-    if benchmark_dir:
-        benchmarks_json = benchmark_dir / "artifacts" / "results" / "benchmarks.json"
-    else:
-        matches = list(
-            Path(env.ARTIFACT_DIR).glob("*__run_guidellm_benchmark/artifacts/results/benchmarks.json")
-        )
-        benchmarks_json = matches[-1] if matches else None
-
-    if not benchmarks_json or not benchmarks_json.exists():
-        logger.warning(
-            "benchmarks.json not found, skipping PSAP payload"
-        )
-        return
-
-    payload = generate_psap_payload(
-        benchmarks_json_path=benchmarks_json,
-        model_id=model_cfg["hf_model_id"],
-        vllm_image=vllm_image,
-        vllm_args=vllm_args,
-        accelerator=accelerator,
-        workload_key=workload_key,
-        run_uuid=run_uuid,
-    )
-    output_dir = Path(env.ARTIFACT_DIR) / "artifacts" / "results"
-    write_psap_payload(
-        payload=payload,
-        output_dir=output_dir,
-        accelerator=accelerator,
-        model_id=model_cfg["hf_model_id"],
-        workload_key=workload_key,
-    )
-
-
-def _generate_and_sync_dashboard_csv(
-    model_cfg: dict,
-    accelerator_key: str,
-    workload_key: str,
-    vllm_args: dict,
-    *,
-    run_uuid: str = "",
-) -> None:
+def _sync_postprocessed_dashboard_csv(model_key: str, workload_keys: list[str]) -> None:
+    """Find the dashboard CSV generated by Caliper kpis_to_csv and sync to S3."""
     from pathlib import Path
 
     from projects.core.library import config
-    from projects.rhaiis.postprocess.csv_export import find_psap_files, generate_dashboard_csv
-
-    # Use chip family only (e.g. "H200") — cluster_tag is only for run ID in the CSV
-    accelerator = accelerator_key.split("_")[0].upper() if "_" in accelerator_key else accelerator_key.upper()
-
-    psap_files = find_psap_files(Path(env.ARTIFACT_DIR))
-    if not psap_files:
-        logger.warning("No PSAP JSON files found, skipping dashboard CSV")
-        return
-
-    version = config.project.get_config("tests.rhaiis.version", "")
-    if not version:
-        logger.info("No version configured, skipping dashboard CSV generation")
-        return
-
-    csv_path = None
-    for psap_file in psap_files:
-        output_path = psap_file.parent / f"dashboard_{psap_file.stem}.csv"
-        csv_path = generate_dashboard_csv(psap_file, version=version, output_path=output_path, run_uuid=run_uuid)
-        logger.info("Generated dashboard CSV: %s", csv_path)
-
-    if not csv_path:
-        return
 
     csv_dashboard_cfg = config.project.get_config("caliper.postprocess.csv_dashboard", {})
     if not csv_dashboard_cfg or not csv_dashboard_cfg.get("enabled", False):
         logger.info("Dashboard CSV S3 sync not enabled")
         return
+
+    # Find the CSV produced by the kpis_to_csv step in the postprocessing directory
+    postprocess_dirs = sorted(Path(env.ARTIFACT_DIR).glob("*__postprocessing"))
+    if not postprocess_dirs:
+        logger.info("No postprocessing directory found, skipping dashboard CSV sync")
+        return
+
+    kpis_to_csv_output = config.project.get_config("caliper.postprocess.kpi.kpis_to_csv.output", "dashboard.csv")
+    csv_path = postprocess_dirs[-1] / kpis_to_csv_output
+    if not csv_path.exists():
+        logger.info("Dashboard CSV not found at %s, skipping sync", csv_path)
+        return
+
+    logger.info("Found postprocessed dashboard CSV: %s", csv_path)
 
     from projects.rhaiis.postprocess.s3_dashboard import sync_csv_to_s3
 
@@ -507,13 +473,22 @@ def _generate_and_sync_dashboard_csv(
     )
     logger.info("Dashboard CSV sync result: %s", sync_result)
 
+    version = config.project.get_config("tests.rhaiis.version", "")
     compare_version = config.project.get_config("tests.rhaiis.compare_version", "")
-    if not compare_version:
+    if not compare_version or not version:
         return
 
-    from projects.rhaiis.orchestration.analysis import run_regression_check
-    run_regression_check(csv_path, compare_version, version, model_cfg, accelerator, run_uuid=run_uuid, vllm_args=vllm_args)
+    model_cfg = runtime_config.get_model(model_key)
+    accelerator = runtime_config.get_accelerator()
+    vllm_defaults = runtime_config.get_vllm_defaults()
+    first_workload = runtime_config.get_workload(workload_keys[0])
+    vllm_args = runtime_config.merge_vllm_args(vllm_defaults, model_cfg, first_workload)
 
+    from projects.rhaiis.orchestration.analysis import run_regression_check
+    run_regression_check(
+        csv_path, compare_version, version, model_cfg, accelerator,
+        run_uuid="", vllm_args=vllm_args,
+    )
 
 
 def _upload_predictor_log(run_uuid: str) -> None:

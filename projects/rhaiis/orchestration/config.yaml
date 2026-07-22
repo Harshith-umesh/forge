@@ -43,8 +43,11 @@ caliper:
       artifacts_to_kpis:
         enabled: true
         output: kpis.json
+      kpis_to_csv:
+        enabled: true
+        output: dashboard.csv
     csv_dashboard:
-      enabled: false
+      enabled: true
       s3_key: staging/rhaiis-dashboard/consolidated_dashboard.csv
     analyze:
       enabled: false
