@@ -116,7 +116,7 @@ def install_service_mesh_instance(args, ctx):
     if "wait_for_ready" in step:
         spec = step["wait_for_ready"]
         ctx.mesh_ready_spec = spec
-        return (False, "Service Mesh instance applied, readiness checked in next task")
+        return "Service Mesh instance applied, readiness checked in next task"
 
     return f"Service Mesh instance applied from {kustomize_path}"
 
