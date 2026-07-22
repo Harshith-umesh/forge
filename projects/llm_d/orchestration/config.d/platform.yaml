@@ -86,6 +86,9 @@ inference_service:
   name: llm-d
   template: manifests/llminferenceservice.yaml
   workload_deployment_name_suffix: -kserve
+  scheduler:
+    node_selector:
+      nvidia.com/gpu.present: "true"
 
 artifacts:
   capture_namespace_events: true

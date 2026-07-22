@@ -490,17 +490,19 @@ def get_deployment_profile() -> dict[str, Any]:
 
     resolved_profile = deep_merge(resolved_profile, scheduler_content)
 
-    # force the scheduler to run on a GPU node.
-    # 'gpu.present: true' doesn't work on AKS/CKS
-    scheduler_node_selector = {
-        "scheduler": {
-            "template": {
-                "nodeSelector": {"nvidia.com/gpu.deploy.container-toolkit": "true"},
+    # Configure scheduler node selector from platform config
+    platform_node_selector = config.project.get_config(
+        "platform.inference_service.scheduler.node_selector"
+    )
+    if platform_node_selector:
+        scheduler_node_selector = {
+            "scheduler": {
+                "template": {
+                    "nodeSelector": platform_node_selector,
+                }
             }
         }
-    }
-
-    resolved_profile = deep_merge(resolved_profile, scheduler_node_selector)
+        resolved_profile = deep_merge(resolved_profile, scheduler_node_selector)
 
     return resolved_profile
 

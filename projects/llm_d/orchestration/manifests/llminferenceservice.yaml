@@ -17,8 +17,6 @@ spec:
       template:
         containers:
         - name: main
-        nodeSelector:
-          nvidia.com/gpu.present: "true"
     route: {}
     gateway: {}
   template:
