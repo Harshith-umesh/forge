@@ -132,6 +132,6 @@ class CaliperMLflowVerifier(NightlyVerifier):
         version = match.group(1)
 
         if self._strip_prefix and version.startswith(self._strip_prefix):
-            return version[len(self._strip_prefix):]
+            return version[len(self._strip_prefix) :]
 
         return version

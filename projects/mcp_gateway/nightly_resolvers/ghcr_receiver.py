@@ -40,7 +40,9 @@ class GHCRReceiver(ImageReceiver):
         self.image = source_cfg["image"]
 
         self._commits_url = f"https://api.github.com/repos/{self.repo}/commits?per_page=20"
-        self._token_url = f"https://ghcr.io/token?service=ghcr.io&scope=repository:{self.image}:pull"
+        self._token_url = (
+            f"https://ghcr.io/token?service=ghcr.io&scope=repository:{self.image}:pull"
+        )
         self._manifest_url = f"https://ghcr.io/v2/{self.image}/manifests/"
 
     def get_latest_version(self) -> str:
