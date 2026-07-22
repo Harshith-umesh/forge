@@ -302,15 +302,8 @@ def extract_results(args, ctx):
             remote_path = f"/results/benchmarks-{run.label}.json"
             local_path = results_dir / f"benchmarks-{run.label}.json"
 
-        result = oc(
-            "cp",
-            f"{ctx.target_namespace}/{copy_pod}:{remote_path}",
-            str(local_path),
-            "-c", "copy-helper",
-            check=False,
-            log_stdout=False,
-        )
-        if result.returncode != 0 or not local_path.exists():
+        local_path = _copy_result_file(ctx.target_namespace, copy_pod, remote_path, local_path)
+        if local_path is None:
             raise RuntimeError(f"No results found for {ctx.benchmark_name} run {run.label}")
 
         extracted_files.append(
@@ -331,6 +324,65 @@ def extract_results(args, ctx):
     )
 
     return f"Extracted results for {ctx.benchmark_name}"
+
+
+def _copy_result_file(namespace: str, pod: str, remote_path: str, local_path) -> "Path | None":
+    """Copy a result file from a pod, compressing first to handle large files.
+
+    Falls back to direct ``oc cp`` for small files.
+    """
+    import gzip
+    import shutil
+
+    # Try direct oc cp first
+    result = oc(
+        "cp",
+        f"{namespace}/{pod}:{remote_path}",
+        str(local_path),
+        "-c", "copy-helper",
+        check=False,
+        log_stdout=False,
+    )
+    if result.returncode == 0 and local_path.exists() and local_path.stat().st_size > 0:
+        return local_path
+
+    logging.getLogger(__name__).info(
+        "Direct oc cp failed (rc=%d), retrying with gzip compression", result.returncode,
+    )
+
+    # Compress inside the pod, copy the gz, decompress locally
+    gz_remote = f"{remote_path}.gz"
+    compress = oc(
+        "exec", pod, "-n", namespace, "-c", "copy-helper", "--",
+        "gzip", "-kf", remote_path,
+        check=False,
+    )
+    if compress.returncode != 0:
+        logging.getLogger(__name__).warning("gzip inside pod failed (rc=%d)", compress.returncode)
+        return None
+
+    local_gz = local_path.parent / f"{local_path.name}.gz"
+    cp_result = oc(
+        "cp",
+        f"{namespace}/{pod}:{gz_remote}",
+        str(local_gz),
+        "-c", "copy-helper",
+        check=False,
+        log_stdout=False,
+    )
+    if cp_result.returncode != 0 or not local_gz.exists() or local_gz.stat().st_size == 0:
+        logging.getLogger(__name__).warning("oc cp of gzipped file failed")
+        local_gz.unlink(missing_ok=True)
+        return None
+
+    with gzip.open(local_gz, "rb") as f_in, open(local_path, "wb") as f_out:
+        shutil.copyfileobj(f_in, f_out)
+    local_gz.unlink(missing_ok=True)
+
+    if local_path.exists() and local_path.stat().st_size > 0:
+        return local_path
+
+    return None
 
 
 @task
