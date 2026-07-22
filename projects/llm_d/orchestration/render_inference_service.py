@@ -197,7 +197,6 @@ def _render_standard_deployment(
     name = slugify_identifier(name)
     name = truncate_k8s_name(name, max_length=25)
     manifest["metadata"]["name"] = name
-
     manifest["spec"]["replicas"] = deployment_profile["replicas"]
 
     serving_container = manifest["spec"]["template"]["containers"][0]
