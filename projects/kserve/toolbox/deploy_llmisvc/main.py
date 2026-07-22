@@ -37,6 +37,7 @@ def run(
     inference_service_manifest_path: str,
     gateway_status_address_name: str | None = "gateway-external",
     dry_run: bool = False,
+    wait_pods_scheduled: bool = False,
 ) -> str:
     """
     Deploy an LLMInferenceService and wait for its endpoint.
@@ -46,6 +47,7 @@ def run(
         inference_service_manifest_path: Path to the InferenceService YAML manifest file
         gateway_status_address_name: Gateway status address name for endpoint resolution
         dry_run: If True, only prepare the manifest without deploying
+        wait_pods_scheduled: If True, wait for all pods to be scheduled before checking service readiness
     """
 
     ctx = execute_tasks(locals())
@@ -519,6 +521,40 @@ def query_service_message(args, ctx):
             return f"Failed to parse Ready condition: {e}"
     else:
         return "No Ready condition found in status"
+
+
+@retry(attempts=999999, delay=30, backoff=1.0)
+@task
+def wait_pods_scheduled(args, ctx):
+    """Wait for all pods to be scheduled (optional task)"""
+
+    # Check if this task is enabled
+    if not args.wait_pods_scheduled:
+        return "Pod scheduling wait disabled by parameter"
+
+    service_name = ctx.inference_service_name
+
+    # Get pod status using plain text output
+    result = oc(
+        "get",
+        "pods",
+        "-l",
+        ctx.selector,
+        "-n",
+        args.namespace,
+        "--no-headers",
+        check=False,
+        log_stdout=False,
+    )
+
+    if not result.stdout.strip():
+        return False, "No pods found for the service yet"
+
+    # Keep waiting if any pod is Pending
+    if "Pending" in result.stdout:
+        return False, "Waiting for pods to exit Pending state"
+
+    return f"All pods for {service_name} are scheduled successfully"
 
 
 @retry(attempts=90, delay=10, backoff=1.0)
