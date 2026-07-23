@@ -8,7 +8,7 @@ cluster:
   namespace:
     labels:
       app.kubernetes.io/managed-by: forge
-      forge.openshift.io/project: llm_d"
+      forge.openshift.io/project: llm_d
 
 operators:
   openshift-cert-manager-operator:
