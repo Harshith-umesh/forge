@@ -251,9 +251,11 @@ def run_finalizers(
         namespace=namespace,
         capture_namespace_events=capture_namespace_events,
     )
+
     finalizer_exc = _run_finalizer(
         "cleaning up runtime resources",
         cleanup_test_resources,
+        llmisvc_name=llmisvc_name or "llmisvc-name-not-available",
     )
 
     return primary_exc, finalizer_exc
@@ -561,8 +563,12 @@ def write_endpoint_url(*, artifact_dir: Path, endpoint_url: str | None) -> None:
     endpoint_file.write_text(f"{endpoint_url}\n", encoding="utf-8")
 
 
-def cleanup_test_resources() -> None:
-    """Cleanup test resources using the toolbox script"""
+def cleanup_test_resources(llmisvc_name: str | None) -> None:
+    """Cleanup test resources using the toolbox script
+
+    Args:
+        llmisvc_name: The actual LLMInferenceService name that was deployed, or None if deployment failed
+    """
 
     # Skip cleanup when in dry-run mode
     dry_run = config.project.get_config("runtime.kserve.dry_run", False)
@@ -570,19 +576,17 @@ def cleanup_test_resources() -> None:
         logger.info("Skipping cleanup_test_resources - dry-run mode enabled")
         return
 
+    if not llmisvc_name:
+        logger.warning("No LLMInferenceService name provided, cleanup may be incomplete")
+        return
+
     namespace = runtime_config.get_namespace()
     platform = runtime_config.get_platform_config()
-    inference_service = platform["inference_service"]
     smoke = platform["smoke"]
-
-    # Build the actual inference service name (includes deployment profile)
-    base_name = inference_service["name"]
-    deployment_profile_name = runtime_config.get_deployment_profile_name()
-    actual_service_name = f"{base_name}-{deployment_profile_name}"
 
     cleanup_test_resources_command.run(
         namespace=namespace,
-        inference_service_name=actual_service_name,
+        inference_service_name=llmisvc_name,
         smoke_pod_name=smoke["pod_name"],
         benchmark_job_name=runtime_config.get_benchmark_job_name(),
     )
