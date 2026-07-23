@@ -147,7 +147,7 @@ def create_guidellm_resources_task(args, ctx):
     return f"GuideLLM benchmark {ctx.benchmark_name} created"
 
 
-@retry(attempts=180, delay=10, backoff=1.0)
+@retry(attempts=1080, delay=10, backoff=1.0)
 @task
 def wait_guidellm_benchmark_task(args, ctx):
     """Wait for the GuideLLM benchmark job to complete"""
