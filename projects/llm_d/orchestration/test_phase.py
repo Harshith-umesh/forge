@@ -339,6 +339,84 @@ def do_test() -> int:
     return 0
 
 
+def _try_reuse_existing_service(
+    namespace: str, llmisvc_name: str, gateway: dict[str, str], reuse_existing: bool, dry_run: bool
+) -> str | None:
+    """Try to reuse an existing LLMInferenceService if enabled and available.
+
+    Args:
+        namespace: Target namespace
+        llmisvc_name: Name of the LLMInferenceService
+        gateway: Gateway configuration
+        reuse_existing: Whether to attempt reuse
+        dry_run: Whether in dry-run mode
+
+    Returns:
+        Endpoint URL if reuse successful, None otherwise
+    """
+    # Check if we should reuse existing LLMInferenceService
+    if reuse_existing and not dry_run:
+        logger.info(f"Checking if LLMInferenceService {llmisvc_name} already exists")
+
+        # Check if the service already exists
+        try:
+            existing_llmisvc = oc(
+                "get",
+                "llminferenceservice",
+                llmisvc_name,
+                "-n",
+                namespace,
+                check=False,
+            )
+
+            if existing_llmisvc.returncode == 0:
+                logger.info(
+                    f"Found existing LLMInferenceService {llmisvc_name}, attempting to reuse"
+                )
+
+                # Import and use the toolbox function to extract URL
+                # Check if the existing service has a scheduler to determine gateway address
+                from projects.core.dsl.utils.k8s import oc_get_json
+                from projects.kserve.toolbox.deploy_llmisvc import try_resolve_endpoint_url
+
+                existing_service = oc_get_json(
+                    "llminferenceservice", name=llmisvc_name, namespace=namespace
+                )
+                has_scheduler = (
+                    existing_service.get("spec", {}).get("router", {}).get("scheduler") is not None
+                )
+
+                # Use None for status_address_name when existing service has no scheduler
+                gateway_status_address_name = (
+                    gateway["status_address_name"] if has_scheduler else None
+                )
+
+                endpoint_url = try_resolve_endpoint_url(
+                    namespace=namespace,
+                    inference_service_name=llmisvc_name,
+                    gateway_status_address_name=gateway_status_address_name,
+                )
+
+                if endpoint_url:
+                    logger.info(f"Successfully reused existing LLMInferenceService: {endpoint_url}")
+                    return endpoint_url
+                else:
+                    logger.warning(
+                        "Existing LLMInferenceService found but no endpoint URL could be resolved, proceeding with new deployment"
+                    )
+            else:
+                logger.info(
+                    f"LLMInferenceService {llmisvc_name} does not exist, proceeding with new deployment"
+                )
+
+        except Exception as e:
+            logger.warning(
+                f"Error checking for existing LLMInferenceService: {e}, proceeding with new deployment"
+            )
+
+    return None
+
+
 def deploy_inference_service(llmisvc_name: str) -> str:
     """Deploy LLMInferenceService and return endpoint URL and service name.
 
@@ -362,51 +440,16 @@ def deploy_inference_service(llmisvc_name: str) -> str:
     wait_readiness = config.project.get_config("runtime.kserve.wait_readiness")
     reuse_existing = config.project.get_config("runtime.kserve.reuse_existing", False)
 
-    # Check if we should reuse existing LLMInferenceService
-    if reuse_existing and not dry_run:
-        logger.info(f"Checking if LLMInferenceService {llmisvc_name} already exists")
-
-        # Check if the service already exists
-        try:
-            existing_llmisvc = oc(
-                "get",
-                "llminferenceservice",
-                llmisvc_name,
-                "-n",
-                namespace,
-                check=False,
-            )
-
-            if existing_llmisvc.returncode == 0:
-                logger.info(
-                    f"Found existing LLMInferenceService {llmisvc_name}, attempting to reuse"
-                )
-
-                # Import and use the toolbox function to extract URL
-                from projects.kserve.toolbox.deploy_llmisvc import try_resolve_endpoint_url
-
-                endpoint_url = try_resolve_endpoint_url(
-                    namespace=namespace,
-                    inference_service_name=llmisvc_name,
-                    gateway_status_address_name=gateway["status_address_name"],
-                )
-
-                if endpoint_url:
-                    logger.info(f"Successfully reused existing LLMInferenceService: {endpoint_url}")
-                    return endpoint_url
-                else:
-                    logger.warning(
-                        "Existing LLMInferenceService found but no endpoint URL could be resolved, proceeding with new deployment"
-                    )
-            else:
-                logger.info(
-                    f"LLMInferenceService {llmisvc_name} does not exist, proceeding with new deployment"
-                )
-
-        except Exception as e:
-            logger.warning(
-                f"Error checking for existing LLMInferenceService: {e}, proceeding with new deployment"
-            )
+    # Try to reuse existing LLMInferenceService if enabled
+    endpoint_url = _try_reuse_existing_service(
+        namespace=namespace,
+        llmisvc_name=llmisvc_name,
+        gateway=gateway,
+        reuse_existing=reuse_existing,
+        dry_run=dry_run,
+    )
+    if endpoint_url:
+        return endpoint_url
 
     # Step 1: Ensure model cache is ready (skip in dry-run)
     if not dry_run:
@@ -422,6 +465,21 @@ def deploy_inference_service(llmisvc_name: str) -> str:
     # Step 3: Build and write inference service manifest
     manifest_path = _build_inference_service_manifest()
 
+    # Check if the manifest has a scheduler to determine gateway status address name
+    import yaml
+
+    with manifest_path.open(encoding="utf-8") as f:
+        manifest = yaml.safe_load(f)
+
+    has_scheduler = (
+        "spec" in manifest
+        and "router" in manifest["spec"]
+        and "scheduler" in manifest["spec"]["router"]
+    )
+
+    # Use None for status_address_name when deploying without a scheduler
+    gateway_status_address_name = gateway["status_address_name"] if has_scheduler else None
+
     # Step 4: Deploy the service and wait for endpoint
     logger.info("Deploying LLMInferenceService from manifest: %s", manifest_path)
 
@@ -431,7 +489,7 @@ def deploy_inference_service(llmisvc_name: str) -> str:
     endpoint_url = deploy_llmisvc.run(
         namespace=namespace,
         inference_service_manifest_path=str(manifest_path),
-        gateway_status_address_name=gateway["status_address_name"],
+        gateway_status_address_name=gateway_status_address_name,
         dry_run=dry_run,
         wait_pods_scheduled=wait_pods_scheduled,
     )
