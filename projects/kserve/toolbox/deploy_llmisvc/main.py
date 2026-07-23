@@ -259,9 +259,12 @@ def wait_pods_scheduled(args, ctx):
     if not result.stdout.strip():
         return False, "No pods found for the service yet"
 
-    # Keep waiting if any pod is Pending
+    # Keep waiting if any pod is Pending or SchedulingGated
     if "Pending" in result.stdout:
         return False, "Waiting for pods to exit Pending state"
+
+    if "SchedulingGated" in result.stdout:
+        return False, "Waiting for pods to exit SchedulingGated state"
 
     return f"All pods for {service_name} are scheduled successfully"
 
@@ -304,6 +307,7 @@ def wait_service_ready(args, ctx):
         args.namespace,
         "-o",
         "jsonpath={range .items[*]}{.metadata.name}:{.status.containerStatuses[*].restartCount}{'\\n'}{end}",
+        log_stdout=False,
     )
 
     if restart_result.stdout.strip():
