@@ -173,12 +173,9 @@ def _build_vllm_additional_args(
         String suitable for VLLM_ADDITIONAL_ARGS environment variable
     """
 
-    vllm_default_args = _build_vllm_args(
-        config.project.get_config("deployments.defaults.vllm_extra.args")
-    )
-    vllm_deploy_args = _build_vllm_args(deployment_profile.get("vllm_extra.args", {}))
+    vllm_deploy_args = _build_vllm_args(deployment_profile.get("vllm_extra", {}).get("args"))
 
-    return " ".join(vllm_default_args + vllm_deploy_args)
+    return " ".join(vllm_deploy_args)
 
 
 def _render_standard_deployment(
