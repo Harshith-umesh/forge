@@ -31,6 +31,77 @@ from projects.llm_d.toolbox.cleanup_test_resources import main as cleanup_test_r
 logger = logging.getLogger(__name__)
 
 
+def _delete_resources_by_type(resource_type: str, namespace: str, description: str) -> None:
+    """Delete all resources of a given type in the namespace.
+
+    Args:
+        resource_type: Kubernetes resource type (e.g., 'llminferenceservice', 'workload')
+        namespace: Target namespace
+        description: Human-readable description for logging
+    """
+    logger.info("Deleting all %s in namespace %s", description, namespace)
+
+    result = oc(
+        "get",
+        resource_type,
+        "-n",
+        namespace,
+        "--no-headers",
+        "-o",
+        "name",
+        check=False,
+    )
+
+    if result.returncode == 0 and result.stdout.strip():
+        resource_names = result.stdout.strip().split("\n")
+        logger.info(
+            "Found %d %s to delete: %s",
+            len(resource_names),
+            description,
+            ", ".join(resource_names),
+        )
+
+        # Delete all found resources
+        for resource_name in resource_names:
+            logger.info("Deleting %s", resource_name)
+            oc("delete", resource_name, "-n", namespace, check=False)
+
+        logger.info("Successfully deleted all existing %s", description)
+    else:
+        logger.info("No existing %s found in namespace %s", description, namespace)
+
+
+def cleanup_existing_resources(namespace: str) -> None:
+    """Delete all existing LLMInferenceServices and Kueue workloads if configured.
+
+    Args:
+        namespace: Target namespace for cleanup
+    """
+    delete_all_on_start = config.project.get_config("runtime.kserve.delete_all_on_start", False)
+    reuse_existing = config.project.get_config("runtime.kserve.reuse_existing", False)
+
+    if not delete_all_on_start:
+        return
+
+    if reuse_existing:
+        logger.info("Skipping cleanup - reuse_existing is enabled")
+        return
+
+    logger.info("Starting cleanup of existing resources in namespace %s", namespace)
+
+    try:
+        # Delete LLMInferenceServices
+        _delete_resources_by_type("llminferenceservice", namespace, "LLMInferenceServices")
+
+        # Also delete Kueue workloads if Kueue is enabled
+        enable_kueue = config.project.get_config("runtime.kueue.enabled", False)
+        if enable_kueue:
+            _delete_resources_by_type("workload", namespace, "Kueue workloads")
+
+    except Exception as e:
+        logger.warning("Failed to delete existing resources: %s, continuing with test", e)
+
+
 def ensure_kueue_local_queue() -> None:
     """Create LocalQueue when kueue is enabled."""
     enable_kueue = config.project.get_config("runtime.kueue.enabled")
@@ -202,6 +273,9 @@ def do_test() -> int:
 
         # Ensure LocalQueue exists when kueue is enabled
         ensure_kueue_local_queue()
+
+        # Delete all existing resources if configured
+        cleanup_existing_resources(namespace)
 
     endpoint_url: str | None = None
     llmisvc_name: str | None = None
