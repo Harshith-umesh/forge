@@ -298,7 +298,9 @@ def get_job_name() -> str:
 
 def get_platform_config() -> dict[str, Any]:
     """Get the normalized platform configuration"""
-    return normalize_platform_config(copy.deepcopy(config.project.get_config("platform")))
+    return normalize_platform_config(
+        copy.deepcopy(config.project.get_config("platform", print=False))
+    )
 
 
 def get_namespace() -> str:
@@ -340,7 +342,7 @@ def get_served_model_name(model_name: str | None = None) -> str:
 
 def get_model_cache_config() -> dict[str, Any]:
     """Get the model cache configuration"""
-    return copy.deepcopy(config.project.get_config("model_cache"))
+    return copy.deepcopy(config.project.get_config("model_cache", print=False))
 
 
 def get_benchmark_keys() -> list[str]:
@@ -349,9 +351,9 @@ def get_benchmark_keys() -> list[str]:
 
 def _resolve_benchmark_config(benchmark_name: str) -> dict[str, Any]:
     benchmark = copy.deepcopy(
-        config.project.get_config(f"workloads.benchmarks['{benchmark_name}']")
+        config.project.get_config(f"workloads.benchmarks['{benchmark_name}']", print=False)
     )
-    workload_defaults = copy.deepcopy(config.project.get_config("workloads"))
+    workload_defaults = copy.deepcopy(config.project.get_config("workloads", print=False))
 
     default_keys = ("job_name", "image", "pvc_size", "timeout_seconds")
     for key in default_keys:
@@ -438,7 +440,7 @@ def _resolve_template_profile(
 
 def get_deployment_profile() -> dict[str, Any]:
     profile_name = get_deployment_profile_name()
-    deployment_config = copy.deepcopy(config.project.get_config("deployments"))
+    deployment_config = copy.deepcopy(config.project.get_config("deployments", print=False))
 
     # First try direct profile lookup in profiles section
     profiles = deployment_config.get("profiles", {})
