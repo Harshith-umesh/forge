@@ -169,6 +169,219 @@ def wait_pods_appear(args, ctx):
     return False  # Retry
 
 
+@task
+def query_service_status(args, ctx):
+    """Query the status of the LLMInferenceService"""
+
+    service_name = ctx.inference_service_name
+
+    # Query only the Ready condition status
+    result = oc(
+        "get",
+        "llminferenceservice",
+        service_name,
+        "-n",
+        args.namespace,
+        "-o",
+        "jsonpath={.status.conditions[?(@.type=='Ready')].status}",
+        log_stdout=False,
+    )
+
+    ready_status = result.stdout.strip()
+    ctx.is_ready = ready_status == "True"
+
+    if ctx.is_ready:
+        return f"LLMInferenceService {service_name} status: Ready"
+    else:
+        return f"LLMInferenceService {service_name} status: Not Ready"
+
+
+@task
+def query_service_message(args, ctx):
+    """Query detailed message from LLMInferenceService"""
+
+    service_name = ctx.inference_service_name
+
+    # Query the Ready condition details
+    result = oc(
+        "get",
+        "llminferenceservice",
+        service_name,
+        "-n",
+        args.namespace,
+        "-o",
+        "jsonpath={.status.conditions[?(@.type=='Ready')]}",
+        log_stdout=False,
+    )
+
+    if result.stdout.strip():
+        try:
+            import json
+
+            condition = json.loads(result.stdout)
+            reason = condition.get("reason", "Unknown")
+            message = condition.get("message", "No message")
+
+            if not ctx.is_ready:
+                return f"Not ready - Reason: {reason}, Message: {message}"
+            else:
+                return "Ready - Service is operational"
+        except (json.JSONDecodeError, KeyError) as e:
+            return f"Failed to parse Ready condition: {e}"
+    else:
+        return "No Ready condition found in status"
+
+
+@retry(attempts=999999, delay=30, backoff=1.0)
+@task
+def wait_pods_scheduled(args, ctx):
+    """Wait for all pods to be scheduled (optional task)"""
+
+    # Check if this task is enabled
+    if not args.wait_pods_scheduled:
+        return "Pod scheduling wait disabled by parameter"
+
+    service_name = ctx.inference_service_name
+
+    # Get pod status using plain text output
+    result = oc(
+        "get",
+        "pods",
+        "-l",
+        ctx.selector,
+        "-n",
+        args.namespace,
+        "--no-headers",
+        check=False,
+        log_stdout=False,
+    )
+
+    if not result.stdout.strip():
+        return False, "No pods found for the service yet"
+
+    # Keep waiting if any pod is Pending
+    if "Pending" in result.stdout:
+        return False, "Waiting for pods to exit Pending state"
+
+    return f"All pods for {service_name} are scheduled successfully"
+
+
+@retry(attempts=90, delay=10, backoff=1.0)
+@task
+def wait_service_ready(args, ctx):
+    """Wait for LLMInferenceService to be ready"""
+
+    service_name = ctx.inference_service_name
+
+    # Query the current status and show diagnostic info
+    result = oc(
+        "get",
+        "llminferenceservice",
+        service_name,
+        "-n",
+        args.namespace,
+        "-o",
+        "jsonpath={.status.conditions[?(@.type=='Ready')]}",
+    )
+
+    # Also show pod status for debugging
+    oc(
+        "get",
+        "pods",
+        "-l",
+        ctx.selector,
+        "-n",
+        args.namespace,
+    )
+
+    # Check for pod restarts and abort if any pods have restarted
+    restart_result = oc(
+        "get",
+        "pods",
+        "-l",
+        ctx.selector,
+        "-n",
+        args.namespace,
+        "-o",
+        "jsonpath={range .items[*]}{.metadata.name}:{.status.containerStatuses[*].restartCount}{'\\n'}{end}",
+    )
+
+    if restart_result.stdout.strip():
+        for line in restart_result.stdout.strip().split("\n"):
+            if ":" in line:
+                pod_name, restart_counts = line.split(":", 1)
+                # Check if any container has restarted
+                counts = restart_counts.split()
+                for count_str in counts:
+                    try:
+                        if int(count_str) > 0:
+                            raise RuntimeError(
+                                f"Pod {pod_name} has restarted (restart count: {count_str}). Aborting wait due to pod restart."
+                            )
+                    except ValueError:
+                        # Skip non-numeric restart counts
+                        pass
+
+    if result.stdout.strip():
+        try:
+            import json
+
+            condition = json.loads(result.stdout)
+            status = condition.get("status", "Unknown")
+            reason = condition.get("reason", "Unknown")
+            message = condition.get("message", "No message")
+
+            if status == "True":
+                return f"LLMInferenceService {service_name} is ready"
+            else:
+                return (
+                    False,
+                    f"Service not ready - Status: {status}, Reason: {reason}, Message: {message}",
+                )
+
+        except (json.JSONDecodeError, KeyError) as e:
+            return (False, f"Failed to parse Ready condition: {e}")
+    else:
+        return (False, f"No Ready condition found in status for {service_name}")
+
+
+def try_resolve_endpoint_url(
+    *, namespace: str, inference_service_name: str, gateway_status_address_name: str | None
+) -> str | None:
+    payload = oc_get_json("llminferenceservice", name=inference_service_name, namespace=namespace)
+
+    for address in payload.get("status", {}).get("addresses", []):
+        # When gateway_status_address_name is None, return the first address with a URL and append port 8000
+        if gateway_status_address_name is None:
+            if address.get("url"):
+                url = address["url"]
+                # Append port 8000 when not using gateway if no port is already specified
+                if ":" not in url.split("/")[-1]:  # Check if no port in the hostname part
+                    url = f"{url}:8000"
+                return url
+        # Otherwise, match by name
+        elif address.get("name") == gateway_status_address_name and address.get("url"):
+            return address["url"]
+    return None
+
+
+@retry(attempts=90, delay=10, backoff=1.0)
+@task
+def resolve_endpoint_task(args, ctx):
+    """Resolve the gateway endpoint URL"""
+
+    endpoint_url = try_resolve_endpoint_url(
+        namespace=args.namespace,
+        inference_service_name=ctx.inference_service_name,
+        gateway_status_address_name=args.gateway_status_address_name,
+    )
+    if endpoint_url:
+        ctx.endpoint_url = endpoint_url
+        write_text(args.artifact_dir / "artifacts" / "endpoint.url", f"{endpoint_url}\n")
+        return f"Endpoint resolved: {endpoint_url}"
+    return False, "No endpoint URL available"
+
+
 @always
 @task
 def capture_llmisv_description(args, ctx):
@@ -485,193 +698,6 @@ def capture_pod_yaml(args, ctx):
 
     except Exception as e:
         return f"Failed to capture pod YAML: {e}"
-
-
-@task
-def query_service_status(args, ctx):
-    """Query the status of the LLMInferenceService"""
-
-    service_name = ctx.inference_service_name
-
-    # Query only the Ready condition status
-    result = oc(
-        "get",
-        "llminferenceservice",
-        service_name,
-        "-n",
-        args.namespace,
-        "-o",
-        "jsonpath={.status.conditions[?(@.type=='Ready')].status}",
-        log_stdout=False,
-    )
-
-    ready_status = result.stdout.strip()
-    ctx.is_ready = ready_status == "True"
-
-    if ctx.is_ready:
-        return f"LLMInferenceService {service_name} status: Ready"
-    else:
-        return f"LLMInferenceService {service_name} status: Not Ready"
-
-
-@task
-def query_service_message(args, ctx):
-    """Query detailed message from LLMInferenceService"""
-
-    service_name = ctx.inference_service_name
-
-    # Query the Ready condition details
-    result = oc(
-        "get",
-        "llminferenceservice",
-        service_name,
-        "-n",
-        args.namespace,
-        "-o",
-        "jsonpath={.status.conditions[?(@.type=='Ready')]}",
-        log_stdout=False,
-    )
-
-    if result.stdout.strip():
-        try:
-            import json
-
-            condition = json.loads(result.stdout)
-            reason = condition.get("reason", "Unknown")
-            message = condition.get("message", "No message")
-
-            if not ctx.is_ready:
-                return f"Not ready - Reason: {reason}, Message: {message}"
-            else:
-                return "Ready - Service is operational"
-        except (json.JSONDecodeError, KeyError) as e:
-            return f"Failed to parse Ready condition: {e}"
-    else:
-        return "No Ready condition found in status"
-
-
-@retry(attempts=999999, delay=30, backoff=1.0)
-@task
-def wait_pods_scheduled(args, ctx):
-    """Wait for all pods to be scheduled (optional task)"""
-
-    # Check if this task is enabled
-    if not args.wait_pods_scheduled:
-        return "Pod scheduling wait disabled by parameter"
-
-    service_name = ctx.inference_service_name
-
-    # Get pod status using plain text output
-    result = oc(
-        "get",
-        "pods",
-        "-l",
-        ctx.selector,
-        "-n",
-        args.namespace,
-        "--no-headers",
-        check=False,
-        log_stdout=False,
-    )
-
-    if not result.stdout.strip():
-        return False, "No pods found for the service yet"
-
-    # Keep waiting if any pod is Pending
-    if "Pending" in result.stdout:
-        return False, "Waiting for pods to exit Pending state"
-
-    return f"All pods for {service_name} are scheduled successfully"
-
-
-@retry(attempts=90, delay=10, backoff=1.0)
-@task
-def wait_service_ready(args, ctx):
-    """Wait for LLMInferenceService to be ready"""
-
-    service_name = ctx.inference_service_name
-
-    # Query the current status and show diagnostic info
-    result = oc(
-        "get",
-        "llminferenceservice",
-        service_name,
-        "-n",
-        args.namespace,
-        "-o",
-        "jsonpath={.status.conditions[?(@.type=='Ready')]}",
-        log_stdout=True,
-    )
-
-    # Also show pod status for debugging
-    oc(
-        "get",
-        "pods",
-        "-l",
-        ctx.selector,
-        "-n",
-        args.namespace,
-        log_stdout=True,  # Show pod status in logs
-    )
-
-    if result.stdout.strip():
-        try:
-            import json
-
-            condition = json.loads(result.stdout)
-            status = condition.get("status", "Unknown")
-            reason = condition.get("reason", "Unknown")
-            message = condition.get("message", "No message")
-
-            if status == "True":
-                return f"LLMInferenceService {service_name} is ready"
-            else:
-                return (
-                    False,
-                    f"Service not ready - Status: {status}, Reason: {reason}, Message: {message}",
-                )
-
-        except (json.JSONDecodeError, KeyError) as e:
-            return (False, f"Failed to parse Ready condition: {e}")
-    else:
-        return (False, f"No Ready condition found in status for {service_name}")
-
-
-@retry(attempts=90, delay=10, backoff=1.0)
-@task
-def resolve_endpoint_task(args, ctx):
-    """Resolve the gateway endpoint URL"""
-
-    endpoint_url = try_resolve_endpoint_url(
-        namespace=args.namespace,
-        inference_service_name=ctx.inference_service_name,
-        gateway_status_address_name=args.gateway_status_address_name,
-    )
-    if endpoint_url:
-        ctx.endpoint_url = endpoint_url
-        write_text(args.artifact_dir / "artifacts" / "endpoint.url", f"{endpoint_url}\n")
-        return f"Endpoint resolved: {endpoint_url}"
-    return False, "No endpoint URL available"
-
-
-def try_resolve_endpoint_url(
-    *, namespace: str, inference_service_name: str, gateway_status_address_name: str | None
-) -> str | None:
-    payload = oc_get_json("llminferenceservice", name=inference_service_name, namespace=namespace)
-
-    for address in payload.get("status", {}).get("addresses", []):
-        # When gateway_status_address_name is None, return the first address with a URL and append port 8000
-        if gateway_status_address_name is None:
-            if address.get("url"):
-                url = address["url"]
-                # Append port 8000 when not using gateway if no port is already specified
-                if ":" not in url.split("/")[-1]:  # Check if no port in the hostname part
-                    url = f"{url}:8000"
-                return url
-        # Otherwise, match by name
-        elif address.get("name") == gateway_status_address_name and address.get("url"):
-            return address["url"]
-    return None
 
 
 if __name__ == "__main__":
