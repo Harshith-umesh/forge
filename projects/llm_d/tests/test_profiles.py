@@ -600,7 +600,7 @@ def test_single_benchmark_key_backward_compatible() -> None:
     assert len(run_specs) == 1
     assert run_specs[0].benchmark_key == "short"
     assert run_specs[0].benchmark_slug == "short"
-    assert run_specs[0].artifact_dirname == "llmd__short"
+    assert run_specs[0].artifact_dirname == "llmd__short__approximate-prefix-cache"
 
 
 def test_activate_run_spec_sets_benchmark_key() -> None:

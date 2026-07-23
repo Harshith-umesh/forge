@@ -594,7 +594,7 @@ def get_run_specs() -> list[RunSpec]:
                 benchmark_key=bench_key,
                 benchmark_slug=bench_slug,
                 namespace=namespace,
-                artifact_dirname=f"llmd__{bench_key or 'default'}",
+                artifact_dirname=f"llmd__{bench_key or 'default'}__{profile_slug}",
             )
         )
 
