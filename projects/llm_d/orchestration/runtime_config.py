@@ -53,16 +53,7 @@ def ensure_artifact_directories(artifact_dir: Path) -> None:
 
 
 def _get_runtime_value(key: str) -> Any:
-    return config.project.get_config(f"runtime.{key}", None)
-
-
-def _assert_no_legacy_model_key() -> None:
-    legacy_model_key = _get_runtime_value("model_key")
-    if legacy_model_key not in (None, ""):
-        raise ValueError(
-            "llm_d no longer supports runtime.model_key. "
-            "Use runtime.model_name with a literal Hugging Face model name instead."
-        )
+    return config.project.get_config(f"runtime.{key}", None, warn=False)
 
 
 def _normalize_string_or_list(value: Any, field_name: str) -> list[str]:
@@ -256,7 +247,6 @@ def _load_scheduler_with_epp_config(
     # Load the router template
     router_template_path = config_dir / router_template_file
     if not router_template_path.exists():
-        # Fallback to legacy behavior if template doesn't exist
         raise FileNotFoundError(f"Router template not found at {router_template_path}")
 
     # Load the EPP config content
@@ -318,7 +308,7 @@ def get_namespace() -> str:
 
 def get_model_name() -> str:
     """Get the selected Hugging Face model name"""
-    _assert_no_legacy_model_key()
+
     model_names = _normalize_string_or_list(_get_runtime_value("model_name"), "runtime.model_name")
     if len(model_names) != 1:
         raise ValueError(
@@ -560,7 +550,6 @@ def get_smoke_request() -> dict[str, Any]:
 
 
 def get_run_specs() -> list[RunSpec]:
-    _assert_no_legacy_model_key()
     model_names = _normalize_string_or_list(_get_runtime_value("model_name"), "runtime.model_name")
     profile_names = _normalize_string_or_list(
         _get_runtime_value("deployment_profile"),

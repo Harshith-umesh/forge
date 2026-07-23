@@ -650,14 +650,6 @@ def test_benchmark_deployment_overrides_empty_when_no_benchmark() -> None:
     assert overrides == {}
 
 
-def test_runtime_rejects_legacy_model_key_path() -> None:
-    _init_project_config()
-
-    core_config.project.config.setdefault("runtime", {})["model_key"] = "qwen3-0-6b"
-    with pytest.raises(ValueError, match="runtime.model_key"):
-        runtime_config.get_run_specs()
-
-
 def test_render_uses_sanitized_model_name_and_profile_resources() -> None:
     _init_project_config()
     core_config.project.set_config("model_cache.enabled", False)
