@@ -9,6 +9,7 @@ kserve:
   dry_run: false
   wait_readiness: true
   wait_long_scheduling: false
+  reuse_existing: false
 kueue:
   enabled: false
   queue_name: default-queue

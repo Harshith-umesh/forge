@@ -279,12 +279,58 @@ def deploy_inference_service(llmisvc_name: str) -> str:
     namespace = runtime_config.get_namespace()
     platform = runtime_config.get_platform_config()
     gateway = platform["gateway"]
-    inference_service = platform["inference_service"]
 
     # llmisvc_name is now passed as a parameter
 
     dry_run = config.project.get_config("runtime.kserve.dry_run")
     wait_readiness = config.project.get_config("runtime.kserve.wait_readiness")
+    reuse_existing = config.project.get_config("runtime.kserve.reuse_existing", False)
+
+    # Check if we should reuse existing LLMInferenceService
+    if reuse_existing and not dry_run:
+        logger.info(f"Checking if LLMInferenceService {llmisvc_name} already exists")
+
+        # Check if the service already exists
+        try:
+            existing_llmisvc = oc(
+                "get",
+                "llminferenceservice",
+                llmisvc_name,
+                "-n",
+                namespace,
+                check=False,
+            )
+
+            if existing_llmisvc.returncode == 0:
+                logger.info(
+                    f"Found existing LLMInferenceService {llmisvc_name}, attempting to reuse"
+                )
+
+                # Import and use the toolbox function to extract URL
+                from projects.kserve.toolbox.deploy_llmisvc import try_resolve_endpoint_url
+
+                endpoint_url = try_resolve_endpoint_url(
+                    namespace=namespace,
+                    inference_service_name=llmisvc_name,
+                    gateway_status_address_name=gateway["status_address_name"],
+                )
+
+                if endpoint_url:
+                    logger.info(f"Successfully reused existing LLMInferenceService: {endpoint_url}")
+                    return endpoint_url
+                else:
+                    logger.warning(
+                        "Existing LLMInferenceService found but no endpoint URL could be resolved, proceeding with new deployment"
+                    )
+            else:
+                logger.info(
+                    f"LLMInferenceService {llmisvc_name} does not exist, proceeding with new deployment"
+                )
+
+        except Exception as e:
+            logger.warning(
+                f"Error checking for existing LLMInferenceService: {e}, proceeding with new deployment"
+            )
 
     # Step 1: Ensure model cache is ready (skip in dry-run)
     if not dry_run:
