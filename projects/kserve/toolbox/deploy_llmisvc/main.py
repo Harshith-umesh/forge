@@ -644,6 +644,42 @@ def capture_final_llmisvc_yaml(args, ctx):
 
 @always
 @task
+def capture_workload_overview(args, ctx):
+    """Capture deployment, replicaset, and pod overview for debugging"""
+
+    if args.dry_run:
+        return "Dry-run, nothing to do"
+
+    # Ensure artifacts directory exists
+    artifacts_dir = args.artifact_dir / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    # Use selector from context
+    selector = getattr(ctx, "selector", None)
+    if not selector:
+        return "No selector available"
+
+    workload_overview_path = artifacts_dir / "workload_overview.txt"
+
+    # Capture deployment, replicaset, and pod overview
+    oc(
+        "get",
+        "deploy,rs,pod",
+        "-l",
+        selector,
+        "-n",
+        args.namespace,
+        "-o",
+        "wide",
+        check=False,
+        stdout_dest=workload_overview_path,
+    )
+
+    return f"Captured workload overview to {workload_overview_path}"
+
+
+@always
+@task
 def capture_pod_status(args, ctx):
     """Capture pod status for debugging"""
 
