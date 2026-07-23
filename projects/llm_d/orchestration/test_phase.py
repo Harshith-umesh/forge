@@ -280,10 +280,10 @@ def do_test() -> int:
         cleanup_existing_resources(namespace)
 
     endpoint_url: str | None = None
-    llmisvc_name: str | None = None
     primary_exc: tuple[type[BaseException], BaseException, Any] | None = None
     finalizer_exc: tuple[type[BaseException], BaseException, Any] | None = None
 
+    actual_llmisvc_name = "llmisvc-na-not-computed"
     try:
         # Create test labels with actual model and profile information
         create_test_labels()
@@ -296,12 +296,16 @@ def do_test() -> int:
         inference_service = platform["inference_service"]
         base_name = inference_service["name"]
         deployment_profile_name = runtime_config.get_deployment_profile_name()
-        llmisvc_name = (
+        # Step 1: Build manifest and get actual truncated name
+        initial_llmisvc_name = (
             f"{base_name}-{deployment_profile_name}" if deployment_profile_name else base_name
         )
-        llmisvc_name = slugify_identifier(llmisvc_name)
+        initial_llmisvc_name = slugify_identifier(initial_llmisvc_name)
 
-        endpoint_url = deploy_inference_service(llmisvc_name)
+        manifest_path, actual_llmisvc_name = build_inference_service_manifest(initial_llmisvc_name)
+
+        # Step 2: Deploy using the actual name from the manifest
+        endpoint_url = deploy_inference_service_from_manifest(manifest_path, actual_llmisvc_name)
 
         if dry_run:
             logging.warning("Running in dry-run mode, skipping the rest of the test steps")
@@ -312,7 +316,7 @@ def do_test() -> int:
         run_smoke_request(endpoint_url=endpoint_url)
 
         run_guidellm_benchmark(endpoint_url=endpoint_url)
-    except Exception:
+    except Exception as e:
         primary_exc = sys.exc_info()
     except SignalInterrupt:
         primary_exc = sys.exc_info()
@@ -327,7 +331,7 @@ def do_test() -> int:
 
         if do_finalizers:
             primary_exc, finalizer_exc = run_finalizers(
-                endpoint_url, llmisvc_name, primary_exc, finalizer_exc
+                endpoint_url, actual_llmisvc_name, primary_exc, finalizer_exc
             )
 
     if primary_exc is not None:
@@ -417,24 +421,51 @@ def _try_reuse_existing_service(
     return None
 
 
-def deploy_inference_service(llmisvc_name: str) -> str:
-    """Deploy LLMInferenceService and return endpoint URL and service name.
+def build_inference_service_manifest(llmisvc_name: str) -> tuple[Path, str]:
+    """Build inference service manifest and return path and actual service name.
 
     Args:
-        llmisvc_name: The name of the LLMInferenceService to deploy
+        llmisvc_name: The initial name for the LLMInferenceService
+
+    Returns:
+        Tuple of (manifest_path, actual_llmisvc_name) where actual_llmisvc_name may be truncated
+    """
+    # Step 1: Build and write inference service manifest
+    manifest_path = _build_inference_service_manifest()
+
+    # Step 2: Extract the actual deployed name from the manifest (may be truncated)
+    import yaml
+
+    with manifest_path.open(encoding="utf-8") as f:
+        manifest = yaml.safe_load(f)
+
+    # Get the actual deployed name from the manifest (may be truncated)
+    actual_llmisvc_name = manifest["metadata"]["name"]
+
+    logger.info(
+        "Built LLMInferenceService manifest: %s (actual name: %s)",
+        manifest_path,
+        actual_llmisvc_name,
+    )
+    return manifest_path, actual_llmisvc_name
+
+
+def deploy_inference_service_from_manifest(manifest_path: Path, actual_llmisvc_name: str) -> str:
+    """Deploy LLMInferenceService from pre-built manifest and return endpoint URL.
+
+    Args:
+        manifest_path: Path to the pre-built manifest
+        actual_llmisvc_name: The actual name of the LLMInferenceService from the manifest
 
     Returns:
         Gateway endpoint URL
     """
-    logger.info("Starting LLMInferenceService deployment")
+    logger.info("Starting LLMInferenceService deployment from manifest")
 
     # Load config where it's consumed
-
     namespace = runtime_config.get_namespace()
     platform = runtime_config.get_platform_config()
     gateway = platform["gateway"]
-
-    # llmisvc_name is now passed as a parameter
 
     dry_run = config.project.get_config("runtime.kserve.dry_run")
     wait_readiness = config.project.get_config("runtime.kserve.wait_readiness")
@@ -443,7 +474,7 @@ def deploy_inference_service(llmisvc_name: str) -> str:
     # Try to reuse existing LLMInferenceService if enabled
     endpoint_url = _try_reuse_existing_service(
         namespace=namespace,
-        llmisvc_name=llmisvc_name,
+        llmisvc_name=actual_llmisvc_name,
         gateway=gateway,
         reuse_existing=reuse_existing,
         dry_run=dry_run,
@@ -462,10 +493,7 @@ def deploy_inference_service(llmisvc_name: str) -> str:
         rhoai_namespace = platform["rhoai"]["namespace"]
         wait_kserve_ready.run(namespace=rhoai_namespace)
 
-    # Step 3: Build and write inference service manifest
-    manifest_path = _build_inference_service_manifest()
-
-    # Check if the manifest has a scheduler to determine gateway status address name
+    # Step 3: Check manifest for scheduler to determine gateway status address name
     import yaml
 
     with manifest_path.open(encoding="utf-8") as f:
@@ -495,10 +523,8 @@ def deploy_inference_service(llmisvc_name: str) -> str:
     )
 
     if dry_run:
-        llmisvc_manifest_path = endpoint_url
-        logger.info("Dry-run completed: LLMInferenceService manifest prepared:")
-        logger.info(llmisvc_manifest_path)
-        return llmisvc_manifest_path, llmisvc_name
+        logger.info("Dry-run completed: LLMInferenceService manifest prepared: %s", manifest_path)
+        return str(manifest_path)
 
     logger.info("LLMInferenceService deployed successfully, endpoint: %s", endpoint_url)
     return endpoint_url
