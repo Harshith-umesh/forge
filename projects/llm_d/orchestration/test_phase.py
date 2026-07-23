@@ -200,39 +200,36 @@ def do_test() -> int:
     primary_exc: tuple[type[BaseException], BaseException, Any] | None = None
     finalizer_exc: tuple[type[BaseException], BaseException, Any] | None = None
 
-    with env.NextArtifactDir("llmd_test"):
-        try:
-            # Create test labels with actual model and profile information
-            create_test_labels()
+    try:
+        # Create test labels with actual model and profile information
+        create_test_labels()
 
-            endpoint_url = deploy_inference_service()
+        endpoint_url = deploy_inference_service()
 
-            if dry_run:
-                logging.warning("Running in dry-run mode, skipping the rest of the test steps")
-                return 0
+        if dry_run:
+            logging.warning("Running in dry-run mode, skipping the rest of the test steps")
+            return 0
 
-            if not endpoint_url:
-                raise ValueError("Failed to extract the endpoint_url from the LLMISVC deployment")
-            run_smoke_request(endpoint_url=endpoint_url)
+        if not endpoint_url:
+            raise ValueError("Failed to extract the endpoint_url from the LLMISVC deployment")
+        run_smoke_request(endpoint_url=endpoint_url)
 
-            run_guidellm_benchmark(endpoint_url=endpoint_url)
-        except Exception:
-            primary_exc = sys.exc_info()
-        except SignalInterrupt:
-            primary_exc = sys.exc_info()
-        finally:
-            do_finalizers = config.project.get_config("runtime.run_test_finalizers")
-            if primary_exc and isinstance(primary_exc[1], SignalInterrupt):
-                logging.warning("Caught a SignalInterrupt, skipping the finalizers")
-                do_finalizers = False
+        run_guidellm_benchmark(endpoint_url=endpoint_url)
+    except Exception:
+        primary_exc = sys.exc_info()
+    except SignalInterrupt:
+        primary_exc = sys.exc_info()
+    finally:
+        do_finalizers = config.project.get_config("runtime.run_test_finalizers")
+        if primary_exc and isinstance(primary_exc[1], SignalInterrupt):
+            logging.warning("Caught a SignalInterrupt, skipping the finalizers")
+            do_finalizers = False
 
-            if dry_run:
-                do_finalizers = False
+        if dry_run:
+            do_finalizers = False
 
-            if do_finalizers:
-                primary_exc, finalizer_exc = run_finalizers(
-                    endpoint_url, primary_exc, finalizer_exc
-                )
+        if do_finalizers:
+            primary_exc, finalizer_exc = run_finalizers(endpoint_url, primary_exc, finalizer_exc)
 
     if primary_exc is not None:
         raise primary_exc[1].with_traceback(primary_exc[2])
