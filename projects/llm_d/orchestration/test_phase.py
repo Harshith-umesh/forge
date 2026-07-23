@@ -86,6 +86,40 @@ def create_test_labels() -> None:
     logger.info("Created test labels: %s", labels)
 
 
+def run_all_tests(stop_on_error: bool = False) -> int:
+    """Run tests for all run specifications without post-processing.
+
+    Args:
+        stop_on_error: If True, stop on the first test failure
+
+    Returns:
+        Maximum exit code from all tests
+    """
+    from projects.llm_d.orchestration import runtime_config
+
+    max_exit_code = 0
+    for run_spec in runtime_config.get_run_specs():
+        with runtime_config.activate_run_spec(run_spec):
+            with env.NextArtifactDir(run_spec.artifact_dirname):
+                try:
+                    exit_code = do_test()
+                    max_exit_code = max(max_exit_code, exit_code)
+
+                    if exit_code != 0 and stop_on_error:
+                        logger.error(
+                            f"Test failed with exit code {exit_code}, stopping due to stop_on_error"
+                        )
+                        return exit_code
+                except Exception as e:
+                    logger.exception(f"Test failed with exception: {e}")
+                    max_exit_code = 1
+                    if stop_on_error:
+                        logger.error("Stopping due to stop_on_error")
+                        return 1
+
+    return max_exit_code
+
+
 def run() -> int:
     """Main test function that wraps do_test() with outcome postprocessing."""
 
