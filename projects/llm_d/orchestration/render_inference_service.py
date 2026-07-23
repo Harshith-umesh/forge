@@ -70,7 +70,7 @@ def render_inference_service_from_parts(
     manifest = _load_yaml(template_path)
 
     # Check if this is a P/D deployment
-    is_pd_deployment = "pd_config" in deployment_profile
+    is_pd_deployment = "prefill" in deployment_profile
 
     name = inference_service["name"]
     if deployment_profile_name:
@@ -126,6 +126,50 @@ def render_inference_service_from_parts(
     _apply_kueue_configuration(rendered_manifest)
 
     return rendered_manifest
+
+
+def handle_pd_resources(
+    base_resources: dict[str, Any],
+    deployment_profile: dict[str, Any],
+    is_prefill: bool = False,
+) -> None:
+    """Handle P/D resource configuration, including DRA support.
+
+    Args:
+        base_resources: Base resources dict to modify in-place
+        deployment_profile: Deployment profile configuration
+        is_prefill: Whether this is for a prefill container
+    """
+    pd_resources = config.project.get_config("deployments.pd.resources")
+
+    if pd_resources == "composite.dra.io/gpu-nic-pair":
+        # Handle DRA (Dynamic Resource Allocation) case
+        if is_prefill:
+            # For prefill pods, use prefill tensor parallelism
+            tensor_parallelism = deployment_profile["prefill"]["tensor_parallelism"]
+        else:
+            # For decode pods, use decode tensor parallelism
+            tensor_parallelism = deployment_profile["decode"]["tensor_parallelism"]
+
+        # Override GPU resources for DRA
+        for bound in ("requests", "limits"):
+            if bound not in base_resources:
+                base_resources[bound] = {}
+            # Set nvidia.com/gpu to 0 and add composite DRA resource
+            base_resources[bound]["nvidia.com/gpu"] = "0"
+            base_resources[bound][pd_resources] = str(tensor_parallelism)
+    elif isinstance(pd_resources, dict):
+        # Normal case: pd_resources is a dictionary to merge
+        for bound in ("requests", "limits"):
+            if bound not in base_resources:
+                base_resources[bound] = {}
+            base_resources[bound].update(pd_resources)
+    elif pd_resources is not None:
+        # Handle unexpected pd_resources type
+        raise ValueError(
+            f"Unexpected type for deployments.pd.resources: {type(pd_resources)}, value: {pd_resources}"
+        )
+    # If pd_resources is None, do nothing
 
 
 def _build_serving_resources(deployment_profile: dict[str, Any]) -> dict[str, Any]:
@@ -327,13 +371,8 @@ def _build_pd_pod_template(
         # For decode pods, use main tensor parallelism
         base_resources = _build_serving_resources(deployment_profile)
 
-    # Add P/D extra resources to both requests and limits
-    pd_resources = config.project.get_config("deployments.pd.resources")
-
-    for bound in ("requests", "limits"):
-        if bound not in base_resources:
-            base_resources[bound] = {}
-        base_resources[bound].update(pd_resources)
+    # Handle P/D extra resources
+    handle_pd_resources(base_resources, deployment_profile, is_prefill)
 
     # Build container configuration
     container = {
@@ -393,34 +432,29 @@ def _apply_kueue_configuration(manifest: dict[str, Any]) -> None:
         full_annotation_key = f"{kueue_prefix}{annotation_key}"
         manifest["metadata"]["annotations"][full_annotation_key] = annotation_value
 
-    # Apply Kueue annotations to router scheduler pod template if it exists
+    # Apply Kueue annotations to router scheduler if it exists
     if (
         "spec" in manifest
         and "router" in manifest["spec"]
         and "scheduler" in manifest["spec"]["router"]
     ):
-        scheduler_template = manifest["spec"]["router"]["scheduler"].get("template", {})
+        scheduler = manifest["spec"]["router"]["scheduler"]
 
-        # Ensure metadata exists in scheduler template
-        if "metadata" not in scheduler_template:
-            scheduler_template["metadata"] = {}
-        if "annotations" not in scheduler_template["metadata"]:
-            scheduler_template["metadata"]["annotations"] = {}
-        if "labels" not in scheduler_template["metadata"]:
-            scheduler_template["metadata"]["labels"] = {}
+        # Ensure annotations and labels exist on scheduler
+        if "annotations" not in scheduler:
+            scheduler["annotations"] = {}
+        if "labels" not in scheduler:
+            scheduler["labels"] = {}
 
-        # Apply the same Kueue annotations to the scheduler pod template
+        # Apply the same Kueue annotations to the scheduler
         for annotation_key, annotation_value in kueue_annotations.items():
             full_annotation_key = f"{kueue_prefix}{annotation_key}"
-            scheduler_template["metadata"]["annotations"][full_annotation_key] = annotation_value
+            scheduler["annotations"][full_annotation_key] = annotation_value
 
-        # Apply the same Kueue labels to the scheduler pod template
+        # Apply the same Kueue labels to the scheduler
         for label_key, label_value in kueue_labels.items():
             full_label_key = f"{kueue_prefix}{label_key}"
-            scheduler_template["metadata"]["labels"][full_label_key] = label_value
-
-        # Update the scheduler template back to the data structure
-        manifest["spec"]["router"]["scheduler"]["template"] = scheduler_template
+            scheduler["labels"][full_label_key] = label_value
 
     # Calculate pod group total count: 1 scheduler + number of replicas
     replicas = manifest.get("spec", {}).get("replicas", 1)
@@ -448,10 +482,18 @@ def _apply_kueue_configuration(manifest: dict[str, Any]) -> None:
     pod_group_name = manifest["metadata"]["name"]
     manifest["metadata"]["labels"][f"{kueue_prefix}pod-group-name"] = pod_group_name
 
-    # Also add pod-group-name label to scheduler template if it exists
+    # Also add required Kueue annotations/labels to scheduler if it exists
     if has_scheduler:
-        scheduler_template = manifest["spec"]["router"]["scheduler"].get("template", {})
-        if "metadata" in scheduler_template and "labels" in scheduler_template["metadata"]:
-            scheduler_template["metadata"]["labels"][f"{kueue_prefix}pod-group-name"] = (
-                pod_group_name
-            )
+        scheduler = manifest["spec"]["router"]["scheduler"]
+
+        # Ensure annotations and labels exist on scheduler
+        if "annotations" not in scheduler:
+            scheduler["annotations"] = {}
+        if "labels" not in scheduler:
+            scheduler["labels"] = {}
+
+        # Add the same pod-group annotations and labels to scheduler
+        scheduler["annotations"][f"{kueue_prefix}pod-group-total-count"] = str(
+            pod_group_total_count
+        )
+        scheduler["labels"][f"{kueue_prefix}pod-group-name"] = pod_group_name

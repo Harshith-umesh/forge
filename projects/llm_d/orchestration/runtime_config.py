@@ -515,12 +515,28 @@ def get_pd_config() -> dict[str, Any]:
 
 def get_prefill_pod_count() -> int:
     """Get number of prefill pods for current deployment profile."""
+    profile_name = get_deployment_profile_name()
+    if profile_name:
+        try:
+            return _extract_value_from_profile_name(profile_name, "prefill_pods")
+        except ValueError:
+            pass
+
+    # Fallback to pd_config if profile name extraction fails
     pd_config = get_pd_config()
     return pd_config.get("prefill_pods", 1)
 
 
 def get_decode_pod_count() -> int:
     """Get number of decode pods for current deployment profile."""
+    profile_name = get_deployment_profile_name()
+    if profile_name:
+        try:
+            return _extract_value_from_profile_name(profile_name, "decode_pods")
+        except ValueError:
+            pass
+
+    # Fallback to pd_config if profile name extraction fails
     pd_config = get_pd_config()
     return pd_config.get("decode_pods", 1)
 

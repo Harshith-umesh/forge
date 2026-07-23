@@ -40,10 +40,15 @@ profiles:
 templates:
   pd:
     scheduler_manifest: {}  # scheduler enabled with default config
-    tensor_parallelism: FROM_NAME
-    pd_config:
-      prefill_pods: FROM_NAME
-      decode_pods: FROM_NAME
+    tensor_parallelism: FROM_NAME  # Extract main deployment tensor parallelism from profile name
+
+    prefill:
+      replicas: FROM_NAME
+      tensor_parallelism: FROM_NAME
+    decode:
+      replicas: FROM_NAME
+      tensor_parallelism: FROM_NAME
+
 
   intelligentrouting:
     scheduler_manifest: {}  # scheduler enabled with default config
