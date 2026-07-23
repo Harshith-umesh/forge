@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import yaml
@@ -23,6 +24,8 @@ from projects.core.dsl.utils.k8s import (
 )
 
 from .on_failure_helpers import on_wait_pods_appear_failure
+
+logger = logging.getLogger(__name__)
 
 
 def load_yaml(path: Path):
@@ -301,6 +304,30 @@ def capture_final_llmisvc_yaml(args, ctx):
         )
 
         llmisvc_yaml_path = artifacts_dir / "llmisvc_final.yaml"
+
+        if result.returncode != 0:
+            # Handle the case where the LLMInferenceService is not found
+            if "not found" in result.stderr.lower():
+                logger.warning(
+                    f"LLMInferenceService '{service_name}' not found in namespace '{args.namespace}'"
+                )
+                with open(llmisvc_yaml_path, "w", encoding="utf-8") as f:
+                    f.write(
+                        f"# LLMInferenceService '{service_name}' not found in namespace '{args.namespace}'\n"
+                    )
+                    f.write(f"# Error: {result.stderr.strip()}\n")
+                return f"LLMInferenceService not found, logged error to {llmisvc_yaml_path}"
+            else:
+                # Handle other error cases
+                logger.error(
+                    f"Failed to get LLMInferenceService '{service_name}': {result.stderr.strip()}"
+                )
+                with open(llmisvc_yaml_path, "w", encoding="utf-8") as f:
+                    f.write(f"# Error getting LLMInferenceService '{service_name}'\n")
+                    f.write(f"# Error: {result.stderr.strip()}\n")
+                return f"Error getting LLMInferenceService, logged error to {llmisvc_yaml_path}"
+
+        # Success case - write the YAML content
         with open(llmisvc_yaml_path, "w", encoding="utf-8") as f:
             f.write(result.stdout)
 
