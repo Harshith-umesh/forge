@@ -346,6 +346,7 @@ def _build_inference_service_manifest() -> Path:
     model_slug = runtime_config.get_model_slug(model_name)
     deployment_profile = runtime_config.get_deployment_profile()
     model_cache = runtime_config.get_model_cache_config()
+    workload = runtime_config.get_workload_config()  # Get workload config with vllm_args
 
     benchmark_overrides = runtime_config.get_benchmark_deployment_overrides()
     if benchmark_overrides:
@@ -362,6 +363,7 @@ def _build_inference_service_manifest() -> Path:
         deployment_profile=deployment_profile,
         model_cache=model_cache,
         deployment_profile_name=deployment_profile_name,
+        workload=workload,
     )
 
     # Write the manifest to artifacts

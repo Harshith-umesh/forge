@@ -360,6 +360,12 @@ def _resolve_benchmark_config(benchmark_name: str) -> dict[str, Any]:
         if key in workload_defaults and key not in benchmark:
             benchmark[key] = workload_defaults[key]
 
+    # Merge vllm_args from default benchmark if not present in specific benchmark
+    if "vllm_args" not in benchmark:
+        default_benchmark = workload_defaults.get("benchmarks", {}).get("default", {})
+        if "vllm_args" in default_benchmark:
+            benchmark["vllm_args"] = copy.deepcopy(default_benchmark["vllm_args"])
+
     benchmark_args = benchmark.get("args", {})
     workload_args = workload_defaults.get("args", {})
     if workload_args:
@@ -379,6 +385,34 @@ def get_benchmark_config() -> dict[str, Any] | None:
             f"got {benchmark_keys}"
         )
     return _resolve_benchmark_config(benchmark_keys[0])
+
+
+def get_workload_config() -> dict[str, Any] | None:
+    """Get workload configuration, falling back to default if no benchmark is specified."""
+    benchmark_config = get_benchmark_config()
+    if benchmark_config:
+        return benchmark_config
+
+    # No benchmark specified, return default workload configuration
+    workload_defaults = copy.deepcopy(config.project.get_config("workloads", print=False))
+    default_benchmark = workload_defaults.get("benchmarks", {}).get("default", {})
+
+    if not default_benchmark:
+        return None
+
+    # Apply same merging logic as _resolve_benchmark_config
+    default_keys = ("job_name", "image", "pvc_size", "timeout_seconds")
+    for key in default_keys:
+        if key in workload_defaults and key not in default_benchmark:
+            default_benchmark[key] = workload_defaults[key]
+
+    # Merge args from workloads.args to default benchmark args
+    benchmark_args = default_benchmark.get("args", {})
+    workload_args = workload_defaults.get("args", {})
+    if workload_args:
+        default_benchmark["args"] = deep_merge(workload_args, benchmark_args)
+
+    return default_benchmark
 
 
 def get_benchmark_deployment_overrides() -> dict[str, Any]:

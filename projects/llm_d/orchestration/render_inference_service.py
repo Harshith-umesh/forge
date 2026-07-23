@@ -64,6 +64,7 @@ def render_inference_service_from_parts(
     deployment_profile: dict[str, Any],
     model_cache: dict[str, Any],
     deployment_profile_name: str | None = None,
+    workload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Render an llm_d-owned LLMInferenceService manifest from concrete runtime inputs."""
     template_path = Path(config_dir) / inference_service["template"]
@@ -115,11 +116,11 @@ def render_inference_service_from_parts(
 
     if is_pd_deployment:
         rendered_manifest = _render_pd_deployment(
-            manifest, deployment_profile, deployment_profile_name
+            manifest, deployment_profile, deployment_profile_name, workload
         )
     else:
         rendered_manifest = _render_standard_deployment(
-            manifest, deployment_profile, deployment_profile_name
+            manifest, deployment_profile, deployment_profile_name, workload
         )
 
     # Apply Kueue configuration if enabled
@@ -212,17 +213,25 @@ def _has_cli_arg(args: list[str], option_name: str) -> bool:
 
 def _build_vllm_additional_args(
     deployment_profile: dict[str, Any],
+    workload: dict[str, Any] | None = None,
 ) -> str:
     """Build VLLM_ADDITIONAL_ARGS string based on deployment profile configuration.
 
     Args:
         deployment_profile: The deployment profile configuration
+        workload: The workload configuration (merged benchmark config)
 
     Returns:
         String suitable for VLLM_ADDITIONAL_ARGS environment variable
     """
 
-    vllm_deploy_args = _build_vllm_args(deployment_profile.get("vllm_extra", {}).get("args"))
+    vllm_extra = deployment_profile.get("vllm_extra", {})
+    vllm_deploy_args = _build_vllm_args(vllm_extra.get("args", {}))
+
+    # Add workload vllm_args if available
+    if workload and "vllm_args" in workload:
+        workload_vllm_args = _build_vllm_args(workload["vllm_args"])
+        vllm_deploy_args.extend(workload_vllm_args)
 
     return " ".join(vllm_deploy_args)
 
@@ -231,6 +240,7 @@ def _render_standard_deployment(
     manifest: dict[str, Any],
     deployment_profile: dict[str, Any],
     deployment_profile_name: str | None = None,
+    workload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Render standard (non-P/D) deployment configuration."""
     # Check if this is intelligent routing (scheduler_manifest exists)
@@ -248,7 +258,7 @@ def _render_standard_deployment(
     if deployment_profile.get("serving_image"):
         serving_container["image"] = deployment_profile["serving_image"]
 
-    vllm_additional_args = _build_vllm_additional_args(deployment_profile)
+    vllm_additional_args = _build_vllm_additional_args(deployment_profile, workload)
 
     # Add environment variable (don't set generic env vars or args)
     if "env" not in serving_container:
@@ -281,6 +291,7 @@ def _render_pd_deployment(
     manifest: dict[str, Any],
     deployment_profile: dict[str, Any],
     deployment_profile_name: str | None = None,
+    workload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Render P/D (Prefill/Decode) deployment configuration."""
     from .runtime_config import get_decode_pod_count, get_prefill_pod_count
@@ -295,14 +306,14 @@ def _render_pd_deployment(
     manifest["spec"]["prefill"] = {
         "replicas": get_prefill_pod_count(),
         "template": _build_pd_pod_template(
-            deployment_profile, deployment_profile_name, is_prefill=True
+            deployment_profile, deployment_profile_name, is_prefill=True, workload=workload
         ),
     }
 
     # Configure main template (decode)
     manifest["spec"]["replicas"] = get_decode_pod_count()
     manifest["spec"]["template"] = _build_pd_pod_template(
-        deployment_profile, deployment_profile_name, is_prefill=False
+        deployment_profile, deployment_profile_name, is_prefill=False, workload=workload
     )
 
     return manifest
@@ -312,6 +323,7 @@ def _build_pd_pod_template(
     deployment_profile: dict[str, Any],
     deployment_profile_name: str | None = None,
     is_prefill: bool = False,
+    workload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build pod template for P/D deployment."""
 
@@ -325,21 +337,26 @@ def _build_pd_pod_template(
         # For prefill pods, use prefill tensor parallelism
         from .runtime_config import _extract_value_from_profile_name
 
-        prefill_tp = _extract_value_from_profile_name(
-            deployment_profile_name, "prefill_tensor_parallelism"
-        )
-        # Create modified profile with prefill tensor parallelism
-        prefill_profile = copy.deepcopy(deployment_profile)
-        prefill_profile["tensor_parallelism"] = prefill_tp
-        base_vllm_args = _build_vllm_additional_args(prefill_profile)
+        try:
+            prefill_tp = _extract_value_from_profile_name(
+                deployment_profile_name, "prefill_tensor_parallelism"
+            )
+            # Create modified profile with prefill tensor parallelism
+            prefill_profile = copy.deepcopy(deployment_profile)
+            prefill_profile["tensor_parallelism"] = prefill_tp
+            base_vllm_args = _build_vllm_additional_args(prefill_profile, workload)
+        except ValueError:
+            # Fallback to main tensor parallelism if extraction fails
+            base_vllm_args = _build_vllm_additional_args(deployment_profile, workload)
     else:
         # For decode pods, use main tensor parallelism
-        base_vllm_args = _build_vllm_additional_args(deployment_profile)
+        base_vllm_args = _build_vllm_additional_args(deployment_profile, workload)
 
     # Add P/D extra args
 
     pd_extra_args = pd_vllm_extra.get("args", [])
     all_vllm_args = base_vllm_args.split() + pd_extra_args
+
     vllm_additional_args = " ".join(all_vllm_args)
 
     # Build base environment variables

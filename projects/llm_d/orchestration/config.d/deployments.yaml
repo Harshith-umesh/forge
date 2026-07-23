@@ -6,7 +6,6 @@ defaults:
   tensor_parallelism: 1
   vllm_extra:
     args:
-      - --max-model-len=4096
       - --gpu-memory-utilization=0.92
       - --trust-remote-code
       - --no-enable-log-requests
