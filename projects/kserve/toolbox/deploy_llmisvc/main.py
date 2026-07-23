@@ -348,24 +348,112 @@ def wait_service_ready(args, ctx):
 def try_resolve_endpoint_url(
     *, namespace: str, inference_service_name: str, gateway_status_address_name: str | None
 ) -> str | None:
+    logger.info(
+        f"=== Resolving endpoint URL for {inference_service_name} in namespace {namespace} ==="
+    )
+    logger.info(f"Target gateway_status_address_name: {gateway_status_address_name}")
+
     payload = oc_get_json("llminferenceservice", name=inference_service_name, namespace=namespace)
 
-    for address in payload.get("status", {}).get("addresses", []):
+    # Log the entire status section for debugging
+    status = payload.get("status", {})
+    logger.info(f"Status section keys found: {list(status.keys())}")
+
+    # Check status.address first
+    status_address = status.get("address")
+    logger.info(f"status.address content: {status_address}")
+
+    if status_address:
+        logger.info("✓ status.address exists")
+        if isinstance(status_address, dict):
+            logger.info("✓ status.address is a dict")
+            if status_address.get("url"):
+                url = status_address["url"]
+                logger.info(f"✓ Found URL in status.address: '{url}'")
+
+                # When gateway_status_address_name is None, append port 8000 if needed
+                if gateway_status_address_name is None:
+                    logger.info("Mode: No gateway (will append port 8000 if needed)")
+                    if ":" not in url.split("/")[-1]:  # Check if no port in the hostname part
+                        url = f"{url}:8000"
+                        logger.info(f"✓ Appended port 8000: '{url}'")
+                    else:
+                        logger.info("✓ URL already has port, using as-is")
+                else:
+                    logger.info(
+                        f"Mode: Gateway '{gateway_status_address_name}' (no port modification)"
+                    )
+
+                logger.info(f"🎯 RESOLVED from status.address: '{url}'")
+                return url
+            else:
+                logger.info("✗ status.address has no 'url' field")
+                logger.info(f"  Available fields: {list(status_address.keys())}")
+        else:
+            logger.info(f"✗ status.address is not a dict, type: {type(status_address)}")
+    else:
+        logger.info("✗ No status.address found")
+
+    # Fallback to existing status.addresses logic
+    logger.info("--- Falling back to status.addresses lookup ---")
+    status_addresses = status.get("addresses", [])
+    logger.info(f"status.addresses content: {status_addresses}")
+
+    if not status_addresses:
+        logger.info("✗ No status.addresses found - RESOLUTION FAILED")
+        return None
+
+    logger.info(f"✓ Found {len(status_addresses)} address(es) in status.addresses")
+
+    for i, address in enumerate(status_addresses):
+        logger.info(f"Checking address[{i}]: {address}")
+
         # When gateway_status_address_name is None, return the first address with a URL and append port 8000
         if gateway_status_address_name is None:
+            logger.info("  Mode: No gateway filter (looking for any URL)")
             if address.get("url"):
                 url = address["url"]
+                logger.info(f"  ✓ Found URL in address[{i}]: '{url}'")
                 # Append port 8000 when not using gateway if no port is already specified
                 if ":" not in url.split("/")[-1]:  # Check if no port in the hostname part
                     url = f"{url}:8000"
+                    logger.info(f"  ✓ Appended port 8000: '{url}'")
+                else:
+                    logger.info("  ✓ URL already has port, using as-is")
+
+                logger.info(f"🎯 RESOLVED from status.addresses[{i}]: '{url}'")
                 return url
+            else:
+                logger.info(f"  ✗ Address[{i}] has no 'url' field")
+                logger.info(f"    Available fields: {list(address.keys())}")
         # Otherwise, match by name
-        elif address.get("name") == gateway_status_address_name and address.get("url"):
-            return address["url"]
+        else:
+            address_name = address.get("name")
+            logger.info(
+                f"  Mode: Gateway filter (looking for name='{gateway_status_address_name}')"
+            )
+            logger.info(f"  Address[{i}] name: '{address_name}'")
+
+            if address_name == gateway_status_address_name:
+                logger.info(f"  ✓ Name matches '{gateway_status_address_name}'")
+                if address.get("url"):
+                    url = address["url"]
+                    logger.info(f"  ✓ Found URL: '{url}'")
+                    logger.info(f"🎯 RESOLVED from status.addresses[{i}] by name: '{url}'")
+                    return url
+                else:
+                    logger.info("  ✗ Matching address has no 'url' field")
+                    logger.info(f"    Available fields: {list(address.keys())}")
+            else:
+                logger.info(
+                    f"  ✗ Name mismatch: '{address_name}' != '{gateway_status_address_name}'"
+                )
+
+    logger.info("❌ RESOLUTION FAILED - No suitable URL found in any address")
     return None
 
 
-@retry(attempts=90, delay=10, backoff=1.0)
+@retry(attempts=30, delay=10, backoff=1.0)
 @task
 def resolve_endpoint_task(args, ctx):
     """Resolve the gateway endpoint URL"""
