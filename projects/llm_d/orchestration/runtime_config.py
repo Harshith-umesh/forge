@@ -12,7 +12,7 @@ from typing import Any
 
 import yaml
 
-from projects.core.dsl.utils import slugify_identifier, truncate_k8s_name
+from projects.core.dsl.utils import slugify_identifier
 from projects.core.library import config, env, run
 
 logger = logging.getLogger(__name__)
@@ -32,7 +32,6 @@ class RunSpec:
     benchmark_slug: str | None
     namespace: str
     artifact_dirname: str
-    namespace_is_managed: bool
 
 
 def init() -> Path:
@@ -114,9 +113,167 @@ def deep_merge(base: Any, override: Any) -> Any:
     return merged
 
 
+def _extract_value_from_profile_name(profile_name: str, field_name: str) -> int:
+    """Extract configuration values from profile names.
+
+    Supports patterns:
+    - simple-tp4-x4: tensor_parallelism=4, replicas=4
+    - intelligentrouting-tp4-x4: tensor_parallelism=4, replicas=4
+    - pd-d.x2-p.tp4-d.tp4-p.x1: prefill_pods=1, decode_pods=2, tensor_parallelism=4
+
+    Args:
+        profile_name: The deployment profile name
+        field_name: The field to extract (tensor_parallelism, replicas, prefill_pods, decode_pods, prefill_tensor_parallelism)
+
+    Returns:
+        Extracted integer value
+
+    Raises:
+        ValueError: If the pattern is not recognized or value cannot be extracted
+    """
+    # P/D pattern: pd-d.x2-p.tp4-d.tp4-p.x1
+    if profile_name.startswith("pd-"):
+        # P/D naming: pd-d.x{decode_pods}-p.tp{tensor_parallelism}-d.tp{decode_tensor_parallelism}-p.x{prefill_pods}
+        # Extract different components
+        if field_name == "tensor_parallelism":
+            # For main container: d.tp4 or tp4
+            match = re.search(r"d\.tp(\d+)", profile_name)
+            if match:
+                return int(match.group(1))
+            match = re.search(r"(?<!p\.)tp(\d+)", profile_name)  # tp but not p.tp
+            if match:
+                return int(match.group(1))
+        elif field_name == "prefill_pods":
+            # Look for p.x1 pattern
+            match = re.search(r"p\.x(\d+)", profile_name)
+            if match:
+                return int(match.group(1))
+        elif field_name == "decode_pods":
+            # For main container replicas: d.x2 or x2
+            match = re.search(r"d\.x(\d+)", profile_name)
+            if match:
+                return int(match.group(1))
+            match = re.search(r"(?<!p\.)x(\d+)", profile_name)  # x but not p.x
+            if match:
+                return int(match.group(1))
+        elif field_name == "prefill_tensor_parallelism":
+            # Look for p.tp4 pattern (prefill tensor_parallelism)
+            match = re.search(r"p\.tp(\d+)", profile_name)
+            if match:
+                return int(match.group(1))
+    else:
+        # Standard patterns: simple-tp4-x4, intelligentrouting-tp4-x4
+        if field_name == "tensor_parallelism":
+            # Look for tp4 pattern
+            match = re.search(r"tp(\d+)", profile_name)
+            if match:
+                return int(match.group(1))
+        elif field_name == "replicas":
+            # For standard deployments: x4 (but not d.x4 or p.x4)
+            match = re.search(r"(?<!d\.|p\.)x(\d+)", profile_name)
+            if match:
+                return int(match.group(1))
+
+    raise ValueError(f"Could not extract {field_name} from profile name: {profile_name}")
+
+
+def _resolve_from_name_values(profile_name: str, profile_data: dict[str, Any]) -> dict[str, Any]:
+    """Resolve FROM_NAME placeholders in profile configuration with values from profile name.
+
+    Args:
+        profile_name: The deployment profile name to extract values from
+        profile_data: The profile configuration that may contain FROM_NAME placeholders
+
+    Returns:
+        Profile configuration with FROM_NAME placeholders resolved to actual values
+    """
+    resolved = copy.deepcopy(profile_data)
+
+    def resolve_value(obj: Any, path: str = "") -> Any:
+        if isinstance(obj, dict):
+            result = {}
+            for key, value in obj.items():
+                current_path = f"{path}.{key}" if path else key
+                result[key] = resolve_value(value, current_path)
+            return result
+        elif isinstance(obj, list):
+            return [resolve_value(item, path) for item in obj]
+        elif obj == "FROM_NAME":
+            # Determine which field to extract based on the path
+            field_name = path.split(".")[-1]  # Get the last part of the path
+            try:
+                return _extract_value_from_profile_name(profile_name, field_name)
+            except ValueError as e:
+                logger.warning(f"Failed to extract {field_name} from {profile_name}: {e}")
+                return obj  # Return the original FROM_NAME if extraction fails
+        else:
+            return obj
+
+    return resolve_value(resolved)
+
+
 def _load_yaml(path: Path) -> Any:
     with path.open(encoding="utf-8") as handle:
         return yaml.safe_load(handle)
+
+
+def _load_scheduler_with_epp_config(
+    config_dir: Path, scheduler_manifest: str, deployment_profile: dict[str, Any]
+) -> dict[str, Any]:
+    """Load scheduler configuration using router template with EPP config replacement.
+
+    Uses configurable paths from runtime.router config.
+
+    Args:
+        config_dir: Configuration directory path
+        scheduler_manifest: Path to EPP config file (e.g., "manifests/deployments/approximate-prefix-cache.yaml")
+        deployment_profile: Resolved deployment profile for templating
+
+    Returns:
+        Scheduler data with EPP config content replacing placeholder
+    """
+
+    # Get configurable paths and placeholder
+    router_template_file = config.project.get_config("runtime.router.template.file")
+    router_placeholder = config.project.get_config("runtime.router.template.placeholder")
+    epp_config_dir = config.project.get_config("runtime.router.epp")
+
+    # Load the router template
+    router_template_path = config_dir / router_template_file
+    if not router_template_path.exists():
+        # Fallback to legacy behavior if template doesn't exist
+        raise FileNotFoundError(f"Router template not found at {router_template_path}")
+
+    # Load the EPP config content
+    # Convert scheduler_manifest path to EPP config directory
+    # e.g., "manifests/deployments/approximate-prefix-cache.yaml" -> "manifests/scheduler_config/approximate-prefix-cache.yaml"
+    manifest_path = Path(scheduler_manifest)
+    epp_config_filename = manifest_path.name
+    epp_config_path = config_dir / epp_config_dir / epp_config_filename
+
+    if not epp_config_path.exists():
+        raise FileNotFoundError(f"EPP config not found at {epp_config_path}")
+
+    # Load both files
+    router_template_data = _load_yaml(router_template_path)
+    epp_config_data = _load_yaml(epp_config_path)
+
+    # Replace placeholder in the parsed data structure (avoids YAML formatting issues)
+    def replace_placeholder_in_structure(obj):
+        if isinstance(obj, dict):
+            return {key: replace_placeholder_in_structure(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [replace_placeholder_in_structure(item) for item in obj]
+        elif isinstance(obj, str) and obj == router_placeholder:
+            # Convert EPP config to YAML string for the --config-text argument
+            return yaml.dump(epp_config_data, default_flow_style=False, sort_keys=False).strip()
+        else:
+            return obj
+
+    # Perform the replacement in the structure
+    replaced_data = replace_placeholder_in_structure(router_template_data)
+
+    return replaced_data
 
 
 def get_config_dir() -> Path:
@@ -130,8 +287,8 @@ def get_job_name() -> str:
     if job_name:
         return job_name
 
-    preset_name = config.project.get_config("runtime.selected_preset")
-    return f"local-{preset_name}"
+    deployment_profile = config.project.get_config("runtime.deployment_profile")
+    return f"local-{deployment_profile}"
 
 
 def get_platform_config() -> dict[str, Any]:
@@ -139,47 +296,9 @@ def get_platform_config() -> dict[str, Any]:
     return normalize_platform_config(copy.deepcopy(config.project.get_config("platform")))
 
 
-def _derive_base_namespace() -> str:
-    platform_data = get_platform_config()
-    namespace_override = _get_runtime_value("namespace_override")
-    namespace_config = platform_data["cluster"]["namespace"]
-    default_namespace = namespace_config.get("name")
-
-    if namespace_override:
-        return namespace_override
-    if default_namespace:
-        return default_namespace
-
-    return derive_namespace(
-        get_job_name(),
-        namespace_config["prefix"],
-        namespace_config["max_length"],
-    )
-
-
 def get_namespace() -> str:
-    """Get the resolved namespace for this execution"""
-    return _derive_base_namespace()
-
-
-_namespace_is_managed_override: bool | None = None
-
-
-def get_namespace_is_managed() -> bool:
-    """Check if namespace is managed (auto-derived) vs explicitly configured.
-
-    Inside activate_run_spec(), returns the base managed state captured before
-    the run-spec override was applied (otherwise the namespace_override set by
-    activate_run_spec would always flip this to False).
-    """
-    if _namespace_is_managed_override is not None:
-        return _namespace_is_managed_override
-
-    namespace_override = _get_runtime_value("namespace_override")
-    platform_data = get_platform_config()
-    default_namespace = platform_data["cluster"]["namespace"].get("name")
-
-    return namespace_override is None and default_namespace is None
+    """Get the namespace for this execution"""
+    return _get_runtime_value("namespace")
 
 
 def get_model_name() -> str:
@@ -284,19 +403,121 @@ def get_deployment_profile_name() -> str:
     return deployment_profiles[0]
 
 
+def _resolve_template_profile(
+    profile_name: str, deployment_config: dict[str, Any]
+) -> dict[str, Any]:
+    """Resolve a profile name to a template-based configuration if no direct match exists.
+
+    Args:
+        profile_name: The deployment profile name (e.g., "simple-tp4-x4")
+        deployment_config: The full deployments configuration
+
+    Returns:
+        Template configuration to use, or raises ValueError if no template matches
+
+    Raises:
+        ValueError: If no template pattern matches the profile name
+    """
+    templates = deployment_config.get("templates", {})
+    if not templates:
+        raise ValueError("No templates section found in deployment config")
+
+    # Extract first component and check if it matches a template
+    template_name = profile_name.partition("-")[0]
+    if template_name not in templates:
+        raise ValueError(f"No template found for profile name pattern: {profile_name}")
+
+    logger.info(f"Using template {template_name} for profile {profile_name}")
+    return copy.deepcopy(templates[template_name])
+
+
 def get_deployment_profile() -> dict[str, Any]:
     profile_name = get_deployment_profile_name()
     deployment_config = copy.deepcopy(config.project.get_config("deployments"))
-    profile = copy.deepcopy(deployment_config[profile_name])
+
+    # First try direct profile lookup in profiles section
+    profiles = deployment_config.get("profiles", {})
+    if profile_name in profiles:
+        profile = copy.deepcopy(profiles[profile_name])
+    else:
+        # Fall back to template-based resolution
+        profile = _resolve_template_profile(profile_name, deployment_config)
+
     defaults = copy.deepcopy(deployment_config.get("defaults", {}))
 
     scheduler_manifest = profile.pop("scheduler_manifest", None)
     resolved_profile = deep_merge(defaults, profile)
-    if scheduler_manifest:
-        scheduler_data = _load_yaml(get_config_dir() / scheduler_manifest)
-        resolved_profile = deep_merge(resolved_profile, scheduler_data)
+
+    # Resolve FROM_NAME placeholders with values extracted from profile name
+    resolved_profile = _resolve_from_name_values(profile_name, resolved_profile)
+
+    scheduler_content = None
+    if scheduler_manifest is None:
+        # scheduler disabled, nothing to do
+        return resolved_profile
+
+    if isinstance(scheduler_manifest, dict) and len(scheduler_manifest) == 0:  # {}
+        # Create simplified scheduler with just basic container structure - override completely
+        scheduler_content = {
+            "scheduler": {
+                "template": {
+                    "containers": [{"name": "main"}],
+                }
+            }
+        }
+        # Don't merge - directly assign to override template defaults
+        resolved_profile["scheduler"] = scheduler_content["scheduler"]
+    else:
+        # use __router_template__.yaml with EPP config replacement
+        scheduler_content = _load_scheduler_with_epp_config(
+            get_config_dir(), scheduler_manifest, resolved_profile
+        )
+
+    resolved_profile = deep_merge(resolved_profile, scheduler_content)
+
+    # force the scheduler to run on a GPU node.
+    # 'gpu.present: true' doesn't work on AKS/CKS
+    scheduler_node_selector = {
+        "scheduler": {
+            "template": {
+                "nodeSelector": {"nvidia.com/gpu.deploy.container-toolkit": "true"},
+            }
+        }
+    }
+
+    resolved_profile = deep_merge(resolved_profile, scheduler_node_selector)
 
     return resolved_profile
+
+
+def get_pd_config() -> dict[str, Any]:
+    """Get P/D configuration from active deployment profile."""
+    profile = get_deployment_profile()
+    return profile.get("pd_config", {})
+
+
+def get_prefill_pod_count() -> int:
+    """Get number of prefill pods for current deployment profile."""
+    pd_config = get_pd_config()
+    return pd_config.get("prefill_pods", 1)
+
+
+def get_decode_pod_count() -> int:
+    """Get number of decode pods for current deployment profile."""
+    pd_config = get_pd_config()
+    return pd_config.get("decode_pods", 1)
+
+
+def get_scheduler_config() -> str:
+    """Get scheduler configuration for current deployment profile."""
+    pd_config = get_pd_config()
+    return pd_config.get("scheduler_config", "default")
+
+
+def is_pd_deployment() -> bool:
+    """Check if current deployment profile is a P/D deployment."""
+    profile = get_deployment_profile()
+    return "pd_config" in profile
 
 
 def get_smoke_request() -> dict[str, Any]:
@@ -332,29 +553,13 @@ def get_run_specs() -> list[RunSpec]:
         benchmark_entries = [(None, None)]
 
     combinations = list(product(model_names, profile_names, benchmark_entries))
-    base_namespace = _derive_base_namespace()
-    namespace_max_length = get_platform_config()["cluster"]["namespace"]["max_length"]
-    # Compute base managed state once (ignores per-spec overrides)
-    namespace_is_managed = get_namespace_is_managed()
+    namespace = get_namespace()
+
     run_specs: list[RunSpec] = []
 
     for model_name, profile_name, (bench_key, bench_slug) in combinations:
         model_slug = get_model_slug(model_name)
         profile_slug = slugify_identifier(profile_name, max_length=24)
-        if len(combinations) == 1:
-            namespace = base_namespace
-            artifact_dirname = "llmd_run"
-        else:
-            ns_parts = [base_namespace, model_slug, profile_slug]
-            dir_parts = ["llmd_run", profile_slug, model_slug]
-            if bench_slug is not None:
-                ns_parts.append(bench_slug)
-                dir_parts.append(bench_slug)
-            namespace = truncate_k8s_name(
-                "-".join(ns_parts),
-                max_length=namespace_max_length,
-            )
-            artifact_dirname = "_".join(dir_parts)
 
         run_specs.append(
             RunSpec(
@@ -365,8 +570,7 @@ def get_run_specs() -> list[RunSpec]:
                 benchmark_key=bench_key,
                 benchmark_slug=bench_slug,
                 namespace=namespace,
-                artifact_dirname=artifact_dirname,
-                namespace_is_managed=namespace_is_managed,
+                artifact_dirname=f"llmd__{bench_key or 'default'}",
             )
         )
 
@@ -376,7 +580,6 @@ def get_run_specs() -> list[RunSpec]:
 @contextmanager
 def activate_run_spec(run_spec: RunSpec):
     """Temporarily activate a run spec by setting its runtime config values."""
-    global _namespace_is_managed_override
 
     saved = {
         "model_name": _get_runtime_value("model_name"),
@@ -384,32 +587,19 @@ def activate_run_spec(run_spec: RunSpec):
         "namespace_override": _get_runtime_value("namespace_override"),
         "benchmark_key": _get_runtime_value("benchmark_key"),
     }
-    prev_managed_override = _namespace_is_managed_override
 
     config.project.set_config("runtime.model_name", run_spec.model_name)
     config.project.set_config("runtime.deployment_profile", run_spec.deployment_profile_name)
-    config.project.set_config("runtime.namespace_override", run_spec.namespace)
     config.project.set_config("runtime.benchmark_key", run_spec.benchmark_key)
-    _namespace_is_managed_override = run_spec.namespace_is_managed
     try:
         yield
     finally:
         config.project.set_config("runtime.model_name", saved["model_name"])
         config.project.set_config("runtime.deployment_profile", saved["deployment_profile"])
-        config.project.set_config("runtime.namespace_override", saved["namespace_override"])
         config.project.set_config("runtime.benchmark_key", saved["benchmark_key"])
-        _namespace_is_managed_override = prev_managed_override
 
 
 def normalize_platform_config(platform_data: dict[str, Any]) -> dict[str, Any]:
-    cluster = platform_data["cluster"]
-    if "namespace" not in cluster:
-        cluster["namespace"] = {
-            "name": cluster.pop("namespace_name", None),
-            "prefix": cluster.pop("namespace_prefix"),
-            "max_length": cluster.pop("namespace_max_length"),
-        }
-
     operators = platform_data["operators"]
     if isinstance(operators, list):
         platform_data["operators"] = {
@@ -420,23 +610,6 @@ def normalize_platform_config(platform_data: dict[str, Any]) -> dict[str, Any]:
         }
 
     return platform_data
-
-
-def derive_namespace(job_name: str, prefix: str, max_length: int) -> str:
-    slug = re.sub(r"[^a-z0-9-]+", "-", job_name.lower())
-    slug = re.sub(r"-{2,}", "-", slug).strip("-")
-    if not slug:
-        slug = "run"
-
-    if slug.startswith(f"{prefix}-"):
-        namespace = slug
-    else:
-        namespace = f"{prefix}-{slug}"
-
-    namespace = namespace[:max_length].rstrip("-")
-    if not namespace:
-        raise ValueError(f"Could not derive a valid namespace from job name: {job_name}")
-    return namespace
 
 
 def version_tuple(value: str) -> tuple[int, ...]:

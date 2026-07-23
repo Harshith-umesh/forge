@@ -309,7 +309,7 @@ def run_postprocess_after_test(
 
     if not postprocess_config.enabled:
         logger.info("Caliper post-processing disabled (caliper.postprocess.enabled: false).")
-        return
+        return dict(success=True, final_status="Post-processing disabled")
 
     artifact_root_path = Path(artifact_root).resolve() if artifact_root is not None else None
 

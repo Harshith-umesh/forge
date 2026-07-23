@@ -1,14 +1,14 @@
 cluster:
   minimum_openshift_version: "4.19.9"
-  namespace:
-    name: forge-llm-d
-    prefix: llm-d
-    max_length: 63
   gpu_node_label_selector: nvidia.com/gpu.present=true
   nfd_gpu_detection_labels:
     - feature.node.kubernetes.io/pci-10de.present
     - feature.node.kubernetes.io/pci-0302_10de.present
     - feature.node.kubernetes.io/pci-0300_10de.present
+  namespace:
+    labels:
+      app.kubernetes.io/managed-by: forge
+      forge.openshift.io/project: llm_d
 
 operators:
   openshift-cert-manager-operator:
