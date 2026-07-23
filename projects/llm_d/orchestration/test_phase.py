@@ -134,6 +134,7 @@ def run() -> int:
 
 def run_finalizers(
     endpoint_url: str | None,
+    llmisvc_name: str | None,
     primary_exc: tuple[type[BaseException], BaseException, Any] | None,
     finalizer_exc: tuple[type[BaseException], BaseException, Any] | None,
 ) -> tuple[type[BaseException], BaseException, Any] | None:
@@ -156,10 +157,16 @@ def run_finalizers(
     platform = runtime_config.get_platform_config()
     capture_namespace_events = platform["artifacts"]["capture_namespace_events"]
 
-    finalizer_exc = _run_finalizer(
-        "capturing inference-service state",
-        capture_inference_service_state,
-    )
+    # Only capture service state if we have the llmisvc_name
+    if llmisvc_name:
+        finalizer_exc = _run_finalizer(
+            "capturing inference-service state",
+            capture_inference_service_state,
+            llmisvc_name=llmisvc_name,
+        )
+    else:
+        logging.warning("No llmisvc name received, cannot capture the llmisvc state")
+
     finalizer_exc = _run_finalizer(
         "writing endpoint URL",
         write_endpoint_url,
@@ -197,6 +204,7 @@ def do_test() -> int:
         ensure_kueue_local_queue()
 
     endpoint_url: str | None = None
+    llmisvc_name: str | None = None
     primary_exc: tuple[type[BaseException], BaseException, Any] | None = None
     finalizer_exc: tuple[type[BaseException], BaseException, Any] | None = None
 
@@ -204,7 +212,20 @@ def do_test() -> int:
         # Create test labels with actual model and profile information
         create_test_labels()
 
-        endpoint_url = deploy_inference_service()
+        # Generate the LLMInferenceService name before deployment
+        # so we have it available even if deployment fails
+        from projects.core.dsl.utils import slugify_identifier
+
+        platform = runtime_config.get_platform_config()
+        inference_service = platform["inference_service"]
+        base_name = inference_service["name"]
+        deployment_profile_name = runtime_config.get_deployment_profile_name()
+        llmisvc_name = (
+            f"{base_name}-{deployment_profile_name}" if deployment_profile_name else base_name
+        )
+        llmisvc_name = slugify_identifier(llmisvc_name)
+
+        endpoint_url = deploy_inference_service(llmisvc_name)
 
         if dry_run:
             logging.warning("Running in dry-run mode, skipping the rest of the test steps")
@@ -229,7 +250,9 @@ def do_test() -> int:
             do_finalizers = False
 
         if do_finalizers:
-            primary_exc, finalizer_exc = run_finalizers(endpoint_url, primary_exc, finalizer_exc)
+            primary_exc, finalizer_exc = run_finalizers(
+                endpoint_url, llmisvc_name, primary_exc, finalizer_exc
+            )
 
     if primary_exc is not None:
         raise primary_exc[1].with_traceback(primary_exc[2])
@@ -240,11 +263,14 @@ def do_test() -> int:
     return 0
 
 
-def deploy_inference_service() -> str:
-    """Deploy LLMInferenceService and return endpoint URL.
+def deploy_inference_service(llmisvc_name: str) -> str:
+    """Deploy LLMInferenceService and return endpoint URL and service name.
+
+    Args:
+        llmisvc_name: The name of the LLMInferenceService to deploy
 
     Returns:
-        Gateway endpoint URL for the deployed service
+        Gateway endpoint URL
     """
     logger.info("Starting LLMInferenceService deployment")
 
@@ -253,6 +279,9 @@ def deploy_inference_service() -> str:
     namespace = runtime_config.get_namespace()
     platform = runtime_config.get_platform_config()
     gateway = platform["gateway"]
+    inference_service = platform["inference_service"]
+
+    # llmisvc_name is now passed as a parameter
 
     dry_run = config.project.get_config("runtime.kserve.dry_run")
     wait_readiness = config.project.get_config("runtime.kserve.wait_readiness")
@@ -289,7 +318,7 @@ def deploy_inference_service() -> str:
         llmisvc_manifest_path = endpoint_url
         logger.info("Dry-run completed: LLMInferenceService manifest prepared:")
         logger.info(llmisvc_manifest_path)
-        return llmisvc_manifest_path
+        return llmisvc_manifest_path, llmisvc_name
 
     logger.info("LLMInferenceService deployed successfully, endpoint: %s", endpoint_url)
     return endpoint_url
@@ -391,15 +420,12 @@ def run_guidellm_benchmark(*, endpoint_url: str) -> None:
         )
 
 
-def capture_inference_service_state() -> None:
-    # Load config where it's consumed
-
+def capture_inference_service_state(llmisvc_name: str) -> None:
+    """Capture inference service state for the given llmisvc name."""
     namespace = runtime_config.get_namespace()
-    platform = runtime_config.get_platform_config()
-    inference_service = platform["inference_service"]
 
     capture_llmisvc_state.run(
-        llmisvc_name=inference_service["name"],
+        llmisvc_name=llmisvc_name,
         namespace=namespace,
     )
 
