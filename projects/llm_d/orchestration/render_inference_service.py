@@ -19,6 +19,18 @@ def _load_yaml(path: Path) -> Any:
         return yaml.safe_load(handle)
 
 
+def _replace_placeholders(value: Any, replacements: dict[str, str]) -> Any:
+    """Replace Python-time deployment placeholders while preserving value types."""
+    if isinstance(value, dict):
+        return {key: _replace_placeholders(item, replacements) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_replace_placeholders(item, replacements) for item in value]
+    if isinstance(value, str):
+        for placeholder, replacement in replacements.items():
+            value = value.replace(placeholder, replacement)
+    return value
+
+
 def _create_model_cache_spec(
     model_cache: dict[str, Any],
     source_uri: str,
@@ -113,6 +125,18 @@ def render_inference_service_from_parts(
         model_slug=model_slug,
         namespace=namespace,
     )
+
+    # These sentinels are resolved here because VLLM_ADDITIONAL_ARGS is opaque
+    # shell input and cannot use controller-time Go-template substitutions.
+    rendered_service_name = f"llm-d-{deployment_profile_name}" if deployment_profile_name else name
+    deployment_profile = _replace_placeholders(
+        deployment_profile,
+        {
+            "__INFERENCE_SERVICE_NAME__": rendered_service_name,
+            "__MODEL_NAME__": model_name.removeprefix("hf://"),
+        },
+    )
+    manifest["metadata"]["annotations"].update(deployment_profile.get("annotations", {}))
 
     manifest["spec"]["model"]["uri"] = cache_spec["model_uri"] if cache_spec else source_uri
     manifest["spec"]["model"]["name"] = model_slug
@@ -269,6 +293,9 @@ def _render_standard_deployment(
         serving_container["env"] = []
 
     serving_container["env"].append({"name": "VLLM_ADDITIONAL_ARGS", "value": vllm_additional_args})
+    serving_container["env"].extend(
+        copy.deepcopy(deployment_profile.get("vllm_extra", {}).get("env", []))
+    )
 
     # Configure router/scheduler
     has_scheduler_key = "scheduler" in deployment_profile

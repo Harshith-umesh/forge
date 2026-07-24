@@ -12,7 +12,7 @@ from typing import Any
 
 import yaml
 
-from projects.core.dsl.utils import slugify_identifier
+from projects.core.dsl.utils import slugify_identifier, truncate_k8s_name
 from projects.core.library import config, env, run
 
 logger = logging.getLogger(__name__)
@@ -611,13 +611,25 @@ def get_run_specs() -> list[RunSpec]:
         benchmark_entries = [(None, None)]
 
     combinations = list(product(model_names, profile_names, benchmark_entries))
-    namespace = get_namespace()
+    base_namespace = get_namespace()
+    isolate_run_specs = bool(_get_runtime_value("isolate_run_specs"))
 
     run_specs: list[RunSpec] = []
 
     for model_name, profile_name, (bench_key, bench_slug) in combinations:
         model_slug = get_model_slug(model_name)
         profile_slug = slugify_identifier(profile_name, max_length=24)
+        if not isolate_run_specs or len(combinations) == 1:
+            namespace = base_namespace
+            artifact_dirname = f"llmd__{bench_key or 'default'}"
+        else:
+            namespace_parts = [base_namespace, model_slug, profile_slug]
+            artifact_parts = ["llmd", model_slug, profile_slug]
+            if bench_slug:
+                namespace_parts.append(bench_slug)
+                artifact_parts.append(bench_slug)
+            namespace = truncate_k8s_name("-".join(namespace_parts), max_length=63)
+            artifact_dirname = "__".join(artifact_parts)
 
         run_specs.append(
             RunSpec(
@@ -628,7 +640,7 @@ def get_run_specs() -> list[RunSpec]:
                 benchmark_key=bench_key,
                 benchmark_slug=bench_slug,
                 namespace=namespace,
-                artifact_dirname=f"llmd__{bench_key or 'default'}__{profile_slug}",
+                artifact_dirname=artifact_dirname,
             )
         )
 
@@ -642,18 +654,20 @@ def activate_run_spec(run_spec: RunSpec):
     saved = {
         "model_name": _get_runtime_value("model_name"),
         "deployment_profile": _get_runtime_value("deployment_profile"),
-        "namespace_override": _get_runtime_value("namespace_override"),
+        "namespace": _get_runtime_value("namespace"),
         "benchmark_key": _get_runtime_value("benchmark_key"),
     }
 
     config.project.set_config("runtime.model_name", run_spec.model_name)
     config.project.set_config("runtime.deployment_profile", run_spec.deployment_profile_name)
+    config.project.set_config("runtime.namespace", run_spec.namespace)
     config.project.set_config("runtime.benchmark_key", run_spec.benchmark_key)
     try:
         yield
     finally:
         config.project.set_config("runtime.model_name", saved["model_name"])
         config.project.set_config("runtime.deployment_profile", saved["deployment_profile"])
+        config.project.set_config("runtime.namespace", saved["namespace"])
         config.project.set_config("runtime.benchmark_key", saved["benchmark_key"])
 
 

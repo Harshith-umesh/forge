@@ -56,8 +56,8 @@ def test_release_deployment_profiles_have_expected_shape() -> None:
     distributed = runtime_config.get_deployment_profile()
 
     for profile in (approximate, precise, distributed):
-        assert profile["replicas"] == 1
-        assert profile["tensor_parallelism"] == 1
+        assert profile["replicas"] == 4
+        assert profile["tensor_parallelism"] == 2
 
     assert isinstance(approximate["scheduler"], dict)
     assert isinstance(precise["scheduler"], dict)
@@ -185,6 +185,35 @@ def test_release_preset_produces_3_run_specs() -> None:
     ]
     assert all(spec.model_name == "openai/gpt-oss-120b" for spec in run_specs)
     assert all(spec.deployment_profile_name == "distributed-default" for spec in run_specs)
+
+
+def test_llama_release_preset_produces_deployment_workload_matrix() -> None:
+    _init_project_config()
+
+    core_config.project.apply_preset("llama-33-70b-rhoai-release")
+
+    run_specs = runtime_config.get_run_specs()
+    assert len(run_specs) == 9
+    assert {spec.deployment_profile_name for spec in run_specs} == {
+        "distributed-default",
+        "precise-prefix-cache",
+        "approximate-prefix-cache",
+    }
+    assert {spec.benchmark_key for spec in run_specs} == {
+        "concurrent-1k-1k",
+        "heavy-heterogeneous",
+        "multi-turn",
+    }
+    assert len({spec.namespace for spec in run_specs}) == 9
+
+
+def test_precise_profile_preserves_kv_events_json_for_the_serving_eval() -> None:
+    _init_project_config()
+    core_config.project.set_config("runtime.deployment_profile", "precise-prefix-cache")
+
+    profile = runtime_config.get_deployment_profile()
+    args = profile["vllm_extra"]["args"]
+    assert args["kv_events_config"].startswith('\'{"enable_kv_cache_events"')
 
 
 def test_ci_init_uses_framework_project_args_preset_and_keeps_var_overrides() -> None:
@@ -671,12 +700,12 @@ def test_render_uses_sanitized_model_name_and_profile_resources() -> None:
         model_cache=runtime_config.get_model_cache_config(),
     )
 
-    assert manifest["spec"]["replicas"] == 1
+    assert manifest["spec"]["replicas"] == 4
     assert manifest["spec"]["model"]["uri"] == "hf://openai/gpt-oss-120b"
     assert manifest["spec"]["model"]["name"] == "openai-gpt-oss-120b"
     assert manifest["spec"]["template"]["containers"][0]["resources"] == {
-        "requests": {"nvidia.com/gpu": "1"},
-        "limits": {"nvidia.com/gpu": "1"},
+        "requests": {"nvidia.com/gpu": "2"},
+        "limits": {"nvidia.com/gpu": "2"},
     }
     assert manifest["spec"]["router"]["scheduler"] == {}
 
