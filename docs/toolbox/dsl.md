@@ -37,8 +37,7 @@ def ensure_project(args, ctx):
 ```python
 @when(lambda: some_other_task.status.return_value is True)
 @task
-def follow_up(args, ctx):
-    ...
+def follow_up(args, ctx): ...
 ```
 
 Because the condition is called with **no arguments**, anything dynamic must come from a **closure**, module-level state, or another task’s `.status.return_value` (see `TaskResult` in `script_manager.py`).
@@ -69,8 +68,7 @@ def wait_until_ready(args, ctx):
 ```python
 @retry(attempts=5, delay=2, backoff=1.5, retry_on_exceptions=True)
 @task
-def call_flaky_api(args, ctx):
-    ...
+def call_flaky_api(args, ctx): ...
 ```
 
 If all attempts fail, `RetryFailure` is raised (wrapped in `TaskExecutionError` during `execute_tasks`, with the underlying `RetryFailure` available as `TaskExecutionError.__cause__` when that applies).

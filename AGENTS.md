@@ -55,7 +55,9 @@ def apply_secret(manifest: dict) -> None:
     """Apply a Secret manifest via stdin — nothing written to disk."""
     import yaml
     from projects.core.dsl.utils.k8s import oc
+
     oc("apply", "-f", "-", input_text=yaml.safe_dump(manifest, sort_keys=False))
+
 
 # GOOD: Guard before using oc_apply
 def safe_oc_apply(artifact_path, manifest):

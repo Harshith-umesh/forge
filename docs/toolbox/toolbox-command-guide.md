@@ -174,6 +174,7 @@ def capture_resources(args, ctx):
     shell.run("oc delete pod mypod", check=False)
     return "Cleanup completed"
 
+
 @always
 @task
 def cleanup_resources(args, ctx):
@@ -195,10 +196,13 @@ shell.run("oc get pods")
 result = shell.run("oc get pods -o json")
 if result.success:
     import json
+
     pods = json.loads(result.stdout)
 
 # Save output to file
-shell.run("oc describe pod mypod", stdout_dest=args.artifact_dir / "artifacts" / "pod-description.txt")
+shell.run(
+    "oc describe pod mypod", stdout_dest=args.artifact_dir / "artifacts" / "pod-description.txt"
+)
 
 # Don't fail on error
 shell.run("oc delete pod optional-pod", check=False)
@@ -278,21 +282,16 @@ def capture_pod_status(args, ctx):
 
     # Human readable
     shell.run(
-        "oc describe pod mypod",
-        stdout_dest=args.artifact_dir / "artifacts" / "pod-describe.txt"
+        "oc describe pod mypod", stdout_dest=args.artifact_dir / "artifacts" / "pod-describe.txt"
     )
 
     # Machine readable
     shell.run(
-        "oc get pod mypod -o yaml",
-        stdout_dest=args.artifact_dir / "artifacts" / "pod-status.yaml"
+        "oc get pod mypod -o yaml", stdout_dest=args.artifact_dir / "artifacts" / "pod-status.yaml"
     )
 
     # For large scale tests, also capture JSON
-    shell.run(
-        "oc get pods -o json",
-        stdout_dest=args.artifact_dir / "artifacts" / "all-pods.json"
-    )
+    shell.run("oc get pods -o json", stdout_dest=args.artifact_dir / "artifacts" / "all-pods.json")
 ```
 
 #### Source Directory (`src/`)
@@ -356,7 +355,7 @@ def run(password: str):  # DON'T DO THIS!
 
 #### ❌ BAD: Secrets in environment variables
 ```python
-os.environ['SECRET_TOKEN'] = token  # DON'T DO THIS!
+os.environ["SECRET_TOKEN"] = token  # DON'T DO THIS!
 # Environment variables appear in logs and process lists
 ```
 
@@ -490,9 +489,11 @@ Use descriptive task names that explain the **purpose**, not just the action:
 def wait_for_operator_to_be_ready(args, ctx):
     """Wait for operator deployment to reach ready state"""
 
+
 @task
 def capture_failed_pod_logs(args, ctx):
     """Collect logs from pods that failed to start"""
+
 
 @task
 def verify_service_endpoints_are_available(args, ctx):
@@ -523,7 +524,7 @@ def wait_for_resource_ready(args, ctx):
         shell.run(
             f"oc describe myresource {args.resource_name}",
             stdout_dest=args.artifact_dir / "artifacts" / "failed-resource-describe.txt",
-            check=False
+            check=False,
         )
         raise RuntimeError(f"Failed to query resource {args.resource_name}: {result.stderr}")
 
@@ -541,13 +542,17 @@ def capture_cluster_state(args, ctx):
     """Capture cluster state for post-mortem analysis"""
 
     # Capture even if tests failed
-    shell.run("oc get pods --all-namespaces",
-              stdout_dest=args.artifact_dir / "artifacts" / "all-pods.txt",
-              check=False)
+    shell.run(
+        "oc get pods --all-namespaces",
+        stdout_dest=args.artifact_dir / "artifacts" / "all-pods.txt",
+        check=False,
+    )
 
-    shell.run("oc get events --sort-by='.lastTimestamp'",
-              stdout_dest=args.artifact_dir / "artifacts" / "events.txt",
-              check=False)
+    shell.run(
+        "oc get events --sort-by='.lastTimestamp'",
+        stdout_dest=args.artifact_dir / "artifacts" / "events.txt",
+        check=False,
+    )
 
     return "Cluster state captured"
 ```
@@ -560,9 +565,8 @@ def capture_cluster_state(args, ctx):
 ```python
 #!/usr/bin/env python3
 
-from projects.core.dsl import (
-    always, entrypoint, execute_tasks, retry, shell, task, template
-)
+from projects.core.dsl import always, entrypoint, execute_tasks, retry, shell, task, template
+
 
 @entrypoint
 def run(
@@ -585,6 +589,7 @@ def run(
     """
     return execute_tasks(locals())
 
+
 @task
 def validate_inputs(args, ctx):
     """Validate input parameters"""
@@ -598,6 +603,7 @@ def validate_inputs(args, ctx):
 
     return "Inputs validated"
 
+
 @task
 def setup_directories(args, ctx):
     """Create artifact directories"""
@@ -605,6 +611,7 @@ def setup_directories(args, ctx):
     shell.mkdir("artifacts")
     shell.mkdir("src")
     return "Directories created"
+
 
 @task
 def verify_namespace_exists(args, ctx):
@@ -616,6 +623,7 @@ def verify_namespace_exists(args, ctx):
 
     return f"Namespace {args.namespace} verified"
 
+
 @task
 def create_deployment_manifest(args, ctx):
     """Generate deployment manifest"""
@@ -624,6 +632,7 @@ def create_deployment_manifest(args, ctx):
     template.render_template_to_file("deployment.yaml.j2", manifest_file)
 
     return f"Deployment manifest created: {manifest_file}"
+
 
 @task
 def apply_deployment(args, ctx):
@@ -634,6 +643,7 @@ def apply_deployment(args, ctx):
 
     return f"Deployment {args.service_name} applied"
 
+
 @retry(attempts=10, delay=5)
 @task
 def wait_for_deployment_ready(args, ctx):
@@ -642,7 +652,7 @@ def wait_for_deployment_ready(args, ctx):
     result = shell.run(
         f"oc get deployment {args.service_name} -n {args.namespace} "
         f"-o jsonpath='{{.status.readyReplicas}}'",
-        check=False
+        check=False,
     )
 
     if not result.success:
@@ -654,6 +664,7 @@ def wait_for_deployment_ready(args, ctx):
 
     return False  # Retry
 
+
 @always
 @task
 def capture_deployment_status(args, ctx):
@@ -663,17 +674,18 @@ def capture_deployment_status(args, ctx):
     shell.run(
         f"oc describe deployment {args.service_name} -n {args.namespace}",
         stdout_dest=args.artifact_dir / "artifacts" / "deployment-describe.txt",
-        check=False
+        check=False,
     )
 
     # Capture pod status
     shell.run(
         f"oc get pods -l app={args.service_name} -n {args.namespace} -o yaml",
         stdout_dest=args.artifact_dir / "artifacts" / "pods-status.yaml",
-        check=False
+        check=False,
     )
 
     return "Deployment status captured"
+
 
 if __name__ == "__main__":
     run.main()
