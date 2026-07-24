@@ -59,7 +59,7 @@ success = send_notification(
     message="🟢 Test completed successfully\nResults: https://example.com/results",
     github=True,
     slack=False,
-    dry_run=False
+    dry_run=False,
 )
 ```
 

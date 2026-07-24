@@ -152,7 +152,7 @@ pd_config = runtime_config.get_pd_config()
 
 # Get individual P/D parameters
 prefill_pods = runtime_config.get_prefill_pod_count()  # Returns: 2
-decode_pods = runtime_config.get_decode_pod_count()    # Returns: 4
+decode_pods = runtime_config.get_decode_pod_count()  # Returns: 4
 scheduler_config = runtime_config.get_scheduler_config()  # Returns: 'high-throughput'
 
 # Check if current deployment is P/D
@@ -272,13 +272,13 @@ if not match:
 # For prefill_tensor_parallelism
 match = re.search(r"p\.tp(\d+)", profile_name)  # p.tp1 → 1
 
-# For decode_pods (main container replicas)  
-match = re.search(r"d\.x(\d+)", profile_name)   # d.x2 → 2
+# For decode_pods (main container replicas)
+match = re.search(r"d\.x(\d+)", profile_name)  # d.x2 → 2
 if not match:
     match = re.search(r"(?<!p\.)x(\d+)", profile_name)  # x2 (but not p.x2) → 2
 
 # For prefill_pods
-match = re.search(r"p\.x(\d+)", profile_name)   # p.x8 → 8
+match = re.search(r"p\.x(\d+)", profile_name)  # p.x8 → 8
 ```
 
 ### VLLM Configuration
