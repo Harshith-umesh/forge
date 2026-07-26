@@ -59,13 +59,18 @@ def run(
 
 
 def _parse_time(value) -> datetime:
-    """Parse a datetime from string (ISO format) or pass through if already datetime."""
+    """Parse a datetime from string (ISO format) or pass through if already datetime.
+
+    Naive datetimes are assumed UTC. Aware datetimes are normalized to UTC.
+    """
     if isinstance(value, datetime):
-        return value
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
     dt = datetime.fromisoformat(str(value))
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
-    return dt
+    return dt.astimezone(UTC)
 
 
 @task
@@ -81,10 +86,13 @@ def validate_parameters(args, ctx):
     max_duration_seconds = 2 * 3600
     duration = (ctx.end_time - ctx.start_time).total_seconds()
     if duration > max_duration_seconds:
-        raise ValueError(
-            f"Test duration ({int(duration)}s) exceeds the 2-hour WAL window. "
-            f"Tests longer than 2 hours require persistent block handling (not yet implemented)."
+        logger.warning(
+            "Test duration (%ds) exceeds the 2-hour WAL window. "
+            "Skipping Prometheus capture (persistent block handling not yet implemented).",
+            int(duration),
         )
+        ctx.skip_capture = True
+        return f"SKIPPED: duration {int(duration)}s exceeds 2-hour WAL window"
 
     ctx.output_dir = Path(args.output_dir)
     ctx.output_dir.mkdir(parents=True, exist_ok=True)
@@ -105,6 +113,9 @@ def validate_parameters(args, ctx):
 @task
 def validate_prometheus_pod(args, ctx):
     """Verify the Prometheus pod is running and accessible."""
+
+    if getattr(ctx, "skip_capture", False):
+        return "SKIPPED"
 
     result = shell.run(
         f"oc -n {ctx.namespace} get pod {ctx.pod_name} -o jsonpath='{{.status.phase}}'",
@@ -127,6 +138,9 @@ def create_temp_tsdb_dir(args, ctx):
     instead of the full TSDB which can be tens of GB.
     """
 
+    if getattr(ctx, "skip_capture", False):
+        return "SKIPPED"
+
     ctx.temp_dir = f"{TSDB_PATH}/.capture-tmp-{ctx.start_ms}"
 
     shell.run(
@@ -145,14 +159,18 @@ def create_temp_tsdb_dir(args, ctx):
 def dump_metrics(args, ctx):
     """Run promtool tsdb dump-openmetrics with time filtering against the temp dir."""
 
-    ctx.remote_output = f"{TSDB_PATH}/.capture-metrics-{ctx.start_ms}.gz"
+    if getattr(ctx, "skip_capture", False):
+        return "SKIPPED"
+
+    ctx.remote_raw = f"{TSDB_PATH}/.capture-metrics-{ctx.start_ms}"
+    ctx.remote_output = f"{ctx.remote_raw}.gz"
 
     shell.run(
         f"oc -n {ctx.namespace} exec {ctx.pod_name} -c {ctx.container} -- "
         f"sh -c '"
         f"promtool tsdb dump-openmetrics "
         f"--min-time={ctx.start_ms} --max-time={ctx.end_ms} "
-        f"{ctx.temp_dir} | gzip > {ctx.remote_output}"
+        f"{ctx.temp_dir} > {ctx.remote_raw} && gzip -f {ctx.remote_raw}"
         f"'",
     )
 
@@ -170,6 +188,9 @@ def dump_metrics(args, ctx):
 @task
 def copy_to_output(args, ctx):
     """Copy the compressed metrics file from the pod to the output directory."""
+
+    if getattr(ctx, "skip_capture", False):
+        return "SKIPPED"
 
     ctx.output_file = ctx.output_dir / "metrics.openmetrics.gz"
 
@@ -201,6 +222,13 @@ def cleanup_pod(args, ctx):
     if remote_output:
         shell.run(
             f"oc -n {namespace} exec {pod_name} -c {container} -- rm -f {remote_output}",
+            check=False,
+        )
+
+    remote_raw = getattr(ctx, "remote_raw", None)
+    if remote_raw:
+        shell.run(
+            f"oc -n {namespace} exec {pod_name} -c {container} -- rm -f {remote_raw}",
             check=False,
         )
 
