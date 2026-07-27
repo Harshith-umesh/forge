@@ -255,6 +255,7 @@ def _render_standard_deployment(
     name = truncate_k8s_name(name, max_length=25)
     manifest["metadata"]["name"] = name
     manifest["spec"]["replicas"] = deployment_profile["replicas"]
+    manifest["spec"]["parallelism"] = {"tensor": deployment_profile["tensor_parallelism"]}
 
     serving_container = manifest["spec"]["template"]["containers"][0]
     serving_container["resources"] = _build_serving_resources(deployment_profile)
@@ -308,6 +309,7 @@ def _render_pd_deployment(
     # Configure prefill section
     manifest["spec"]["prefill"] = {
         "replicas": get_prefill_pod_count(),
+        "parallelism": {"tensor": deployment_profile["prefill"]["tensor_parallelism"]},
         "template": _build_pd_pod_template(
             deployment_profile, deployment_profile_name, is_prefill=True, workload=workload
         ),
@@ -315,6 +317,7 @@ def _render_pd_deployment(
 
     # Configure main template (decode)
     manifest["spec"]["replicas"] = get_decode_pod_count()
+    manifest["spec"]["parallelism"] = {"tensor": deployment_profile["decode"]["tensor_parallelism"]}
     manifest["spec"]["template"] = _build_pd_pod_template(
         deployment_profile, deployment_profile_name, is_prefill=False, workload=workload
     )
