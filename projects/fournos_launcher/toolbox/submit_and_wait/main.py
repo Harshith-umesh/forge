@@ -216,7 +216,7 @@ def submit_fournos_job(args, ctx):
     return f"Successfully submitted FOURNOS job: {ctx.final_job_name}"
 
 
-@retry(attempts=360, delay=10, backoff=1.0)
+@retry(attempts=3000, delay=10, backoff=1.0)
 @task
 def wait_for_job_completion(args, ctx):
     """Wait for FOURNOS job to complete"""

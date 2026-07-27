@@ -524,9 +524,7 @@ def _get_mcp_host() -> str:
 
 def _capture_to_file(path: Path, *oc_args: str) -> None:
     """Best-effort capture of oc output to a file."""
-    result = oc(*oc_args, check=False, log_stdout=False)
-    if result.returncode == 0 and result.stdout:
-        path.write_text(result.stdout, encoding="utf-8")
+    oc(*oc_args, check=False, log_stdout=False, stdout_dest=path)
 
 
 def _parse_version(version: str) -> tuple[int, ...]:

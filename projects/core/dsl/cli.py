@@ -216,6 +216,7 @@ def create_dynamic_parser(func, positional_args=None) -> argparse.ArgumentParser
                 cli_name,
                 type=arg_type,
                 required=not has_default,
+                default=param.default if has_default else None,
                 dest=param_name,
                 help=help_text,
             )

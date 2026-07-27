@@ -116,7 +116,7 @@ from projects.core.library import vault
 vault.disable_strict_validation()
 
 # All subsequent vault operations will use warning mode
-vault.init(['psap-forge-ci'])  # Uses non-strict validation
+vault.init(["psap-forge-ci"])  # Uses non-strict validation
 ```
 
 **When to use non-strict mode:**
@@ -140,10 +140,10 @@ vault.disable_strict_validation()  # Optional: disable strict mode
 vault_manager = get_vault_manager()
 
 # Validate a specific vault
-is_valid = vault_manager.validate_vault('psap-forge-ci')
+is_valid = vault_manager.validate_vault("psap-forge-ci")
 
 # Validate all project vaults
-is_valid = vault_manager.validate_project_vaults('llm_d')
+is_valid = vault_manager.validate_project_vaults("llm_d")
 
 # Validate all defined vaults
 is_valid = vault_manager.validate_all_vaults()
@@ -155,12 +155,12 @@ is_valid = vault_manager.validate_all_vaults()
 from projects.core.library.vault import get_vault_content_path
 
 # Get full path to vault content
-kubeconfig_path = get_vault_content_path('psap-forge-ci', 'kubeconfig')
+kubeconfig_path = get_vault_content_path("psap-forge-ci", "kubeconfig")
 # Returns: Path('/secrets/ci/kubeconfig')
 
 # Access via vault object
-vault = get_vault_manager().get_vault('psap-forge-ci')
-kubeconfig_path = vault.content['kubeconfig'].file_path
+vault = get_vault_manager().get_vault("psap-forge-ci")
+kubeconfig_path = vault.content["kubeconfig"].file_path
 # Returns: Path('/secrets/ci/kubeconfig')
 ```
 
@@ -239,7 +239,7 @@ In `projects/my-project/orchestration/vaults.yaml`:
 from projects.core.library.vault import validate_project_vaults
 
 # Validate the new vault (uses global strict validation setting)
-validate_project_vaults('my-project')
+validate_project_vaults("my-project")
 ```
 
 ### 6. Expose the env var to the `forge_launcher`
@@ -265,7 +265,7 @@ from projects.core.library import vault
 vault.init()
 
 # Initialize with specific vaults only
-vault.init(['psap-forge-ci', 'forge-llm-d'])
+vault.init(["psap-forge-ci", "forge-llm-d"])
 ```
 
 ### Runtime Usage
@@ -277,13 +277,13 @@ from projects.core.library.vault import get_vault_manager
 vault_manager = get_vault_manager()
 
 # Validate project vaults before execution
-if not vault_manager.validate_project_vaults('llm_d'):
+if not vault_manager.validate_project_vaults("llm_d"):
     raise RuntimeError("Vault validation failed")
 
 # Get paths to vault content
-vault = vault_manager.get_vault('forge-llm-d')
-hf_token_path = vault.content['hf_token'].file_path
-pull_secret_path = vault.content['rhoai_pull_secret'].file_path
+vault = vault_manager.get_vault("forge-llm-d")
+hf_token_path = vault.content["hf_token"].file_path
+pull_secret_path = vault.content["rhoai_pull_secret"].file_path
 ```
 
 ## Error Handling

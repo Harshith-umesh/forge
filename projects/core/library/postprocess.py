@@ -143,17 +143,29 @@ def run_and_postprocess(test_func, *args, **kwargs):
     exc_msg: str | None = None
     ret: int | None = None
     original_exc: BaseException | None = None  # Store the test exception
+    interrupted: bool = False
 
     try:
         ret = test_func(*args, **kwargs)
         return ret
-    except BaseException as e:
+    except (KeyboardInterrupt, BaseException) as e:
+        # Import here to avoid circular dependencies
+        from projects.core.library.run import SignalInterrupt
+
+        # Check if this is an interrupt
+        if isinstance(e, KeyboardInterrupt | SignalInterrupt):
+            interrupted = True
+            logger.info("==> Test interrupted - skipping Caliper post-processing")
+
         exc_msg = str(e)
         original_exc = e  # Capture before the name is cleared
         raise
     finally:
-        # Determine test outcome based on exception/return code
-        if exc_msg is not None:
+        # Skip post-processing when interrupted to avoid blocking on finalizers
+        if interrupted:
+            logger.info("==> Skipping Caliper post-processing due to interrupt")
+            outcome = None
+        elif exc_msg is not None:
             outcome = TestPhaseOutcome("FAILED", exc_msg)
         elif ret == 0:
             outcome = TestPhaseOutcome("SUCCESS")
@@ -164,56 +176,80 @@ def run_and_postprocess(test_func, *args, **kwargs):
 
         # Run postprocessing and check status for failures
         try:
-            status = run_postprocess_after_test(artifact_base_dir, test_outcome=outcome)
+            status = (
+                run_postprocess_after_test(artifact_base_dir, test_outcome=outcome)
+                if not interrupted
+                else dict(success=False, final_status="Test interrupted")
+            )
 
-            # Check if postprocessing failed
-            success = status.get("success", False)
-            if not success:
-                final_status = status.get("final_status", "unknown")
-
-                # Check if failure is only due to warnings
-                if _is_warnings_only_failure(status):
-                    if original_exc is not None:
-                        # Test failed, postprocess has warnings: still fail due to test
-                        logger.error(
-                            "Test failed and postprocessing completed with warnings (final_status: %s)",
-                            final_status,
-                        )
-                        raise  # Re-raise the original test exception
-                    else:
-                        # Test succeeded, postprocess has warnings only: treat as success
-                        logger.warning(
-                            "Test succeeded and postprocessing completed with warnings (final_status: %s) - returning exit code 0",
-                            final_status,
-                        )
-                        return 0
+            # Handle None status when postprocessing is disabled - treat as unsuccessful
+            if status is None or not status.get("success", False):
+                if status is None:
+                    final_status = "postprocessing disabled"
                 else:
-                    # Actual postprocessing failures (not just warnings)
-                    if original_exc is not None:
-                        # Both test and postprocess failed: log both issues
-                        logger.error(
-                            "Both test and postprocessing failed (final_status: %s)", final_status
-                        )
-                        raise  # Re-raise the original test exception
-                    else:
-                        # Only postprocess failed: return failure code
-                        logger.error(
-                            "Test succeeded but postprocessing failed (final_status: %s) - returning exit code 1",
-                            final_status,
-                        )
-                        return 1
+                    final_status = status.get("final_status", "unknown")
+                result = _handle_postprocess_failure(status, original_exc, final_status)
+                if result is None:
+                    # Let original test exception propagate through outer flow
+                    pass
+                else:
+                    return result
 
         except Exception as postprocess_exc:
             logger.exception("Caliper postprocess after test failed with exception")
             if original_exc is not None:
                 # Both test and postprocess failed: chain so both are visible in the traceback
                 raise postprocess_exc from original_exc
-            else:
-                # Only postprocess failed: return failure code instead of raising
-                logger.error(
-                    "Test succeeded but postprocessing failed with exception - returning exit code 1"
-                )
-                return 1
+
+            # Only postprocess failed: return failure code instead of raising
+            logger.error(
+                "Test succeeded but postprocessing failed with exception - returning exit code 1"
+            )
+            return 1
+
+
+def _handle_postprocess_failure(
+    status: dict, original_exc: BaseException | None, final_status: str
+) -> int | None:
+    """Handle postprocessing failure logic.
+
+    Args:
+        status: Postprocessing status dictionary
+        original_exc: Original test exception if any
+        final_status: Final status from postprocessing
+
+    Returns:
+        Exit code to return, or None to re-raise original exception
+    """
+    # Check if failure is only due to warnings
+    if _is_warnings_only_failure(status):
+        if original_exc is not None:
+            # Test failed, postprocess has warnings: still fail due to test
+            logger.error(
+                "Test failed and postprocessing completed with warnings (final_status: %s)",
+                final_status,
+            )
+            return None  # Signal to re-raise original exception
+        else:
+            # Test succeeded, postprocess has warnings only: treat as success
+            logger.warning(
+                "Test succeeded and postprocessing completed with warnings (final_status: %s) - returning exit code 0",
+                final_status,
+            )
+            return 0
+    else:
+        # Actual postprocessing failures (not just warnings)
+        if original_exc is not None:
+            # Both test and postprocess failed: log both issues
+            logger.error("Both test and postprocessing failed (final_status: %s)", final_status)
+            return None  # Signal to re-raise original exception
+        else:
+            # Only postprocess failed: return failure code
+            logger.error(
+                "Test succeeded but postprocessing failed (final_status: %s) - returning exit code 1",
+                final_status,
+            )
+            return 1
 
 
 def _is_warnings_only_failure(status: dict) -> bool:
@@ -273,7 +309,7 @@ def run_postprocess_after_test(
 
     if not postprocess_config.enabled:
         logger.info("Caliper post-processing disabled (caliper.postprocess.enabled: false).")
-        return
+        return dict(success=True, final_status="Post-processing disabled")
 
     artifact_root_path = Path(artifact_root).resolve() if artifact_root is not None else None
 

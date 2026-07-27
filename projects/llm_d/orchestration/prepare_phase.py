@@ -283,7 +283,6 @@ def prepare_model_cache() -> None:
 
     common_args = {
         "namespace": namespace,
-        "namespace_is_managed": runtime_config.get_namespace_is_managed(),
         "model_key": model_slug,
         "model_uri": model_uri,
         "pvc_size": model_cache["pvc"]["size"],

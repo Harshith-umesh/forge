@@ -174,7 +174,7 @@ def execute_tasks(function_args: dict = None):
 
             if not file_tasks:
                 logger.error(f"No tasks found for file: {rel_filename}")
-                log_completion_banner(function_args, status="NO_TASKS")
+                log_completion_banner(function_args, status="NO_TASKS", start_time=start_time)
                 raise RuntimeError(f"No tasks found for file: {rel_filename}")
 
             execution_error = None
@@ -193,7 +193,7 @@ def execute_tasks(function_args: dict = None):
                 logger.fatal("==> INTERRUPTED: Received KeyboardInterrupt (Ctrl+C)")
                 logger.info("==> Exiting...")
                 # Show completion banner with interrupted status
-                log_completion_banner(function_args, status="INTERRUPTED")
+                log_completion_banner(function_args, status="INTERRUPTED", start_time=start_time)
                 raise
 
             except EarlyReturnException as e:
@@ -213,7 +213,11 @@ def execute_tasks(function_args: dict = None):
                 # Log error but continue to always tasks
                 logger.info("")
                 logger.fatal(f"==> {e.__class__.__name__}: {e}")
-                log_completion_banner(function_args, status=f"EXCEPTION ({e.__class__.__name__})")
+                log_completion_banner(
+                    function_args,
+                    status=f"EXCEPTION ({e.__class__.__name__})",
+                    start_time=start_time,
+                )
 
                 # Save error to re-raise after always tasks execute
                 execution_error = e
@@ -278,6 +282,7 @@ def execute_tasks(function_args: dict = None):
                 log_completion_banner(
                     function_args,
                     status=f"FAILED ({len(all_exceptions)} exception(s))",
+                    start_time=start_time,
                 )
                 if len(all_exceptions) == 1:
                     raise all_exceptions[0]
@@ -287,7 +292,7 @@ def execute_tasks(function_args: dict = None):
                     )
 
             # Log completion banner if execution was successful
-            log_completion_banner(function_args)
+            log_completion_banner(function_args, start_time=start_time)
 
             # for the time being, return the shared context.  In the
             # future we'll return more info about what has been

@@ -50,7 +50,7 @@ def create_test_labels() -> None:
 def run() -> int:
     """Main test function that wraps do_test() with outcome postprocessing."""
 
-    dry_run = config.project.get_config("runtime.kserve_dry_run", False)
+    dry_run = config.project.get_config("runtime.kserve.dry_run", False)
     if dry_run:
         ret = do_test()
         logger.info("Kserve dry-run mode enabled - Skipping caliper post-processing")
@@ -111,16 +111,12 @@ def do_test() -> int:
     # Load minimal config needed for orchestration flow
 
     namespace = runtime_config.get_namespace()
-    dry_run = config.project.get_config("runtime.kserve_dry_run", False)
+    dry_run = config.project.get_config("runtime.kserve.dry_run", False)
 
     if not dry_run:
         # Ensure namespace exists before starting any deployments
         ensure_namespace(
-            namespace,
-            labels={
-                "app.kubernetes.io/managed-by": "forge",
-                "forge.openshift.io/project": "llm_d",
-            },
+            namespace, labels=config.project.get_config("platform.cluster.namespace.labels")
         )
 
     endpoint_url: str | None = None
@@ -185,7 +181,7 @@ def deploy_inference_service() -> str:
     gateway = platform["gateway"]
 
     # Check if dry-run mode is enabled early
-    dry_run = config.project.get_config("runtime.kserve_dry_run", False)
+    dry_run = config.project.get_config("runtime.kserve.dry_run", False)
 
     # Step 1: Ensure model cache is ready (skip in dry-run)
     if not dry_run:
@@ -249,6 +245,7 @@ def _build_inference_service_manifest() -> Path:
         deployment_profile = runtime_config.deep_merge(deployment_profile, benchmark_overrides)
 
     # Build the InferenceService manifest
+    deployment_profile_name = runtime_config.get_deployment_profile_name()
     manifest = render_inference_service_from_parts(
         config_dir=config_dir,
         namespace=namespace,
@@ -257,6 +254,7 @@ def _build_inference_service_manifest() -> Path:
         model_slug=model_slug,
         deployment_profile=deployment_profile,
         model_cache=model_cache,
+        deployment_profile_name=deployment_profile_name,
     )
 
     # Write the manifest to artifacts
@@ -341,7 +339,7 @@ def cleanup_test_resources() -> None:
     """Cleanup test resources using the toolbox script"""
 
     # Skip cleanup when in dry-run mode
-    dry_run = config.project.get_config("runtime.kserve_dry_run", False)
+    dry_run = config.project.get_config("runtime.kserve.dry_run", False)
     if dry_run:
         logger.info("Skipping cleanup_test_resources - dry-run mode enabled")
         return

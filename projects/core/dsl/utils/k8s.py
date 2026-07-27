@@ -23,6 +23,7 @@ def oc(
     timeout_seconds: float | None = 300,
     log_stdout: bool = True,
     log_stderr: bool = True,
+    stdout_dest: Path | None = None,
 ) -> shell.CommandResult:
     """Run an oc command.
 
@@ -33,6 +34,7 @@ def oc(
         timeout_seconds: Command timeout (not supported)
         log_stdout: Log stdout to console (default True)
         log_stderr: Log stderr to console (default True)
+        stdout_dest: Optional file path to write stdout to
 
     Returns:
         CommandResult with execution details
@@ -45,6 +47,7 @@ def oc(
         shell=False,
         log_stdout=log_stdout,
         log_stderr=log_stderr,
+        stdout_dest=stdout_dest,
     )
 
 
@@ -266,6 +269,7 @@ def capture_pod_logs(*, namespace: str, output_dir: Path) -> None:
     logger.info("Capturing logs from %d pods in %s", len(pod_names), namespace)
 
     for pod_name in pod_names:
+        log_file = output_dir / f"{pod_name}.log"
         log_result = oc(
             "logs",
             pod_name,
@@ -274,16 +278,68 @@ def capture_pod_logs(*, namespace: str, output_dir: Path) -> None:
             "--all-containers=true",
             check=False,
             log_stdout=False,
+            stdout_dest=log_file,
         )
-        log_file = output_dir / f"{pod_name}.log"
-        if log_result.returncode == 0 and log_result.stdout:
-            log_file.write_text(log_result.stdout, encoding="utf-8")
-        else:
+        # If command failed and no output was written, write error info
+        if log_result.returncode != 0 and (not log_file.exists() or log_file.stat().st_size == 0):
             log_file.write_text(
                 f"(failed to collect logs: exit_code={log_result.returncode})\n"
                 f"{log_result.stderr or ''}",
                 encoding="utf-8",
             )
+
+
+def oc_exec(
+    *command: str,
+    namespace: str,
+    pod: str,
+    container: str | None = None,
+    **kwargs,
+) -> shell.CommandResult:
+    """Exec a command inside a pod container.
+
+    Args:
+        *command: Command and arguments to run in the pod
+        namespace: Namespace of the pod
+        pod: Pod name
+        container: Container name (optional if pod has a single container)
+        **kwargs: Additional keyword arguments passed to oc()
+
+    Returns:
+        CommandResult with execution details
+    """
+    args = ["-n", namespace, "exec", pod]
+    if container:
+        args.extend(["-c", container])
+    args.append("--")
+    args.extend(command)
+    return oc(*args, **kwargs)
+
+
+def oc_cp_from_pod(
+    remote_path: str,
+    local_path: str | Path,
+    *,
+    namespace: str,
+    pod: str,
+    container: str | None = None,
+) -> shell.CommandResult:
+    """Copy a file from a pod to a local path.
+
+    Args:
+        remote_path: Absolute path inside the pod
+        local_path: Local destination path
+        namespace: Namespace of the pod
+        pod: Pod name
+        container: Container name (optional if pod has a single container)
+
+    Returns:
+        CommandResult with execution details
+    """
+    args = ["cp", f"{namespace}/{pod}:{remote_path}", str(local_path)]
+    if container:
+        args.extend(["-c", container])
+    return oc(*args)
 
 
 def best_effort_oc(*oc_args: str, description: str | None = None) -> None:

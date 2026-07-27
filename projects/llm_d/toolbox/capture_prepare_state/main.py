@@ -6,7 +6,6 @@ import logging
 from pathlib import Path
 
 from projects.core.dsl import entrypoint, execute_tasks, task
-from projects.core.dsl.utils import write_text
 from projects.core.dsl.utils.k8s import oc
 
 logger = logging.getLogger(__name__)
@@ -65,10 +64,10 @@ def capture_datasciencecluster_state(args, ctx):
         "yaml",
         check=False,
         log_stdout=False,
+        stdout_dest=destination,
     )
 
-    if result.returncode == 0 and result.stdout:
-        write_text(destination, result.stdout)
+    if result.returncode == 0:
         return f"Captured DataScienceCluster: {destination}"
     else:
         logger.warning("Failed to capture DataScienceCluster: %s", result.stderr)
@@ -91,10 +90,10 @@ def capture_gateway_state(args, ctx):
         "yaml",
         check=False,
         log_stdout=False,
+        stdout_dest=destination,
     )
 
-    if result.returncode == 0 and result.stdout:
-        write_text(destination, result.stdout)
+    if result.returncode == 0:
         return f"Captured Gateway: {destination}"
     else:
         logger.warning("Failed to capture Gateway: %s", result.stderr)
@@ -117,10 +116,10 @@ def capture_gateway_service_state(args, ctx):
         "yaml",
         check=False,
         log_stdout=False,
+        stdout_dest=destination,
     )
 
-    if result.returncode == 0 and result.stdout:
-        write_text(destination, result.stdout)
+    if result.returncode == 0:
         return f"Captured Gateway service: {destination}"
     else:
         logger.warning("Failed to capture Gateway service: %s", result.stderr)
@@ -144,10 +143,10 @@ def capture_namespace_events(args, ctx):
         "--sort-by=.metadata.creationTimestamp",
         check=False,
         log_stdout=False,
+        stdout_dest=destination,
     )
 
-    if result.returncode == 0 and result.stdout:
-        write_text(destination, result.stdout)
+    if result.returncode == 0:
         return f"Captured namespace events: {destination}"
     else:
         logger.warning("Failed to capture namespace events: %s", result.stderr)

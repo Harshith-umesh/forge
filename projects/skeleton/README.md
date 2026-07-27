@@ -277,17 +277,11 @@ def prepare(self):
     self.log("Starting prepare phase...")
 
     # Example: Install dependencies
-    if not self.execute_command(
-        "oc apply -f manifests/setup.yaml",
-        "Deploy setup resources"
-    ):
+    if not self.execute_command("oc apply -f manifests/setup.yaml", "Deploy setup resources"):
         return 1
 
     # Example: Validate environment
-    if not self.execute_command(
-        "oc get nodes",
-        "Check cluster nodes"
-    ):
+    if not self.execute_command("oc get nodes", "Check cluster nodes"):
         return 1
 
     self.log("Prepare phase completed!", "success")
@@ -301,16 +295,12 @@ def test(self):
 
     # Example: Run performance tests
     if not self.execute_command(
-        "python scripts/performance_test.py --config config.yaml",
-        "Running performance tests"
+        "python scripts/performance_test.py --config config.yaml", "Running performance tests"
     ):
         return 1
 
     # Example: Run functional tests
-    if not self.execute_command(
-        "pytest tests/ -v",
-        "Running functional tests"
-    ):
+    if not self.execute_command("pytest tests/ -v", "Running functional tests"):
         return 1
 
     self.log("Test phase completed!", "success")
@@ -323,16 +313,10 @@ def cleanup(self):
     self.log("Starting cleanup phase...")
 
     # Example: Remove test resources
-    self.execute_command(
-        "oc delete -f manifests/",
-        "Cleanup test resources"
-    )
+    self.execute_command("oc delete -f manifests/", "Cleanup test resources")
 
     # Example: Generate reports
-    self.execute_command(
-        "python scripts/generate_report.py",
-        "Generate final report"
-    )
+    self.execute_command("python scripts/generate_report.py", "Generate final report")
 
     self.log("Cleanup phase completed!", "success")
     return 0
@@ -358,10 +342,7 @@ if not success:
     return 1  # Exit with error
 
 # Command with complex logic
-result = self.execute_command(
-    "kubectl get pods -o json",
-    "Check pod status"
-)
+result = self.execute_command("kubectl get pods -o json", "Check pod status")
 ```
 
 ### 3. Error Handling
@@ -383,10 +364,10 @@ self.execute_command("cleanup-command", "Optional cleanup")
 Use the logging methods for consistent output:
 
 ```python
-self.log("Starting operation", "info")      # ℹ️ [project] Starting operation
+self.log("Starting operation", "info")  # ℹ️ [project] Starting operation
 self.log("Operation completed", "success")  # ✅ [project] Operation completed
-self.log("Warning occurred", "warning")     # ⚠️ [project] Warning occurred
-self.log("Error occurred", "error")         # ❌ [project] Error occurred
+self.log("Warning occurred", "warning")  # ⚠️ [project] Warning occurred
+self.log("Error occurred", "error")  # ❌ [project] Error occurred
 ```
 
 ### 5. Verbose Mode
@@ -407,13 +388,14 @@ The skeleton uses Click groups to organize commands:
 
 ```python
 @click.group()
-@click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
+@click.option("--verbose", "-v", is_flag=True, help="Enable verbose output")
 @click.pass_context
 def cli(ctx, verbose):
     """Project CI Operations for FORGE."""
     ctx.ensure_object(types.SimpleNamespace)
     ctx.obj.verbose = verbose
     ctx.obj.runner = YourProjectTestRunner(verbose)
+
 
 @cli.command()
 @click.pass_context

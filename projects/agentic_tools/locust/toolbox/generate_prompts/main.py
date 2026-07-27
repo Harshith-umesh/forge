@@ -237,16 +237,15 @@ def capture_logs(args, ctx):
     artifacts_dir = env.ARTIFACT_DIR / "artifacts" / "prompts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
 
-    result = oc(
+    oc(
         "logs",
         f"job/{GENERATOR_JOB_NAME}",
         "-n",
         args.namespace,
         check=False,
         log_stdout=False,
+        stdout_dest=artifacts_dir / "generator.log",
     )
-    if result.returncode == 0 and result.stdout:
-        (artifacts_dir / "generator.log").write_text(result.stdout, encoding="utf-8")
 
     return "Logs captured"
 

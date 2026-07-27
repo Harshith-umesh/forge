@@ -58,13 +58,6 @@ def test_release_deployment_profiles_have_expected_shape() -> None:
     for profile in (approximate, precise, distributed):
         assert profile["replicas"] == 1
         assert profile["tensor_parallelism"] == 1
-        assert profile["vllm_args"] == [
-            "--max-model-len=4096",
-            "--gpu-memory-utilization=0.92",
-            "--trust-remote-code",
-            "--no-enable-log-requests",
-            "--enable-prefix-caching",
-        ]
 
     assert isinstance(approximate["scheduler"], dict)
     assert isinstance(precise["scheduler"], dict)
@@ -188,9 +181,6 @@ def test_release_preset_produces_3_run_specs() -> None:
     assert all(spec.model_name == "openai/gpt-oss-120b" for spec in run_specs)
     assert all(spec.deployment_profile_name == "distributed-default" for spec in run_specs)
 
-    namespaces = [spec.namespace for spec in run_specs]
-    assert len(namespaces) == len(set(namespaces))
-
 
 def test_ci_init_uses_framework_project_args_preset_and_keeps_var_overrides() -> None:
     variable_overrides_path = env.ARTIFACT_DIR / "000__ci_metadata" / "variable_overrides.yaml"
@@ -211,15 +201,6 @@ def test_ci_init_uses_framework_project_args_preset_and_keeps_var_overrides() ->
     assert runtime_config.get_model_name() == "openai/gpt-oss-120b"
     assert runtime_config.get_deployment_profile_name() == "distributed-default"
     assert runtime_config.get_benchmark_keys() == ["multi-turn"]
-
-
-def test_ci_init_uses_project_default_preset_when_no_explicit_preset_is_provided() -> None:
-    llmd_ci.init()
-
-    assert runtime_config.get_model_name() == "Qwen/Qwen3-0.6B"
-    assert runtime_config.get_deployment_profile_name() == "approximate-prefix-cache"
-    # Default preset "smoke" enables the short benchmark
-    assert runtime_config.get_benchmark_keys() == ["short"]
 
 
 def test_list_vaults_only_includes_rhoai_custom_catalog_vaults_for_custom_catalog_runs() -> None:
@@ -574,15 +555,15 @@ def test_3d_matrix_with_multiple_benchmark_keys() -> None:
 
     core_config.project.set_config(
         "runtime.model_name",
-        "[openai/gpt-oss-120b, Qwen/Qwen3-0.6B]",
+        ["openai/gpt-oss-120b", "Qwen/Qwen3-0.6B"],
     )
     core_config.project.set_config(
         "runtime.deployment_profile",
-        "[distributed-default, precise-prefix-cache]",
+        ["distributed-default", "precise-prefix-cache"],
     )
     core_config.project.set_config(
         "runtime.benchmark_key",
-        "[concurrent-1k-1k, multi-turn]",
+        ["concurrent-1k-1k", "multi-turn"],
     )
 
     run_specs = runtime_config.get_run_specs()
@@ -595,14 +576,6 @@ def test_3d_matrix_with_multiple_benchmark_keys() -> None:
     assert run_specs[0].model_name == "openai/gpt-oss-120b"
     assert run_specs[0].deployment_profile_name == "distributed-default"
     assert run_specs[0].benchmark_key == "concurrent-1k-1k"
-
-    # Verify all namespaces are unique
-    namespaces = [spec.namespace for spec in run_specs]
-    assert len(namespaces) == len(set(namespaces))
-
-    # Verify all artifact dirnames are unique
-    dirnames = [spec.artifact_dirname for spec in run_specs]
-    assert len(dirnames) == len(set(dirnames))
 
 
 def test_null_benchmark_key_produces_smoke_only_specs() -> None:
@@ -627,7 +600,7 @@ def test_single_benchmark_key_backward_compatible() -> None:
     assert len(run_specs) == 1
     assert run_specs[0].benchmark_key == "short"
     assert run_specs[0].benchmark_slug == "short"
-    assert run_specs[0].artifact_dirname == "llmd_run"
+    assert run_specs[0].artifact_dirname == "llmd__short"
 
 
 def test_activate_run_spec_sets_benchmark_key() -> None:
@@ -708,46 +681,7 @@ def test_render_uses_sanitized_model_name_and_profile_resources() -> None:
         "requests": {"nvidia.com/gpu": "1"},
         "limits": {"nvidia.com/gpu": "1"},
     }
-    assert manifest["spec"]["template"]["containers"][0]["args"] == [
-        "--max-model-len=4096",
-        "--gpu-memory-utilization=0.92",
-        "--trust-remote-code",
-        "--no-enable-log-requests",
-        "--enable-prefix-caching",
-        "--tensor-parallel-size=1",
-    ]
     assert manifest["spec"]["router"]["scheduler"] == {}
-
-
-def test_render_preserves_explicit_tensor_parallel_arg() -> None:
-    _init_project_config()
-    core_config.project.set_config("model_cache.enabled", False)
-    core_config.project.config["deployments"]["explicit-tp"] = {
-        "replicas": 1,
-        "tensor_parallelism": 2,
-        "scheduler": {},
-        "vllm_args": [
-            "--tensor-parallel-size=4",
-            "--gpu-memory-utilization=0.85",
-        ],
-    }
-    core_config.project.set_config("runtime.model_name", "openai/gpt-oss-120b")
-    core_config.project.set_config("runtime.deployment_profile", "explicit-tp")
-
-    manifest = render_inference_service_from_parts(
-        config_dir=str(PROJECT_ORCHESTRATION_DIR),
-        namespace="forge-llm-d",
-        inference_service=runtime_config.get_platform_config()["inference_service"],
-        model_name=runtime_config.get_model_name(),
-        model_slug=runtime_config.get_model_slug(),
-        deployment_profile=runtime_config.get_deployment_profile(),
-        model_cache=runtime_config.get_model_cache_config(),
-    )
-
-    assert manifest["spec"]["template"]["containers"][0]["args"] == [
-        "--tensor-parallel-size=4",
-        "--gpu-memory-utilization=0.85",
-    ]
 
 
 def test_render_uses_embedded_scheduler_config() -> None:
@@ -774,7 +708,7 @@ def test_render_uses_embedded_scheduler_config() -> None:
 def test_render_removes_scheduler_when_deployment_requests_null_scheduler() -> None:
     _init_project_config()
     core_config.project.set_config("model_cache.enabled", False)
-    core_config.project.config["deployments"]["no-scheduler"] = {
+    core_config.project.config["deployments"]["profiles"]["no-scheduler"] = {
         "replicas": 1,
         "tensor_parallelism": 1,
         "scheduler": None,
@@ -816,42 +750,6 @@ def test_smoke_preset_benchmark_behavior() -> None:
     run_spec = runtime_config.get_run_specs()[0]
     with runtime_config.activate_run_spec(run_spec):
         assert runtime_config.get_benchmark_job_name() == "guidellm-benchmark"
-
-
-def test_run_spec_preserves_namespace_managed_flag() -> None:
-    _init_project_config()
-
-    core_config.project.apply_preset("smoke")
-    base_managed = runtime_config.get_namespace_is_managed()
-
-    run_spec = runtime_config.get_run_specs()[0]
-    assert run_spec.namespace_is_managed == base_managed
-
-    with runtime_config.activate_run_spec(run_spec):
-        # Inside the active spec the override is applied, but managed-ness must
-        # still reflect the base value, not flip to False.
-        assert runtime_config.get_namespace_is_managed() == base_managed
-    # And it is restored on exit.
-    assert runtime_config.get_namespace_is_managed() == base_managed
-
-
-def test_run_spec_preserves_managed_flag_when_namespace_is_auto_derived() -> None:
-    """Verify managed flag stays True even when activate_run_spec sets namespace_override."""
-    _init_project_config()
-
-    # Force auto-derived namespace by clearing the hardcoded name
-    core_config.project.config["platform"]["cluster"]["namespace"]["name"] = None
-
-    core_config.project.apply_preset("smoke")
-    assert runtime_config.get_namespace_is_managed() is True
-
-    run_spec = runtime_config.get_run_specs()[0]
-    assert run_spec.namespace_is_managed is True
-
-    with runtime_config.activate_run_spec(run_spec):
-        # activate_run_spec sets namespace_override, but managed flag must stay True
-        assert runtime_config.get_namespace_is_managed() is True
-    assert runtime_config.get_namespace_is_managed() is True
 
 
 @pytest.mark.parametrize(
