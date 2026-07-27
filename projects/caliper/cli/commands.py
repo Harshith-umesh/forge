@@ -173,13 +173,19 @@ def parse_cmd(
             click.echo("⚠️  No test directories found")
 
     except Exception as e:  # noqa: BLE001
+        import traceback
+
+        full_traceback = traceback.format_exc()
         status.update(
             {
                 "success": False,
                 "error": str(e),
+                "traceback": full_traceback,
             }
         )
         click.echo(f"parse failed: {e}", err=True)
+        click.echo("Full traceback:", err=True)
+        click.echo(full_traceback, err=True)
     finally:
         # Write status file if requested
         if status_file:
