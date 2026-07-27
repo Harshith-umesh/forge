@@ -45,6 +45,8 @@ spec:
             fieldPath: status.podIP
   prefill:
     replicas: 8
+    parallelism:
+      tensor: 1
     template:
       containers:
       - name: main
@@ -65,3 +67,5 @@ spec:
             fieldRef:
               apiVersion: v1
               fieldPath: status.podIP
+  parallelism:
+    tensor: 4
