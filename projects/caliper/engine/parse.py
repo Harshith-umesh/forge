@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 
 from projects.caliper.engine.cache import (
@@ -48,9 +49,15 @@ def run_parse(
     cache_refs = []
     all_warnings = []
 
+    # Track timing statistics
+    parse_start_time = time.time()
+    cached_count = 0
+    parsed_count = 0
+
     parse_fn = plugin.parse
 
     for node in nodes:
+        start_time = time.time()
         test_base_dir = node.directory
         cache_file = cache_path_for_test_base(test_base_dir, plugin_module)
         fp = fingerprint_test_base(test_base_dir, plugin_module)
@@ -71,6 +78,10 @@ def run_parse(
             # Use cached records
             all_records.extend(cached_records)
             cache_refs.append(str(cache_file))
+            elapsed_time = time.time() - start_time
+            cached_count += 1
+            relative_path = test_base_dir.relative_to(base_dir)
+            logger.info(f"⏱️  Directory parsed from cache in {elapsed_time:.3f}s: {relative_path}")
         else:
             # Parse this test base
             result = parse_fn([node])  # Parse just this node
@@ -88,6 +99,16 @@ def run_parse(
                 fingerprint=fp,
             )
             cache_refs.append(str(cache_file))
+            elapsed_time = time.time() - start_time
+            parsed_count += 1
+            relative_path = test_base_dir.relative_to(base_dir)
+            logger.info(f"⏱️  Directory parsed fresh in {elapsed_time:.3f}s: {relative_path}")
+
+    # Log timing summary
+    total_parse_time = time.time() - parse_start_time
+    logger.info(
+        f"⏱️  Parse timing summary: {total_parse_time:.3f}s total ({cached_count} cached, {parsed_count} parsed)"
+    )
 
     # Create unified model with all records
     cache_ref_summary = f"per-test-base: {len(cache_refs)} cache files"
