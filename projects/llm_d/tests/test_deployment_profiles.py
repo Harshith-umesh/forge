@@ -67,13 +67,25 @@ def _test_preset_generates_expected_llmisvc(preset: str, tmp_path: Path):
     ci_script = PROJECT_ROOT / "projects" / "llm_d" / "orchestration" / "ci.py"
     cmd = [str(ci_script), "--preset", preset, "test"]
 
-    result = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        cwd=PROJECT_ROOT,
-        env=env_vars,
-    )
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            cwd=PROJECT_ROOT,
+            env=env_vars,
+            timeout=60,  # 60-second timeout
+        )
+    except subprocess.TimeoutExpired as e:
+        # Show stdout when timeout occurs
+        stdout_output = e.stdout.decode() if e.stdout else "No stdout available"
+        stderr_output = e.stderr.decode() if e.stderr else "No stderr available"
+        pytest.fail(
+            f"CI command timed out after 60 seconds for preset {preset}:\n"
+            f"Command: {' '.join(cmd)}\n\n"
+            f"STDOUT (before timeout):\n{stdout_output}\n\n"
+            f"STDERR (before timeout):\n{stderr_output}\n\n"
+        )
 
     # Check that the command succeeded
     if result.returncode != 0:
