@@ -40,12 +40,17 @@ Key paths:
 5. **Artifact directories are public.**
    Treat everything under `ARTIFACT_DIR` as if it will be published on the internet.
    Only write non-sensitive operational data (CRs, logs, pod descriptions, events).
+   Pod/Deployment and other resources are safe to store, as they must not contain secrets. See point 9.
+   Kubernetes Secret objects should never be stored in the artifacts. Kubernetes Secret descriptions can be safely stored.
 
-6. **Use the vault module.**
+7. **Use the vault module.**
     Use the project `projects.core.library.vault` module to access the secrets, stored in files. Consider all the content of these files as secret.
     
-7. **Never pass secrets via environment variables**
+8. **Never pass secrets via environment variables**
     For transparency and post-mortem troubleshooting, the environment variables are saved to disk at multiple locations. Do not use environment variables to pass a secret between two components. There might be few exceptions to this rule (MLFlow, AWS), but they must be handled with care.
+
+9. **Never pass secrets via Pod environment variables**
+   The Pod definition will be stored in public artifacts. Do no use plain text Pod environment variables to pass secrets to the Pod. Instead, use Secret resources and Pod environment variables that reference this secret.
 
 ### Safe Patterns
 
