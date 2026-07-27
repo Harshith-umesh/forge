@@ -7,6 +7,7 @@ cks:
   runtime.kserve.wait_readiness: false
   runtime.kueue.enabled: true
   runtime.kueue.queue_name: llm-d-cluster-queue
+  runtime.kueue.disable_above_n_gpus: 8
 
   # Use ReadWriteMany for model cache PVC in CKS environment
   model_cache.pvc.access_mode: ReadWriteMany

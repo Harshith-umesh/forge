@@ -15,6 +15,7 @@ kueue:
   enabled: false
   queue_name: default-queue
   local_queue_manifest: manifests/kueue-localqueue.yaml
+  disable_above_n_gpus: null
 router:
   template:
     file: manifests/scheduler_config/__router_template__.yaml

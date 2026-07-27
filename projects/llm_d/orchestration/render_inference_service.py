@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,8 @@ import yaml
 
 from projects.core.dsl.utils import slugify_identifier, truncate_k8s_name
 from projects.core.library import config
+
+logger = logging.getLogger(__name__)
 
 
 def _load_yaml(path: Path) -> Any:
@@ -124,7 +127,7 @@ def render_inference_service_from_parts(
         )
 
     # Apply Kueue configuration if enabled
-    _apply_kueue_configuration(rendered_manifest)
+    _apply_kueue_configuration(rendered_manifest, deployment_profile)
 
     return rendered_manifest
 
@@ -405,16 +408,59 @@ def _build_pd_pod_template(
     return {"containers": [container]}
 
 
-def _apply_kueue_configuration(manifest: dict[str, Any]) -> None:
+def _calculate_total_gpu_usage(deployment_profile: dict[str, Any]) -> int:
+    """Calculate the total GPU usage for a deployment profile.
+
+    Args:
+        deployment_profile: The deployment profile configuration
+
+    Returns:
+        Total number of GPUs required for this deployment
+    """
+    # Check if this is a P/D deployment (has prefill/decode sections)
+    if "prefill" in deployment_profile and "decode" in deployment_profile:
+        # P/D deployment: sum up prefill and decode GPU usage
+        prefill_gpus = (
+            deployment_profile["prefill"]["tensor_parallelism"]
+            * deployment_profile["prefill"]["replicas"]
+        )
+        decode_gpus = (
+            deployment_profile["decode"]["tensor_parallelism"]
+            * deployment_profile["decode"]["replicas"]
+        )
+        return prefill_gpus + decode_gpus
+    else:
+        # Standard deployment: tensor_parallelism * replicas
+        tensor_parallelism = deployment_profile.get("tensor_parallelism", 1)
+        replicas = deployment_profile.get("replicas", 1)
+        return tensor_parallelism * replicas
+
+
+def _apply_kueue_configuration(
+    manifest: dict[str, Any], deployment_profile: dict[str, Any]
+) -> None:
     """Apply Kueue annotations and labels to the ISVC manifest.
 
     Based on the implementation from topsail's test_llmd.py.
     Can be enabled by setting runtime.kserve_use_kueue config.
+
+    Args:
+        manifest: The Kubernetes manifest to modify
+        deployment_profile: The deployment profile configuration used to calculate GPU usage
     """
     # Check if kueue annotations should be enabled
     enable_kueue = config.project.get_config("runtime.kueue.enabled")
 
     if not enable_kueue:
+        return
+
+    # Calculate total GPU usage from deployment profile
+    total_gpus = _calculate_total_gpu_usage(deployment_profile)
+
+    # Check if we should skip Kueue due to high GPU usage
+    disable_above_n_gpus = config.project.get_config("runtime.kueue.disable_above_n_gpus")
+    if disable_above_n_gpus is not None and total_gpus > disable_above_n_gpus:
+        logger.info(f"Skipping Kueue labels: {total_gpus} GPUs > {disable_above_n_gpus} threshold")
         return
 
     # Configure kueue settings
