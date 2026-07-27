@@ -20,7 +20,8 @@ import logging
 from datetime import UTC, datetime
 from pathlib import Path
 
-from projects.core.dsl import always, entrypoint, execute_tasks, shell, task
+from projects.core.dsl import always, entrypoint, execute_tasks, task
+from projects.core.dsl.utils.k8s import oc, oc_cp_from_pod, oc_exec
 
 logger = logging.getLogger("DSL")
 
@@ -58,19 +59,9 @@ def run(
     return 0
 
 
-def _oc_exec(ctx, command: str, **kwargs):
-    """Run a command inside the Prometheus container via oc exec."""
-    return shell.run(
-        f"oc -n {ctx.namespace} exec {ctx.pod_name} -c {ctx.container} -- {command}",
-        **kwargs,
-    )
-
-
-def _oc_cp_from_pod(ctx, remote_path: str, local_path):
-    """Copy a file from the Prometheus container to a local path."""
-    return shell.run(
-        f"oc cp {ctx.namespace}/{ctx.pod_name}:{remote_path} {local_path} -c {ctx.container}",
-    )
+def _pod_kwargs(ctx) -> dict:
+    """Return the common namespace/pod/container kwargs for oc_exec/oc_cp_from_pod."""
+    return {"namespace": ctx.namespace, "pod": ctx.pod_name, "container": ctx.container}
 
 
 def _parse_time(value) -> datetime:
@@ -126,8 +117,14 @@ def validate_parameters(args, ctx):
 def validate_prometheus_pod(args, ctx):
     """Verify the Prometheus pod is running and accessible."""
 
-    result = shell.run(
-        f"oc -n {ctx.namespace} get pod {ctx.pod_name} -o jsonpath='{{.status.phase}}'",
+    result = oc(
+        "-n",
+        ctx.namespace,
+        "get",
+        "pod",
+        ctx.pod_name,
+        "-o",
+        "jsonpath={.status.phase}",
     )
 
     phase = result.stdout.strip()
@@ -149,13 +146,13 @@ def create_temp_tsdb_dir(args, ctx):
 
     ctx.temp_dir = f"{TSDB_PATH}/.capture-tmp-{ctx.start_ms}"
 
-    _oc_exec(
-        ctx,
-        f"sh -c '"
+    oc_exec(
+        "sh",
+        "-c",
         f"mkdir -p {ctx.temp_dir}"
         f" && ln -sf {TSDB_PATH}/wal {ctx.temp_dir}/wal"
-        f" && ln -sf {TSDB_PATH}/chunks_head {ctx.temp_dir}/chunks_head"
-        f"'",
+        f" && ln -sf {TSDB_PATH}/chunks_head {ctx.temp_dir}/chunks_head",
+        **_pod_kwargs(ctx),
     )
 
     return f"Created temp TSDB dir at {ctx.temp_dir}"
@@ -168,17 +165,17 @@ def dump_metrics(args, ctx):
     ctx.remote_raw = f"{TSDB_PATH}/.capture-metrics-{ctx.start_ms}"
     ctx.remote_output = f"{ctx.remote_raw}.gz"
 
-    _oc_exec(
-        ctx,
-        f"sh -c '"
+    oc_exec(
+        "sh",
+        "-c",
         f"promtool tsdb dump-openmetrics"
         f" --min-time={ctx.start_ms} --max-time={ctx.end_ms}"
         f" {ctx.temp_dir} > {ctx.remote_raw}"
-        f" && gzip -f {ctx.remote_raw}"
-        f"'",
+        f" && gzip -f {ctx.remote_raw}",
+        **_pod_kwargs(ctx),
     )
 
-    size_result = _oc_exec(ctx, f"stat -c %s {ctx.remote_output}", check=False)
+    size_result = oc_exec("stat", "-c", "%s", ctx.remote_output, check=False, **_pod_kwargs(ctx))
 
     ctx.archive_size_bytes = int(size_result.stdout.strip()) if size_result.success else 0
 
@@ -191,7 +188,7 @@ def copy_to_output(args, ctx):
 
     ctx.output_file = ctx.output_dir / "metrics.openmetrics.gz"
 
-    _oc_cp_from_pod(ctx, ctx.remote_output, ctx.output_file)
+    oc_cp_from_pod(ctx.remote_output, ctx.output_file, **_pod_kwargs(ctx))
 
     return f"Copied metrics to {ctx.output_file}"
 
@@ -204,10 +201,11 @@ def cleanup_pod(args, ctx):
     temp_dir = getattr(ctx, "temp_dir", None)
     remote_output = getattr(ctx, "remote_output", None)
     remote_raw = getattr(ctx, "remote_raw", None)
+    kwargs = _pod_kwargs(ctx)
 
     for path in [temp_dir, remote_output, remote_raw]:
         if path:
-            _oc_exec(ctx, f"rm -rf {path}", check=False)
+            oc_exec("rm", "-rf", path, check=False, **kwargs)
 
     return "Cleaned up temp files on Prometheus pod"
 

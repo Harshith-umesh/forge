@@ -289,6 +289,59 @@ def capture_pod_logs(*, namespace: str, output_dir: Path) -> None:
             )
 
 
+def oc_exec(
+    *command: str,
+    namespace: str,
+    pod: str,
+    container: str | None = None,
+    **kwargs,
+) -> shell.CommandResult:
+    """Exec a command inside a pod container.
+
+    Args:
+        *command: Command and arguments to run in the pod
+        namespace: Namespace of the pod
+        pod: Pod name
+        container: Container name (optional if pod has a single container)
+        **kwargs: Additional keyword arguments passed to oc()
+
+    Returns:
+        CommandResult with execution details
+    """
+    args = ["-n", namespace, "exec", pod]
+    if container:
+        args.extend(["-c", container])
+    args.append("--")
+    args.extend(command)
+    return oc(*args, **kwargs)
+
+
+def oc_cp_from_pod(
+    remote_path: str,
+    local_path: str | Path,
+    *,
+    namespace: str,
+    pod: str,
+    container: str | None = None,
+) -> shell.CommandResult:
+    """Copy a file from a pod to a local path.
+
+    Args:
+        remote_path: Absolute path inside the pod
+        local_path: Local destination path
+        namespace: Namespace of the pod
+        pod: Pod name
+        container: Container name (optional if pod has a single container)
+
+    Returns:
+        CommandResult with execution details
+    """
+    args = ["cp", f"{namespace}/{pod}:{remote_path}", str(local_path)]
+    if container:
+        args.extend(["-c", container])
+    return oc(*args)
+
+
 def best_effort_oc(*oc_args: str, description: str | None = None) -> None:
     """Run an oc command, swallowing timeout and other errors.
 
