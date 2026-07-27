@@ -157,6 +157,38 @@ def create_test_labels() -> None:
     logger.info("Created test labels: %s", labels)
 
 
+def update_test_labels_with_status(success: bool, message: str) -> None:
+    """Update __test_labels__.yaml with test execution status.
+
+    Args:
+        success: True if test succeeded, False if failed
+        message: Status message describing the result
+    """
+    test_labels_path = env.ARTIFACT_DIR / "__test_labels__.yaml"
+
+    # Read existing labels
+    if test_labels_path.exists():
+        with test_labels_path.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+    else:
+        # Fallback if labels file doesn't exist
+        data = {"version": "1", "labels": {}}
+
+    # Add completion information as separate top-level field
+    data["completion"] = {
+        "success": success,
+        "message": message,
+    }
+
+    # Write updated labels
+    with test_labels_path.open("w", encoding="utf-8") as f:
+        yaml.safe_dump(data, f, sort_keys=False)
+
+    logger.info(
+        "Updated test labels with completion status: success=%s, message=%s", success, message
+    )
+
+
 def run_all_tests(stop_on_error: bool = False) -> int:
     """Run tests for all run specifications without post-processing.
 
@@ -183,6 +215,7 @@ def run_all_tests(stop_on_error: bool = False) -> int:
                         return exit_code
                 except Exception as e:
                     logger.exception(f"Test failed with exception: {e}")
+                    # Note: Status update already handled by do_test() exception handler
                     max_exit_code = 1
                     if stop_on_error:
                         logger.error("Stopping due to stop_on_error")
@@ -309,6 +342,7 @@ def do_test() -> int:
 
         if dry_run:
             logging.warning("Running in dry-run mode, skipping the rest of the test steps")
+            update_test_labels_with_status(True, "Dry-run completed successfully")
             return 0
 
         if not endpoint_url:
@@ -318,8 +352,10 @@ def do_test() -> int:
         run_guidellm_benchmark(endpoint_url=endpoint_url)
     except Exception as e:
         primary_exc = sys.exc_info()
-    except SignalInterrupt:
+        update_test_labels_with_status(False, f"Test failed with exception: {str(e)}")
+    except SignalInterrupt as e:
         primary_exc = sys.exc_info()
+        update_test_labels_with_status(False, f"Test interrupted: {str(e)}")
     finally:
         do_finalizers = config.project.get_config("runtime.run_test_finalizers")
         if primary_exc and isinstance(primary_exc[1], SignalInterrupt):
@@ -339,6 +375,9 @@ def do_test() -> int:
 
     if finalizer_exc is not None:
         raise finalizer_exc[1].with_traceback(finalizer_exc[2])
+
+    # Update test labels with success status
+    update_test_labels_with_status(True, "Test completed successfully")
 
     return 0
 
