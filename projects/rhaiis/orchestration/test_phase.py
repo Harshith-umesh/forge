@@ -109,19 +109,6 @@ def _run_test(
     run_uuid = _cfg.project.get_config("tests.rhaiis.run_uuid", "") or str(_uuid_mod.uuid4())
     logger.info("Run UUID for this job: %s", run_uuid)
 
-    _create_test_labels(
-        model_key,
-        workload_keys[0],
-        accelerator,
-        vllm_args,
-        hf_model_id=model_cfg["hf_model_id"],
-        version=version,
-        vllm_image=vllm_image,
-        cluster_tag=cluster_tag,
-        accelerator_chip=gpu_type.upper(),
-        run_uuid=run_uuid,
-    )
-
     import subprocess
 
     from projects.guidellm.toolbox.run_guidellm_benchmark.main import (
@@ -279,6 +266,8 @@ def _run_test(
                 endpoint_url=endpoint_url,
                 benchmark_timeout=benchmark_timeout,
                 run_uuid=run_uuid,
+                version=version,
+                cluster_tag=cluster_tag,
             )
 
         try:
@@ -342,8 +331,15 @@ def _run_workload_benchmark(
     endpoint_url: str,
     benchmark_timeout: int,
     run_uuid: str,
+    version: str,
+    cluster_tag: str,
 ) -> None:
-    """Run benchmark and post-processing for a single workload."""
+    """Run benchmark and post-processing for a single workload.
+
+    Each workload gets its own NextArtifactDir with per-workload test labels so
+    the Caliper parser treats them as separate test nodes and produces one
+    dashboard CSV row-set per profile.
+    """
     logger.info("=== Benchmark %s (UUID: %s) ===", workload_key, run_uuid)
 
     workload = runtime_config.get_workload(workload_key)
@@ -357,41 +353,52 @@ def _run_workload_benchmark(
 
     run_benchmark = config.project.get_config("tests.rhaiis.run_benchmark", True)
 
-    if not run_benchmark:
-        logger.info("run_benchmark=false, skipping main benchmark")
-        try:
-            from projects.rhaiis.orchestration.analysis import run_standalone_analysis
-
-            run_standalone_analysis(model_cfg, accelerator_key, vllm_args, run_uuid=run_uuid)
-        except Exception:
-            logger.warning("Standalone analysis failed", exc_info=True)
-            _warnings.append(f"Standalone analysis failed for {workload_key}")
-    else:
-        logger.info("Running benchmark at rates=%s for workload=%s", rates, workload_key)
-
-        benchmark_image = benchmark_cfg.get("image", "ghcr.io/vllm-project/guidellm:v0.6.0")
-
-        guidellm_args = runtime_config.build_guidellm_args(
-            benchmark_cfg=benchmark_cfg,
-            model_id=model_cfg["hf_model_id"],
-            data=workload["data"],
-            rates=rates,
-            max_seconds=max_seconds,
+    with env.NextArtifactDir(f"benchmark_{workload_key}"):
+        _create_test_labels(
+            model_key,
+            workload_key,
+            accelerator,
+            vllm_args,
+            hf_model_id=model_cfg["hf_model_id"],
+            version=version,
+            vllm_image=vllm_image,
+            cluster_tag=cluster_tag,
+            accelerator_chip=gpu_type.upper(),
+            run_uuid=run_uuid,
         )
 
-        run_guidellm_benchmark(
-            endpoint_url=f"{endpoint_url}/v1",
-            name=_guidellm_job_name("guidellm-bench", workload_key, deployment_name),
-            namespace=namespace,
-            image=benchmark_image,
-            timeout=benchmark_timeout,
-            pvc_size=benchmark_cfg.get("pvc_size", "5Gi"),
-            guidellm_args=guidellm_args,
-            hf_token_secret=benchmark_cfg.get("hf_token_secret", ""),
-        )
+        if not run_benchmark:
+            logger.info("run_benchmark=false, skipping main benchmark")
+            try:
+                from projects.rhaiis.orchestration.analysis import run_standalone_analysis
 
-    # Dashboard CSV generation and S3 sync is handled by the Caliper
-    # postprocessing pipeline (kpis_to_csv step) + _sync_postprocessed_dashboard_csv
+                run_standalone_analysis(model_cfg, accelerator_key, vllm_args, run_uuid=run_uuid)
+            except Exception:
+                logger.warning("Standalone analysis failed", exc_info=True)
+                _warnings.append(f"Standalone analysis failed for {workload_key}")
+        else:
+            logger.info("Running benchmark at rates=%s for workload=%s", rates, workload_key)
+
+            benchmark_image = benchmark_cfg.get("image", "ghcr.io/vllm-project/guidellm:v0.6.0")
+
+            guidellm_args = runtime_config.build_guidellm_args(
+                benchmark_cfg=benchmark_cfg,
+                model_id=model_cfg["hf_model_id"],
+                data=workload["data"],
+                rates=rates,
+                max_seconds=max_seconds,
+            )
+
+            run_guidellm_benchmark(
+                endpoint_url=f"{endpoint_url}/v1",
+                name=_guidellm_job_name("guidellm-bench", workload_key, deployment_name),
+                namespace=namespace,
+                image=benchmark_image,
+                timeout=benchmark_timeout,
+                pvc_size=benchmark_cfg.get("pvc_size", "5Gi"),
+                guidellm_args=guidellm_args,
+                hf_token_secret=benchmark_cfg.get("hf_token_secret", ""),
+            )
 
 
 def _create_test_labels(
