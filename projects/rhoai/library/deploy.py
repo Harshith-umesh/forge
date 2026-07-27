@@ -125,6 +125,7 @@ def deploy_rhoai_custom_catalog(*, custom_catalog: RhoaiCustomCatalogConfig) -> 
         catalog_image=custom_catalog.image,
         display_name=custom_catalog.display_name or custom_catalog.name,
         publisher=custom_catalog.publisher or "",
+        artifact_dirname_suffix="rhoai",
     )
 
 

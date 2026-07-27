@@ -42,6 +42,7 @@
 ```python
 from projects.core.dsl import EarlyReturn
 
+
 @task
 def check_operator_deployed(args, ctx):
     if operator_exists():

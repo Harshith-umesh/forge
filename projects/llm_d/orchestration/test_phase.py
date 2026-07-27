@@ -7,7 +7,7 @@ from typing import Any
 
 from projects.core.dsl import shell
 from projects.core.dsl.utils import slugify_identifier
-from projects.core.library import env
+from projects.core.library import config, env
 from projects.core.library.postprocess import run_and_postprocess, write_test_labels
 from projects.core.library.run import SignalInterrupt
 from projects.core.orchestration.utils.k8s import ensure_namespace
@@ -17,6 +17,7 @@ from projects.guidellm.toolbox.run_smoke_request import main as run_smoke_reques
 from projects.kserve.toolbox.capture_llmisvc_state import main as capture_llmisvc_state
 from projects.kserve.toolbox.deploy_llmisvc import main as deploy_llmisvc
 from projects.kserve.toolbox.wait_kserve_ready import main as wait_kserve_ready
+from projects.llm_d.orchestration import runtime_config
 from projects.llm_d.orchestration.prepare_phase import prepare_model_cache
 from projects.llm_d.orchestration.render_inference_service import (
     render_inference_service_from_parts,
@@ -29,7 +30,6 @@ logger = logging.getLogger(__name__)
 
 def create_test_labels() -> None:
     """Create __test_labels__.yaml with model name and guidellm configuration."""
-    from projects.llm_d.orchestration import runtime_config
 
     model_name = runtime_config.get_model_name()
     deployment_profile = runtime_config.get_deployment_profile_name()
@@ -40,11 +40,8 @@ def create_test_labels() -> None:
         "deployment_profile": deployment_profile,
     }
 
-    # Add guidellm configuration information
     if benchmark_keys:
-        labels["guidellm_loadshape"] = (
-            benchmark_keys[0] if len(benchmark_keys) == 1 else benchmark_keys
-        )
+        labels["guidellm_loadshape"] = benchmark_keys[0]
 
     write_test_labels(env.ARTIFACT_DIR, labels)
     logger.info("Created test labels: %s", labels)
@@ -52,6 +49,13 @@ def create_test_labels() -> None:
 
 def run() -> int:
     """Main test function that wraps do_test() with outcome postprocessing."""
+
+    dry_run = config.project.get_config("runtime.kserve.dry_run", False)
+    if dry_run:
+        ret = do_test()
+        logger.info("Kserve dry-run mode enabled - Skipping caliper post-processing")
+        return ret
+
     return run_and_postprocess(do_test)
 
 
@@ -73,8 +77,6 @@ def run_finalizers(
                 return finalizer_exc or sys.exc_info()
             logger.exception("Ignoring %s failure after primary test failure", description)
         return finalizer_exc
-
-    from projects.llm_d.orchestration import runtime_config
 
     namespace = runtime_config.get_namespace()
     platform = runtime_config.get_platform_config()
@@ -107,18 +109,15 @@ def run_finalizers(
 
 def do_test() -> int:
     # Load minimal config needed for orchestration flow
-    from projects.llm_d.orchestration import runtime_config
 
     namespace = runtime_config.get_namespace()
+    dry_run = config.project.get_config("runtime.kserve.dry_run", False)
 
-    # Ensure namespace exists before starting any deployments
-    ensure_namespace(
-        namespace,
-        labels={
-            "app.kubernetes.io/managed-by": "forge",
-            "forge.openshift.io/project": "llm_d",
-        },
-    )
+    if not dry_run:
+        # Ensure namespace exists before starting any deployments
+        ensure_namespace(
+            namespace, labels=config.project.get_config("platform.cluster.namespace.labels")
+        )
 
     endpoint_url: str | None = None
     primary_exc: tuple[type[BaseException], BaseException, Any] | None = None
@@ -130,6 +129,10 @@ def do_test() -> int:
             create_test_labels()
 
             endpoint_url = deploy_inference_service()
+
+            if dry_run:
+                logging.warning("Running in dry-run mode, skipping the rest of the test steps")
+                return 0
 
             if not endpoint_url:
                 raise ValueError("Failed to extract the endpoint_url from the LLMISVC deployment")
@@ -144,6 +147,9 @@ def do_test() -> int:
             do_finalizers = True
             if primary_exc and isinstance(primary_exc[1], SignalInterrupt):
                 logging.warning("Caught a SignalInterrupt, skipping the finalizers")
+                do_finalizers = False
+
+            if dry_run:
                 do_finalizers = False
 
             if do_finalizers:
@@ -169,29 +175,43 @@ def deploy_inference_service() -> str:
     logger.info("Starting LLMInferenceService deployment")
 
     # Load config where it's consumed
-    from projects.llm_d.orchestration import runtime_config
 
     namespace = runtime_config.get_namespace()
     platform = runtime_config.get_platform_config()
     gateway = platform["gateway"]
 
-    # Step 1: Ensure model cache is ready
-    _prepare_model_cache()
+    # Check if dry-run mode is enabled early
+    dry_run = config.project.get_config("runtime.kserve.dry_run", False)
+
+    # Step 1: Ensure model cache is ready (skip in dry-run)
+    if not dry_run:
+        _prepare_model_cache()
+    else:
+        logger.info("Skipping model cache preparation - dry-run mode enabled")
 
     # Step 2: Wait for the serving control plane to settle before creating the service.
-    rhoai_namespace = platform["rhoai"]["namespace"]
-    wait_kserve_ready.run(namespace=rhoai_namespace)
+    if not dry_run:
+        rhoai_namespace = platform["rhoai"]["namespace"]
+        wait_kserve_ready.run(namespace=rhoai_namespace)
 
     # Step 3: Build and write inference service manifest
     manifest_path = _build_inference_service_manifest()
 
     # Step 4: Deploy the service and wait for endpoint
     logger.info("Deploying LLMInferenceService from manifest: %s", manifest_path)
+
     endpoint_url = deploy_llmisvc.run(
         namespace=namespace,
         inference_service_manifest_path=str(manifest_path),
         gateway_status_address_name=gateway["status_address_name"],
+        dry_run=dry_run,
     )
+
+    if dry_run:
+        llmisvc_manifest_path = endpoint_url
+        logger.info("Dry-run completed: LLMInferenceService manifest prepared:")
+        logger.info(llmisvc_manifest_path)
+        return llmisvc_manifest_path
 
     logger.info("LLMInferenceService deployed successfully, endpoint: %s", endpoint_url)
     return endpoint_url
@@ -199,7 +219,6 @@ def deploy_inference_service() -> str:
 
 def _prepare_model_cache() -> None:
     """Ensure model cache PVC is ready for deployment."""
-    from projects.llm_d.orchestration import runtime_config
 
     model_name = runtime_config.get_model_name()
     logger.info("Preparing model cache for model: %s", model_name)
@@ -211,7 +230,6 @@ def _prepare_model_cache() -> None:
 
 def _build_inference_service_manifest() -> Path:
     """Build and write the LLMInferenceService manifest."""
-    from projects.llm_d.orchestration import runtime_config
 
     config_dir = runtime_config.get_config_dir()
     namespace = runtime_config.get_namespace()
@@ -222,7 +240,12 @@ def _build_inference_service_manifest() -> Path:
     deployment_profile = runtime_config.get_deployment_profile()
     model_cache = runtime_config.get_model_cache_config()
 
+    benchmark_overrides = runtime_config.get_benchmark_deployment_overrides()
+    if benchmark_overrides:
+        deployment_profile = runtime_config.deep_merge(deployment_profile, benchmark_overrides)
+
     # Build the InferenceService manifest
+    deployment_profile_name = runtime_config.get_deployment_profile_name()
     manifest = render_inference_service_from_parts(
         config_dir=config_dir,
         namespace=namespace,
@@ -231,6 +254,7 @@ def _build_inference_service_manifest() -> Path:
         model_slug=model_slug,
         deployment_profile=deployment_profile,
         model_cache=model_cache,
+        deployment_profile_name=deployment_profile_name,
     )
 
     # Write the manifest to artifacts
@@ -245,7 +269,6 @@ def _build_inference_service_manifest() -> Path:
 
 def run_smoke_request(*, endpoint_url: str) -> dict[str, object]:
     # Load config where it's consumed
-    from projects.llm_d.orchestration import runtime_config
 
     namespace = runtime_config.get_namespace()
     platform = runtime_config.get_platform_config()
@@ -267,35 +290,31 @@ def run_smoke_request(*, endpoint_url: str) -> dict[str, object]:
 
 
 def run_guidellm_benchmark(*, endpoint_url: str) -> None:
-    # Load config where it's consumed
-    from projects.llm_d.orchestration import runtime_config
-
     namespace = runtime_config.get_namespace()
-    benchmark_configs = runtime_config.get_benchmark_configs()
+    benchmark = runtime_config.get_benchmark_config()
 
-    if not benchmark_configs:
-        return  # Skip if benchmark is disabled
+    if benchmark is None:
+        return
 
-    for benchmark_key, benchmark in benchmark_configs:
-        guidellm_args = build_guidellm_args(benchmark)
-        if not any(arg.startswith("--processor=") for arg in guidellm_args):
-            guidellm_args.append(f"--processor={runtime_config.get_model_name()}")
-        artifact_name = f"benchmark_{slugify_identifier(benchmark_key, max_length=48)}"
-        with env.NextArtifactDir(artifact_name):
-            run_guidellm_benchmark_command.run(
-                endpoint_url=endpoint_url,
-                name=benchmark.get("job_name"),
-                namespace=namespace,
-                image=benchmark.get("image"),
-                timeout=benchmark.get("timeout_seconds"),
-                pvc_size=benchmark.get("pvc_size"),
-                guidellm_args=guidellm_args,
-            )
+    benchmark_key = runtime_config.get_benchmark_keys()[0]
+    guidellm_args = build_guidellm_args(benchmark)
+    if not any(arg.startswith("--processor=") for arg in guidellm_args):
+        guidellm_args.append(f"--processor={runtime_config.get_model_name()}")
+    artifact_name = f"benchmark_{slugify_identifier(benchmark_key, max_length=48)}"
+    with env.NextArtifactDir(artifact_name):
+        run_guidellm_benchmark_command.run(
+            endpoint_url=endpoint_url,
+            name=benchmark.get("job_name"),
+            namespace=namespace,
+            image=benchmark.get("image"),
+            timeout=benchmark.get("timeout_seconds"),
+            pvc_size=benchmark.get("pvc_size"),
+            guidellm_args=guidellm_args,
+        )
 
 
 def capture_inference_service_state() -> None:
     # Load config where it's consumed
-    from projects.llm_d.orchestration import runtime_config
 
     namespace = runtime_config.get_namespace()
     platform = runtime_config.get_platform_config()
@@ -318,26 +337,24 @@ def write_endpoint_url(*, artifact_dir: Path, endpoint_url: str | None) -> None:
 
 def cleanup_test_resources() -> None:
     """Cleanup test resources using the toolbox script"""
-    # Load config where it's consumed
-    from projects.llm_d.orchestration import runtime_config
+
+    # Skip cleanup when in dry-run mode
+    dry_run = config.project.get_config("runtime.kserve.dry_run", False)
+    if dry_run:
+        logger.info("Skipping cleanup_test_resources - dry-run mode enabled")
+        return
 
     namespace = runtime_config.get_namespace()
     platform = runtime_config.get_platform_config()
     inference_service = platform["inference_service"]
     smoke = platform["smoke"]
 
-    # Narrow cleanup (no broad sweep): cover every benchmark job name. Benchmarks
-    # typically share a single job_name, so this dedupes to one call; when
-    # benchmarking is disabled, run once with None so the IS/smoke cleanup still
-    # runs. oc delete is idempotent across iterations.
-    benchmark_job_names = runtime_config.get_benchmark_job_names() or [None]
-    for benchmark_job_name in benchmark_job_names:
-        cleanup_test_resources_command.run(
-            namespace=namespace,
-            inference_service_name=inference_service["name"],
-            smoke_pod_name=smoke["pod_name"],
-            benchmark_job_name=benchmark_job_name,
-        )
+    cleanup_test_resources_command.run(
+        namespace=namespace,
+        inference_service_name=inference_service["name"],
+        smoke_pod_name=smoke["pod_name"],
+        benchmark_job_name=runtime_config.get_benchmark_job_name(),
+    )
 
 
 def capture_namespace_events_after_test(

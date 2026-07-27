@@ -210,7 +210,7 @@ class Config:
 
         for key, value in values.items():
             if key == "extends":
-                for extend_name in value:
+                for extend_name in value or []:
                     self.apply_preset(extend_name)
                 continue
 
@@ -519,3 +519,57 @@ def reload(orchestration_dir, *, apply_config_overrides=True):
 
     init(orchestration_dir, apply_config_overrides=apply_config_overrides)
     return project
+
+
+def write_variables_override(presets=None, variables_dict=None):
+    """Write configuration overrides to the variables_override.yaml file in ARTIFACT_DIR.
+
+    This is a top-level function that doesn't require project config to be initialized.
+
+    Args:
+        presets: List of presets to set in project.args
+        variables_dict: Dictionary of additional configuration paths and values
+    """
+    from pathlib import Path
+
+    if not env.ARTIFACT_DIR:
+        raise ValueError(
+            "env.ARTIFACT_DIR is not initialized. "
+            "Call env.init() before using write_variables_override()"
+        )
+
+    artifact_dir = Path(env.ARTIFACT_DIR)
+    override_file = artifact_dir / VARIABLE_OVERRIDES_FILENAME
+
+    # Ensure the directory exists
+    override_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Load existing overrides or create empty structure
+    if override_file.exists():
+        with open(override_file) as f:
+            loaded = yaml.safe_load(f)
+            if loaded is not None and not isinstance(loaded, dict):
+                raise ValueError(
+                    f"Override file {override_file} must contain a YAML dictionary, got {type(loaded).__name__}"
+                )
+            overrides = loaded or {}
+    else:
+        overrides = {}
+
+    # Set presets in project.args
+    if presets:
+        overrides["project.args"] = presets
+        logger.info(f"write_variables_override: project.args --> {presets}")
+
+    # Add additional variables to top level
+    if variables_dict:
+        for jsonpath, value in variables_dict.items():
+            overrides[jsonpath] = value
+            logger.info(f"write_variables_override: {jsonpath} --> {value}")
+
+    # Write back to file
+    with open(override_file, "w") as f:
+        yaml.dump(overrides, f, indent=4, default_flow_style=False, sort_keys=False)
+
+    total_items = (1 if presets else 0) + (len(variables_dict) if variables_dict else 0)
+    logger.info(f"write_variables_override: wrote {total_items} override(s) to {override_file}")

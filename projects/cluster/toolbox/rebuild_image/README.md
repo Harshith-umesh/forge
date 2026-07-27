@@ -43,11 +43,7 @@ Can be imported and used programmatically:
 ```python
 from projects.cluster.toolbox.rebuild_image.main import run as rebuild_image
 
-result = rebuild_image(
-    build_name="my-build",
-    namespace="my-namespace", 
-    timeout_minutes=30
-)
+result = rebuild_image(build_name="my-build", namespace="my-namespace", timeout_minutes=30)
 ```
 
 ## Common Use Cases

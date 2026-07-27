@@ -4,4 +4,14 @@ deployment_profile: approximate-prefix-cache
 smoke_request_key: default
 benchmark_key: null
 job_name: null
-namespace_override: null
+namespace: forge-llm-d
+kserve:
+  dry_run: false
+kueue:
+  enabled: false
+  queue_name: default-queue
+router:
+  template:
+    file: manifests/scheduler_config/__router_template__.yaml
+    placeholder: __ENDPOINT_PICKER_CONFIG__
+  epp: manifests/scheduler_config

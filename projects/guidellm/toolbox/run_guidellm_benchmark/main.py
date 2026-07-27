@@ -446,19 +446,18 @@ def capture_guidellm_state(*, artifact_dir: Path, namespace: str, benchmark_name
     )
 
     # Capture job logs
-    result = oc(
+    oc(
         "logs",
         f"job/{benchmark_name}",
         "-n",
         namespace,
         check=False,
         log_stdout=False,
+        stdout_dest=artifacts_dir / "guidellm_benchmark_job.logs",
     )
-    if result.returncode == 0 and result.stdout:
-        write_text(artifacts_dir / "guidellm_benchmark_job.logs", result.stdout)
 
     # Capture additional debugging info
-    pods_result = oc(
+    oc(
         "get",
         "pods",
         "-n",
@@ -468,11 +467,10 @@ def capture_guidellm_state(*, artifact_dir: Path, namespace: str, benchmark_name
         "-oyaml",
         check=False,
         log_stdout=False,
+        stdout_dest=artifacts_dir / "guidellm_benchmark_pods.yaml",
     )
-    if pods_result.returncode == 0 and pods_result.stdout:
-        write_text(artifacts_dir / "guidellm_benchmark_pods.yaml", pods_result.stdout)
 
-    job_result = oc(
+    oc(
         "get",
         "job",
         benchmark_name,
@@ -481,20 +479,18 @@ def capture_guidellm_state(*, artifact_dir: Path, namespace: str, benchmark_name
         "-oyaml",
         check=False,
         log_stdout=False,
+        stdout_dest=artifacts_dir / "guidellm_benchmark_job_detailed.yaml",
     )
-    if job_result.returncode == 0 and job_result.stdout:
-        write_text(artifacts_dir / "guidellm_benchmark_job_detailed.yaml", job_result.stdout)
 
-    logs_result = oc(
+    oc(
         "logs",
         f"job/{benchmark_name}",
         "-n",
         namespace,
         check=False,
         log_stdout=False,
+        stdout_dest=artifacts_dir / "guidellm_benchmark_job_logs.txt",
     )
-    if logs_result.returncode == 0 and logs_result.stdout:
-        write_text(artifacts_dir / "guidellm_benchmark_job_logs.txt", logs_result.stdout)
 
 
 def capture_get(
@@ -513,9 +509,7 @@ def capture_get(
     if selector:
         args.extend(["-l", selector])
     args.extend(["-o", output])
-    result = oc(*args, check=False, log_stdout=False)
-    if result.returncode == 0 and result.stdout:
-        write_text(destination, result.stdout)
+    oc(*args, check=False, log_stdout=False, stdout_dest=destination)
 
 
 if __name__ == "__main__":

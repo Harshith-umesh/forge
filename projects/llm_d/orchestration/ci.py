@@ -34,10 +34,15 @@ RHOAI_CUSTOM_CATALOG_VAULTS = [
 ]
 
 
-def init():
+def init(presets=None):
     """Initialize LLM-D orchestration environment"""
     env.init()
     run.init()
+
+    # Set presets configuration if provided
+    if presets:
+        config.write_variables_override(presets=presets)
+
     config.init(Path(__file__).parent)
 
 
@@ -69,12 +74,21 @@ def init_vaults_for_phase(phase: str) -> None:
 
 
 @click.group(cls=ci_lib.HelpfulGroup)
+@click.option("--preset", multiple=True, help="Set preset configuration before starting")
 @click.pass_context
 @ci_lib.safe_ci_function
-def main(ctx):
+def main(ctx, preset):
     """LLM-D Project CI Operations for FORGE."""
     ctx.ensure_object(types.SimpleNamespace)
-    init()
+
+    presets_list = list(preset)
+    if presets_list and "," in presets_list[0]:
+        lst = presets_list.pop(0)
+        presets_list = lst.split(",") + presets_list
+
+        logger.info(f"Setting preset configuration from CLI: {presets_list}")
+
+    init(presets_list)
 
     if ctx.invoked_subcommand == "resolve-fournos-config":
         logger.info("No need to initialize the vaults for the resolve step")
@@ -107,10 +121,17 @@ def preflight(ctx) -> int:
 @agent_review_on_failure
 def test(ctx) -> int:
     """Test phase - Execute the main testing logic."""
+    from projects.llm_d.orchestration import runtime_config
+
     # Trigger config review analysis asynchronously (don't block test execution)
     trigger_config_review_for_ci(env.BASE_ARTIFACT_DIR, async_mode=True)
 
-    return test_toolbox_run()
+    exit_code = 0
+    for run_spec in runtime_config.get_run_specs():
+        with runtime_config.activate_run_spec(run_spec):
+            with env.NextArtifactDir(run_spec.artifact_dirname):
+                exit_code = max(exit_code, test_toolbox_run())
+    return exit_code
 
 
 @main.command()
