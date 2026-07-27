@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+from projects.core.ci_entrypoint.prepare_ci import CI_METADATA_DIRNAME
 from projects.core.dsl import shell
 from projects.core.dsl.utils import slugify_identifier
 from projects.core.dsl.utils.k8s import oc
@@ -155,6 +157,27 @@ def create_test_labels() -> None:
 
     write_test_labels(env.ARTIFACT_DIR, labels)
     logger.info("Created test labels: %s", labels)
+
+    # Dump config.project to config.yaml
+    config_path = env.ARTIFACT_DIR / "config.yaml"
+    try:
+        with config_path.open("w", encoding="utf-8") as f:
+            yaml.safe_dump(config.project.config, f, sort_keys=False)
+        logger.info("Saved project configuration to: %s", config_path)
+    except Exception as e:
+        logger.warning("Failed to save project configuration: %s", e)
+
+    # Copy fournos_fjob.yaml if available
+    fournos_source = env.ARTIFACT_DIR / CI_METADATA_DIRNAME / "fournos_fjob.yaml"
+    if fournos_source.exists():
+        fournos_dest = env.ARTIFACT_DIR / "fournos_fjob.yaml"
+        try:
+            shutil.copy2(fournos_source, fournos_dest)
+            logger.info("Copied fournos job file: %s -> %s", fournos_source, fournos_dest)
+        except Exception as e:
+            logger.warning("Failed to copy fournos job file: %s", e)
+    else:
+        logger.debug("No fournos job file found at: %s", fournos_source)
 
 
 def update_test_labels_with_status(success: bool, message: str) -> None:
