@@ -148,7 +148,7 @@ class RhaiisPlugin(PostProcessingPlugin):
                 else f"{acc}-{model_id}-{tp}"
             )
 
-            row: dict[str, Any] = {col: "" for col in FIELDNAMES}
+            row: dict[str, Any] = dict.fromkeys(FIELDNAMES, "")
             # Populate all metric columns from KPI values
             row.update(metrics)
             # Convert latency columns from seconds back to ms for dashboard compat

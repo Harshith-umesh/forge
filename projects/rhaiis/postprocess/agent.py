@@ -7,7 +7,7 @@ streamed AI response into a markdown string. Ported from model-furnace.
 import json
 import logging
 import uuid
-from typing import Optional
+from datetime import UTC
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
@@ -47,7 +47,7 @@ def _build_prompt(
     compare_version: str,
     tp: str,
     severe_regressions: list,
-    improvements: Optional[list] = None,
+    improvements: list | None = None,
 ) -> str:
     """Build a natural-language prompt for the agent from regression context."""
     lines = [
@@ -108,8 +108,8 @@ def request_agent_analysis(
     severe_regressions: list,
     agent_url: str,
     job_id: str = "",
-    improvements: Optional[list] = None,
-) -> Optional[str]:
+    improvements: list | None = None,
+) -> str | None:
     """Send regression context to the PSAP agent and return its analysis.
 
     Returns the agent's response as a markdown string, or None on failure.
@@ -165,7 +165,7 @@ def request_agent_analysis(
         return None
 
 
-def send_followup(message: str, job_id: str, agent_url: str) -> Optional[str]:
+def send_followup(message: str, job_id: str, agent_url: str) -> str | None:
     """Send a followup message to the agent on an existing session.
 
     Reuses the same thread_id/session_id as request_agent_analysis so the
@@ -214,7 +214,7 @@ def send_followup(message: str, job_id: str, agent_url: str) -> Optional[str]:
         return None
 
 
-def _collect_response(resp) -> Optional[str]:
+def _collect_response(resp) -> str | None:
     """Read the NDJSON stream and extract the final AI message content."""
     collected_tokens = []
     final_message = None
@@ -265,9 +265,9 @@ def markdown_to_html(
 
         body = f"<pre>{html_lib.escape(md_text)}</pre>"
 
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
 
     return f"""<!DOCTYPE html>
 <html lang="en">

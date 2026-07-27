@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import csv
 import json
 import logging
-import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 
@@ -28,7 +26,7 @@ class RegressionResult:
     is_improvement: bool = False
 
 
-def geometric_mean(values) -> Optional[float]:
+def geometric_mean(values) -> float | None:
     positive = values[values > 0].values if hasattr(values, "values") else [v for v in values if v > 0]
     if len(positive) == 0:
         return None
@@ -42,7 +40,7 @@ def compare_runs(
     current_version: str,
     profile_map: dict[tuple[int, int], str],
     metrics: dict[str, dict[str, Any]],
-    restrict_profiles: Optional[list[str]] = None,
+    restrict_profiles: list[str] | None = None,
 ) -> tuple[list[RegressionResult], str]:
     """Compare current run metrics against a baseline version.
 
@@ -171,7 +169,7 @@ def run_regression_analysis(
     output_file: Path,
     profile_map: dict[tuple[int, int], str],
     metrics: dict[str, dict[str, Any]],
-    restrict_profiles: Optional[list[str]] = None,
+    restrict_profiles: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run regression analysis comparing current run against baseline.
 

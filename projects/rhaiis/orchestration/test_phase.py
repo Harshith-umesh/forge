@@ -117,13 +117,13 @@ def _run_test(
         run_uuid=run_uuid,
     )
 
+    import subprocess
+
     from projects.guidellm.toolbox.run_guidellm_benchmark.main import (
         wait_guidellm_benchmark_task,
     )
     from projects.rhaiis.toolbox.deploy_kserve_isvc.main import run as deploy_kserve_isvc
     from projects.rhaiis.toolbox.wait_isvc_ready.main import run as wait_isvc_ready
-
-    import subprocess
     fjob_name = os.environ.get("FJOB_NAME", "")
     fjob_ns = os.environ.get("FOURNOS_WORKLOAD_NAMESPACE", "psap-automation")
     if fjob_name:
@@ -533,11 +533,10 @@ def _run_warmup_step(
     benchmark_timeout: int,
 ) -> None:
     """Run a short warmup benchmark to prime KV cache and CUDA kernels."""
+    from projects.core.library import config
     from projects.guidellm.toolbox.run_guidellm_benchmark.main import (
         run as run_guidellm_benchmark,
     )
-
-    from projects.core.library import config
 
     warmup_cfg = config.project.get_config("rhaiis.warmup", {})
     warmup_rate = warmup_cfg.get("rate", 200)
@@ -687,7 +686,7 @@ def _upload_profiler_traces(
         return
 
     traces_dir = trace_files[0].parent
-    if len(set(f.parent for f in trace_files)) > 1:
+    if len({f.parent for f in trace_files}) > 1:
         traces_dir = Path(env.ARTIFACT_DIR) / "artifacts" / "traces_combined"
         traces_dir.mkdir(parents=True, exist_ok=True)
         for f in trace_files:

@@ -8,7 +8,6 @@ import tempfile
 from pathlib import Path
 
 from projects.core.library import env
-from projects.rhaiis.orchestration import runtime_config
 
 logger = logging.getLogger(__name__)
 

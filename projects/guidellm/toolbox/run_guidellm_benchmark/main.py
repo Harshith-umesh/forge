@@ -326,7 +326,7 @@ def extract_results(args, ctx):
     return f"Extracted results for {ctx.benchmark_name}"
 
 
-def _copy_result_file(namespace: str, pod: str, remote_path: str, local_path) -> "Path | None":
+def _copy_result_file(namespace: str, pod: str, remote_path: str, local_path) -> Path | None:
     """Copy a result file from a pod, compressing first to handle large files.
 
     Falls back to direct ``oc cp`` for small files.

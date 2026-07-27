@@ -183,24 +183,22 @@ def _extract_extra_metrics(node: TestBaseNode) -> tuple[dict[str, Any], dict[str
         metrics = bench.get("metrics", {})
         strategy = bench.get("config", {}).get("strategy", {})
 
-        def _pct(metric_name: str, pct: str):
-            return metrics.get(metric_name, {}).get("successful", {}).get("percentiles", {}).get(pct)
+        def _pct(metric_name: str, pct: str, _m: dict = metrics):
+            return _m.get(metric_name, {}).get("successful", {}).get("percentiles", {}).get(pct)
 
         def _pct_s(metric_name: str, pct: str):
-            """Percentile value converted from ms to seconds."""
             v = _pct(metric_name, pct)
             return v / 1000.0 if v is not None else None
 
-        def _stat(metric_name: str, stat: str):
-            return metrics.get(metric_name, {}).get("successful", {}).get(stat)
+        def _stat(metric_name: str, stat: str, _m: dict = metrics):
+            return _m.get(metric_name, {}).get("successful", {}).get(stat)
 
         def _stat_s(metric_name: str, stat: str):
-            """Stat value converted from ms to seconds."""
             v = _stat(metric_name, stat)
             return v / 1000.0 if v is not None else None
 
-        def _total_stat(metric_name: str, stat: str):
-            return metrics.get(metric_name, {}).get("total", {}).get(stat)
+        def _total_stat(metric_name: str, stat: str, _m: dict = metrics):
+            return _m.get(metric_name, {}).get("total", {}).get(stat)
 
         request_totals = metrics.get("request_totals", {})
 
