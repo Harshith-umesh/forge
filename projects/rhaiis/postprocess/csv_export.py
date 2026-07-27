@@ -14,19 +14,58 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 FIELDNAMES = [
-    "run", "accelerator", "model", "version", "prompt toks", "output toks", "TP",
-    "measured concurrency", "intended concurrency", "measured rps",
-    "output_tok/sec", "total_tok/sec", "prompt_token_count_mean",
-    "prompt_token_count_p99", "output_token_count_mean",
-    "output_token_count_p99", "ttft_median", "ttft_p95", "ttft_p1", "ttft_p999",
-    "tpot_median", "tpot_p95", "tpot_p99", "tpot_p999", "tpot_p1",
-    "itl_median", "itl_p95", "itl_p999", "itl_p1",
-    "request_latency_median", "request_latency_min", "request_latency_max",
-    "successful_requests", "errored_requests", "uuid",
-    "ttft_mean", "ttft_p99", "itl_mean", "itl_p99", "runtime_args",
-    "guidellm_start_time_ms", "guidellm_end_time_ms", "image_tag", "guidellm_version",
-    "DP", "dataset", "spec_decoding", "prefix_caching",
-    "turns", "prefix_tokens", "prefix_count", "request_type",
+    "run",
+    "accelerator",
+    "model",
+    "version",
+    "prompt toks",
+    "output toks",
+    "TP",
+    "measured concurrency",
+    "intended concurrency",
+    "measured rps",
+    "output_tok/sec",
+    "total_tok/sec",
+    "prompt_token_count_mean",
+    "prompt_token_count_p99",
+    "output_token_count_mean",
+    "output_token_count_p99",
+    "ttft_median",
+    "ttft_p95",
+    "ttft_p1",
+    "ttft_p999",
+    "tpot_median",
+    "tpot_p95",
+    "tpot_p99",
+    "tpot_p999",
+    "tpot_p1",
+    "itl_median",
+    "itl_p95",
+    "itl_p999",
+    "itl_p1",
+    "request_latency_median",
+    "request_latency_min",
+    "request_latency_max",
+    "successful_requests",
+    "errored_requests",
+    "uuid",
+    "ttft_mean",
+    "ttft_p99",
+    "itl_mean",
+    "itl_p99",
+    "runtime_args",
+    "guidellm_start_time_ms",
+    "guidellm_end_time_ms",
+    "image_tag",
+    "guidellm_version",
+    "DP",
+    "dataset",
+    "spec_decoding",
+    "prefix_caching",
+    "turns",
+    "prefix_tokens",
+    "prefix_count",
+    "request_type",
 ]
 
 
@@ -51,11 +90,15 @@ def _format_runtime_args(inference_server_args: dict, trtllm_config: dict | None
     parts = []
     for key, value in (inference_server_args or {}).items():
         formatted_key = key.replace("_", "-")
-        formatted_value = json.dumps(value, separators=(",", ":")) if isinstance(value, dict) else value
+        formatted_value = (
+            json.dumps(value, separators=(",", ":")) if isinstance(value, dict) else value
+        )
         parts.append(f"{formatted_key}: {formatted_value}")
     for key, value in (trtllm_config or {}).items():
         formatted_key = f"trtllm.{key.replace('_', '-')}"
-        formatted_value = json.dumps(value, separators=(",", ":")) if isinstance(value, dict) else value
+        formatted_value = (
+            json.dumps(value, separators=(",", ":")) if isinstance(value, dict) else value
+        )
         parts.append(f"{formatted_key}: {formatted_value}")
     return "; ".join(parts)
 
@@ -65,7 +108,9 @@ def find_psap_files(artifact_dir: Path) -> list[Path]:
     return sorted(artifact_dir.rglob("PSAP_perf*.json"))
 
 
-def generate_dashboard_csv(psap_json_path: Path, version: str, output_path: Path, *, run_uuid: str = "") -> Path:
+def generate_dashboard_csv(
+    psap_json_path: Path, version: str, output_path: Path, *, run_uuid: str = ""
+) -> Path:
     """Read a PSAP JSON file and produce a dashboard CSV."""
     with open(psap_json_path, encoding="utf-8") as f:
         payload = json.load(f)
@@ -108,8 +153,12 @@ def generate_dashboard_csv(psap_json_path: Path, version: str, output_path: Path
             start_times.append(sched["start_time"])
         if "end_time" in sched:
             end_times.append(sched["end_time"])
-    guidellm_start_ms = int(min(start_times) * 1000) if start_times else payload.get("guidellm_start_time_ms")
-    guidellm_end_ms = int(max(end_times) * 1000) if end_times else payload.get("guidellm_end_time_ms")
+    guidellm_start_ms = (
+        int(min(start_times) * 1000) if start_times else payload.get("guidellm_start_time_ms")
+    )
+    guidellm_end_ms = (
+        int(max(end_times) * 1000) if end_times else payload.get("guidellm_end_time_ms")
+    )
 
     rows = []
     for bench in benchmarks:
@@ -165,12 +214,7 @@ def _extract_row(
     run_uuid: str = "",
 ) -> dict:
     def _pct(metric_name: str, pct: str):
-        return (
-            metrics.get(metric_name, {})
-            .get("successful", {})
-            .get("percentiles", {})
-            .get(pct)
-        )
+        return metrics.get(metric_name, {}).get("successful", {}).get("percentiles", {}).get(pct)
 
     def _stat(metric_name: str, stat: str):
         return metrics.get(metric_name, {}).get("successful", {}).get(stat)

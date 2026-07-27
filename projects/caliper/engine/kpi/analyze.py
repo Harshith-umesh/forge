@@ -27,7 +27,9 @@ class RegressionResult:
 
 
 def geometric_mean(values) -> float | None:
-    positive = values[values > 0].values if hasattr(values, "values") else [v for v in values if v > 0]
+    positive = (
+        values[values > 0].values if hasattr(values, "values") else [v for v in values if v > 0]
+    )
     if len(positive) == 0:
         return None
     return float(np.exp(np.mean(np.log(positive))))
@@ -69,8 +71,14 @@ def compare_runs(
     accelerator = current_df["accelerator"].iloc[0]
     tp = current_df["TP"].iloc[0]
 
-    logger.info("Comparing %s vs %s for model=%s, accelerator=%s, TP=%s",
-                current_version, compare_version, model, accelerator, tp)
+    logger.info(
+        "Comparing %s vs %s for model=%s, accelerator=%s, TP=%s",
+        current_version,
+        compare_version,
+        model,
+        accelerator,
+        tp,
+    )
 
     def _assign_profile(row):
         try:
@@ -91,7 +99,10 @@ def compare_runs(
     ]
 
     if baseline_filtered.empty:
-        return [], f"No baseline data for {compare_version} with model={model}, accelerator={accelerator}, TP={tp}"
+        return (
+            [],
+            f"No baseline data for {compare_version} with model={model}, accelerator={accelerator}, TP={tp}",
+        )
 
     current_profiles = set(current_df["_profile"].dropna().unique())
     baseline_profiles = set(baseline_filtered["_profile"].dropna().unique())
@@ -112,7 +123,9 @@ def compare_runs(
         cur["intended concurrency"] = pd.to_numeric(cur["intended concurrency"], errors="coerce")
         base["intended concurrency"] = pd.to_numeric(base["intended concurrency"], errors="coerce")
 
-        common_conc = set(cur["intended concurrency"].dropna().unique()) & set(base["intended concurrency"].dropna().unique())
+        common_conc = set(cur["intended concurrency"].dropna().unique()) & set(
+            base["intended concurrency"].dropna().unique()
+        )
         common_conc.discard(1)
 
         if not common_conc:
@@ -144,20 +157,23 @@ def compare_runs(
                 is_regression = pct_diff > threshold
                 is_improvement = pct_diff < -threshold
 
-            results.append(RegressionResult(
-                profile=profile,
-                metric_column=col,
-                metric_label=meta["label"],
-                current_value=cur_gm,
-                baseline_value=base_gm,
-                pct_diff=pct_diff,
-                is_regression=is_regression,
-                is_improvement=is_improvement,
-            ))
+            results.append(
+                RegressionResult(
+                    profile=profile,
+                    metric_column=col,
+                    metric_label=meta["label"],
+                    current_value=cur_gm,
+                    baseline_value=base_gm,
+                    pct_diff=pct_diff,
+                    is_regression=is_regression,
+                    is_improvement=is_improvement,
+                )
+            )
 
     regressions = [r for r in results if r.is_regression]
-    logger.info("Comparison complete: %d metric comparisons, %d regressions",
-                len(results), len(regressions))
+    logger.info(
+        "Comparison complete: %d metric comparisons, %d regressions", len(results), len(regressions)
+    )
     return results, ""
 
 

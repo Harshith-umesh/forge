@@ -714,7 +714,6 @@ def send_cpt_notification_to_slack(secret_dir, secret_env_key, title, summary, d
     return not ok
 
 
-
 def get_slack_cpt_message(summary):
     def get_link(name, path, is_raw_file=False, base=None, is_dir=False):
         return f"<{get_ocpci_link(path, is_raw_file, base, is_dir)}|{name}>"

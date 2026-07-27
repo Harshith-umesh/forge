@@ -14,7 +14,9 @@ logger = logging.getLogger(__name__)
 RHAIIS_SLACK_CHANNEL_ID = "C0B9T6JUW74"
 
 
-def _send_via_topsail_bot(message: str, *, notification_vault: str | None = None, channel_id: str | None = None) -> bool:
+def _send_via_topsail_bot(
+    message: str, *, notification_vault: str | None = None, channel_id: str | None = None
+) -> bool:
     """Send a Slack message using the topsail bot token from the forge notifications vault."""
     vault_name = notification_vault or "psap-forge-notifications"
     try:
@@ -49,7 +51,11 @@ METRICS = {
     "output_tok/sec": {"label": "Output Throughput", "higher_is_better": True, "threshold": 5},
     "ttft_p95": {"label": "TTFT P95", "higher_is_better": False, "threshold": 10},
     "itl_p95": {"label": "ITL P95", "higher_is_better": False, "threshold": 5},
-    "request_latency_median": {"label": "Median E2E Latency", "higher_is_better": False, "threshold": 5},
+    "request_latency_median": {
+        "label": "Median E2E Latency",
+        "higher_is_better": False,
+        "threshold": 5,
+    },
 }
 
 DASHBOARD_BASE_URL = "https://staging-aidash.apps.ocp4.intlab.redhat.com/"
@@ -161,10 +167,16 @@ def send_regression_notification(
 
     detail_lines = []
     all_results = analysis_result.get("all_results", [])
-    profiles = sorted({r["profile"] for r in all_results if r.get("is_regression") or r.get("is_improvement")})
+    profiles = sorted(
+        {r["profile"] for r in all_results if r.get("is_regression") or r.get("is_improvement")}
+    )
 
     for profile in profiles:
-        profile_results = [r for r in all_results if r["profile"] == profile and (r.get("is_regression") or r.get("is_improvement"))]
+        profile_results = [
+            r
+            for r in all_results
+            if r["profile"] == profile and (r.get("is_regression") or r.get("is_improvement"))
+        ]
         detail_lines.append(f"\n*{profile}:*")
         for r in profile_results:
             if r.get("is_regression"):
@@ -226,7 +238,9 @@ def send_regression_notification(
         logger.info("DRY RUN regression notification:\n%s", message)
         return True
 
-    return _send_via_topsail_bot(message, notification_vault=notification_vault, channel_id=RHAIIS_SLACK_CHANNEL_ID)
+    return _send_via_topsail_bot(
+        message, notification_vault=notification_vault, channel_id=RHAIIS_SLACK_CHANNEL_ID
+    )
 
 
 def send_failure_notification(
@@ -275,7 +289,9 @@ def send_failure_notification(
         parallelism_parts.append(f"TP={tp}")
     if dp:
         parallelism_parts.append(f"DP={dp}")
-    parallelism_line = f"*Parallelism:* {', '.join(parallelism_parts)}\n" if parallelism_parts else ""
+    parallelism_line = (
+        f"*Parallelism:* {', '.join(parallelism_parts)}\n" if parallelism_parts else ""
+    )
 
     profiles_line = ""
     if workload_keys:
@@ -303,4 +319,6 @@ def send_failure_notification(
         logger.info("DRY RUN failure notification:\n%s", message)
         return True
 
-    return _send_via_topsail_bot(message, notification_vault=notification_vault, channel_id=RHAIIS_SLACK_CHANNEL_ID)
+    return _send_via_topsail_bot(
+        message, notification_vault=notification_vault, channel_id=RHAIIS_SLACK_CHANNEL_ID
+    )

@@ -47,7 +47,9 @@ def run_standalone_analysis(
         logger.warning("AWS credentials not available, skipping standalone analysis")
         return
 
-    accelerator = accelerator_key.split("_")[0].upper() if "_" in accelerator_key else accelerator_key.upper()
+    accelerator = (
+        accelerator_key.split("_")[0].upper() if "_" in accelerator_key else accelerator_key.upper()
+    )
 
     consolidated_path = None
     current_csv_path = None
@@ -77,7 +79,10 @@ def run_standalone_analysis(
         if current_rows.empty:
             logger.warning(
                 "No data found in S3 for version=%s, model=%s, accelerator=%s, TP=%s",
-                version, model_id, accelerator, tp,
+                version,
+                model_id,
+                accelerator,
+                tp,
             )
             return
 
@@ -87,8 +92,14 @@ def run_standalone_analysis(
 
         logger.info("Standalone analysis: found %d rows for version=%s", len(current_rows), version)
         run_regression_check(
-            current_csv_path, compare_version, version, model_cfg, accelerator,
-            run_uuid=run_uuid, restrict_profiles=restrict_profiles, vllm_args=vllm_args,
+            current_csv_path,
+            compare_version,
+            version,
+            model_cfg,
+            accelerator,
+            run_uuid=run_uuid,
+            restrict_profiles=restrict_profiles,
+            vllm_args=vllm_args,
         )
     except Exception:
         logger.warning("Standalone analysis failed", exc_info=True)
@@ -155,8 +166,12 @@ def run_regression_check(
             agent_cfg = config.project.get_config("rhaiis.agent_analysis", {})
             if agent_cfg.get("enabled", False):
                 report_url = run_agent_analysis(
-                    analysis, model_cfg, accelerator,
-                    current_version, compare_version, run_uuid,
+                    analysis,
+                    model_cfg,
+                    accelerator,
+                    current_version,
+                    compare_version,
+                    run_uuid,
                     severity_threshold=agent_cfg.get("severity_threshold", 10),
                 )
 
@@ -243,7 +258,11 @@ def run_agent_analysis(
         agent_response = f"{agent_response}\n\n---\n\n## Related Pull Requests\n\n{pr_analysis}"
 
     html_content = markdown_to_html(
-        agent_response, run_uuid, model, current_version, compare_version,
+        agent_response,
+        run_uuid,
+        model,
+        current_version,
+        compare_version,
     )
     html_path = Path(env.ARTIFACT_DIR) / f"agent_analysis_{run_uuid}.html"
     html_path.write_text(html_content, encoding="utf-8")
@@ -261,7 +280,9 @@ def run_agent_analysis(
             s3_bucket = s3_cfg.get("bucket", "")
             s3_key = f"reports/rhaiis/{run_uuid}_analysis.html"
             s3.upload_file(
-                str(html_path), s3_bucket, s3_key,
+                str(html_path),
+                s3_bucket,
+                s3_key,
                 ExtraArgs={"ContentType": "text/html"},
             )
             report_url = s3.generate_presigned_url(

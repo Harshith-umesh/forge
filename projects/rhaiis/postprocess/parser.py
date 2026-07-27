@@ -68,10 +68,7 @@ def _find_node_for_record(
 def _bench_sort_key(bench: dict) -> float:
     """Sort key matching GuideLLMParser: requests_per_second.successful.mean."""
     return float(
-        bench.get("metrics", {})
-        .get("requests_per_second", {})
-        .get("successful", {})
-        .get("mean", 0)
+        bench.get("metrics", {}).get("requests_per_second", {}).get("successful", {}).get("mean", 0)
     )
 
 
@@ -79,8 +76,12 @@ def _extract_extra_metrics(node: TestBaseNode) -> tuple[dict[str, Any], dict[str
     """Return (scalar_metrics, extra_curves) extracted from raw benchmarks.json files."""
     extra: dict[str, Any] = {}
     benchmarks_files = sorted(
-        [p for p in node.artifact_paths if p.name == "benchmarks.json"
-         or (p.name.startswith("benchmarks-rate-") and p.suffix == ".json")],
+        [
+            p
+            for p in node.artifact_paths
+            if p.name == "benchmarks.json"
+            or (p.name.startswith("benchmarks-rate-") and p.suffix == ".json")
+        ],
         key=lambda p: p.name,
     )
     if not benchmarks_files:

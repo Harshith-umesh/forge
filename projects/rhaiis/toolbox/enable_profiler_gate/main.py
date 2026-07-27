@@ -44,8 +44,7 @@ def find_predictor_pod(args, context):
 def toggle_profiler_gate(args, context):
     if args.disable:
         shell.run(
-            f"oc exec {context.pod_name} -n {args.namespace} "
-            "-- sh -c 'rm -f /tmp/profiler_gate'",
+            f"oc exec {context.pod_name} -n {args.namespace} -- sh -c 'rm -f /tmp/profiler_gate'",
             check=False,
         )
         return f"Profiler gate disabled on {context.pod_name}"

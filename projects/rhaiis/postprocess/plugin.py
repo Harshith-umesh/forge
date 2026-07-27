@@ -20,11 +20,27 @@ logger = logging.getLogger(__name__)
 
 # CSV columns whose KPI values are in seconds but the dashboard expects milliseconds.
 # GuideLLM parser converts `*_ms` metrics to seconds; the old CSV pipeline kept them in ms.
-_SECONDS_TO_MS_COLUMNS = frozenset({
-    "ttft_median", "ttft_p95", "ttft_p99", "ttft_p1", "ttft_p999", "ttft_mean",
-    "tpot_median", "tpot_p95", "tpot_p99", "tpot_p1", "tpot_p999",
-    "itl_median", "itl_p95", "itl_p99", "itl_p1", "itl_p999", "itl_mean",
-})
+_SECONDS_TO_MS_COLUMNS = frozenset(
+    {
+        "ttft_median",
+        "ttft_p95",
+        "ttft_p99",
+        "ttft_p1",
+        "ttft_p999",
+        "ttft_mean",
+        "tpot_median",
+        "tpot_p95",
+        "tpot_p99",
+        "tpot_p1",
+        "tpot_p999",
+        "itl_median",
+        "itl_p95",
+        "itl_p99",
+        "itl_p1",
+        "itl_p999",
+        "itl_mean",
+    }
+)
 
 # KPI ID → dashboard CSV column name mapping (complete)
 _KPI_TO_CSV_COLUMN = {
@@ -143,9 +159,7 @@ class RhaiisPlugin(PostProcessingPlugin):
             version = labels.get("version", "")
 
             run_name = (
-                f"{acc}-{cluster_tag}-{model_id}-{tp}"
-                if cluster_tag
-                else f"{acc}-{model_id}-{tp}"
+                f"{acc}-{cluster_tag}-{model_id}-{tp}" if cluster_tag else f"{acc}-{model_id}-{tp}"
             )
 
             row: dict[str, Any] = dict.fromkeys(FIELDNAMES, "")

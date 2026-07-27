@@ -110,19 +110,21 @@ class RhaiisKpiHandler:
                     if higher_is_better is not None:
                         labels["higher_is_better"] = higher_is_better
 
-                    out.append({
-                        "schema_version": "1",
-                        "kpi_id": kpi_id,
-                        "value": value,
-                        "unit": unit,
-                        "run_id": r.test_base_path,
-                        "run_path": r.test_base_path,
-                        "timestamp": ts,
-                        "labels": labels,
-                        "source": {
-                            "test_base_path": r.test_base_path,
-                            "plugin_module": model.plugin_module,
-                        },
-                    })
+                    out.append(
+                        {
+                            "schema_version": "1",
+                            "kpi_id": kpi_id,
+                            "value": value,
+                            "unit": unit,
+                            "run_id": r.test_base_path,
+                            "run_path": r.test_base_path,
+                            "timestamp": ts,
+                            "labels": labels,
+                            "source": {
+                                "test_base_path": r.test_base_path,
+                                "plugin_module": model.plugin_module,
+                            },
+                        }
+                    )
 
         return out

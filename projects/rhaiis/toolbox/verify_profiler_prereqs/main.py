@@ -24,8 +24,7 @@ def run(*, namespace: str):
 @task
 def check_webhook_pod(args, context):
     result = shell.run(
-        "oc get pods -n vllm-profiler -l app=env-injector "
-        "-o jsonpath='{.items[0].status.phase}'",
+        "oc get pods -n vllm-profiler -l app=env-injector -o jsonpath='{.items[0].status.phase}'",
         check=False,
     )
     phase = result.stdout.strip().strip("'")
@@ -99,8 +98,7 @@ def check_tls_secret(args, context):
 @task
 def check_configmap(args, context):
     result = shell.run(
-        f"oc get configmap env-injector-files -n {args.namespace} "
-        "-o jsonpath='{.data}'",
+        f"oc get configmap env-injector-files -n {args.namespace} -o jsonpath='{{.data}}'",
         check=False,
     )
     if result.returncode != 0 or "sitecustomize.py" not in result.stdout:
@@ -117,9 +115,7 @@ def check_configmap(args, context):
 def raise_on_errors(args, context):
     errors = getattr(context, "errors", [])
     if errors:
-        raise ValueError(
-            "Profiler prerequisites not met:\n  - " + "\n  - ".join(errors)
-        )
+        raise ValueError("Profiler prerequisites not met:\n  - " + "\n  - ".join(errors))
     return "All profiler prerequisites verified"
 
 

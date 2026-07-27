@@ -14,7 +14,6 @@ _K8S_NAME_MAX = 63
 _warnings: list[str] = []
 
 
-
 def _guidellm_job_name(prefix: str, workload_key: str, deployment_name: str) -> str:
     """Build a K8s-safe job name: {prefix}-{workload_key}-{model}, trimming model to fit."""
     base = f"{prefix}-{workload_key}-"
@@ -63,6 +62,7 @@ def do_test(
             )
     except Exception as exc:
         from projects.rhaiis.orchestration.notifications import send_pipeline_failure_alert
+
         send_pipeline_failure_alert(exc, model_key=model_key, workload_keys=workload_keys)
         raise
 
@@ -78,6 +78,7 @@ def _run_test(
     accelerator = runtime_config.get_accelerator()
     gpu_type = runtime_config.get_gpu_type(accelerator) or accelerator
     from projects.core.library import config as _cfg
+
     cluster_tag = _cfg.project.get_config("rhaiis.cluster_tag", "")
     accelerator_key = f"{gpu_type}_{cluster_tag}".upper() if cluster_tag else gpu_type.upper()
     deploy_cfg = runtime_config.get_deploy_config()
@@ -103,12 +104,16 @@ def _run_test(
     env_vars = runtime_config.merge_env_vars(accelerator, model_cfg)
 
     from projects.core.library import config as _cfg
+
     version = _cfg.project.get_config("tests.rhaiis.version", "")
     run_uuid = _cfg.project.get_config("tests.rhaiis.run_uuid", "") or str(_uuid_mod.uuid4())
     logger.info("Run UUID for this job: %s", run_uuid)
 
     _create_test_labels(
-        model_key, workload_keys[0], accelerator, vllm_args,
+        model_key,
+        workload_keys[0],
+        accelerator,
+        vllm_args,
         hf_model_id=model_cfg["hf_model_id"],
         version=version,
         vllm_image=vllm_image,
@@ -124,15 +129,27 @@ def _run_test(
     )
     from projects.rhaiis.toolbox.deploy_kserve_isvc.main import run as deploy_kserve_isvc
     from projects.rhaiis.toolbox.wait_isvc_ready.main import run as wait_isvc_ready
+
     fjob_name = os.environ.get("FJOB_NAME", "")
     fjob_ns = os.environ.get("FOURNOS_WORKLOAD_NAMESPACE", "psap-automation")
     if fjob_name:
         try:
             mgmt_env = {k: v for k, v in os.environ.items() if k != "KUBECONFIG"}
             subprocess.run(
-                ["oc", "annotate", "fournosjob", fjob_name, "-n", fjob_ns,
-                 f"rhaiis.run-uuid={run_uuid}", "--overwrite"],
-                check=False, capture_output=True, timeout=10, env=mgmt_env,
+                [
+                    "oc",
+                    "annotate",
+                    "fournosjob",
+                    fjob_name,
+                    "-n",
+                    fjob_ns,
+                    f"rhaiis.run-uuid={run_uuid}",
+                    "--overwrite",
+                ],
+                check=False,
+                capture_output=True,
+                timeout=10,
+                env=mgmt_env,
             )
             logger.info("Annotated FournosJob %s with run-uuid=%s", fjob_name, run_uuid)
         except Exception:
@@ -149,9 +166,13 @@ def _run_test(
         logger.info("run_benchmark=false and profiler=false, running standalone analysis only")
         try:
             from projects.rhaiis.orchestration.analysis import run_standalone_analysis
+
             run_standalone_analysis(
-                model_cfg, accelerator_key, vllm_args,
-                run_uuid=run_uuid, restrict_profiles=workload_keys or None,
+                model_cfg,
+                accelerator_key,
+                vllm_args,
+                run_uuid=run_uuid,
+                restrict_profiles=workload_keys or None,
             )
         except Exception:
             logger.warning("Standalone analysis failed", exc_info=True)
@@ -202,7 +223,9 @@ def _run_test(
         )
 
         logger.info(
-            "Running %d workload(s): %s", len(workload_keys), workload_keys,
+            "Running %d workload(s): %s",
+            len(workload_keys),
+            workload_keys,
         )
 
         # Phase 1: warmup or profiler for ALL workloads first
@@ -287,8 +310,11 @@ def _run_test(
         _warnings.append("Predictor log upload failed")
 
     if _warnings:
-        logger.warning("Test completed with %d warning(s): %s", len(_warnings), "; ".join(_warnings))
+        logger.warning(
+            "Test completed with %d warning(s): %s", len(_warnings), "; ".join(_warnings)
+        )
         from projects.rhaiis.orchestration.notifications import send_pipeline_warning
+
         send_pipeline_warning(
             warnings=list(_warnings),
             model_key=model_key,
@@ -335,6 +361,7 @@ def _run_workload_benchmark(
         logger.info("run_benchmark=false, skipping main benchmark")
         try:
             from projects.rhaiis.orchestration.analysis import run_standalone_analysis
+
             run_standalone_analysis(model_cfg, accelerator_key, vllm_args, run_uuid=run_uuid)
         except Exception:
             logger.warning("Standalone analysis failed", exc_info=True)
@@ -456,7 +483,9 @@ def _sync_postprocessed_dashboard_csv(model_key: str, workload_keys: list[str]) 
         logger.info("No postprocessing directory found, skipping dashboard CSV sync")
         return
 
-    kpis_to_csv_output = config.project.get_config("caliper.postprocess.kpi.kpis_to_csv.output", "dashboard.csv")
+    kpis_to_csv_output = config.project.get_config(
+        "caliper.postprocess.kpi.kpis_to_csv.output", "dashboard.csv"
+    )
     csv_path = postprocess_dirs[-1] / kpis_to_csv_output
     if not csv_path.exists():
         logger.info("Dashboard CSV not found at %s, skipping sync", csv_path)
@@ -489,9 +518,15 @@ def _sync_postprocessed_dashboard_csv(model_key: str, workload_keys: list[str]) 
     vllm_args = runtime_config.merge_vllm_args(vllm_defaults, model_cfg, first_workload)
 
     from projects.rhaiis.orchestration.analysis import run_regression_check
+
     run_regression_check(
-        csv_path, compare_version, version, model_cfg, accelerator,
-        run_uuid="", vllm_args=vllm_args,
+        csv_path,
+        compare_version,
+        version,
+        model_cfg,
+        accelerator,
+        run_uuid="",
+        vllm_args=vllm_args,
     )
 
 
@@ -502,7 +537,9 @@ def _upload_predictor_log(run_uuid: str) -> None:
     from projects.core.library import config
     from projects.rhaiis.postprocess.s3_dashboard import upload_predictor_log_to_s3
 
-    matches = sorted(Path(env.ARTIFACT_DIR).glob("*__capture_isvc_state/artifacts/inferenceservice.pods.logs"))
+    matches = sorted(
+        Path(env.ARTIFACT_DIR).glob("*__capture_isvc_state/artifacts/inferenceservice.pods.logs")
+    )
     log_path = matches[-1] if matches else None
     if not log_path or not log_path.exists():
         logger.info("No predictor pod log found under %s, skipping upload", env.ARTIFACT_DIR)
@@ -680,7 +717,9 @@ def _upload_profiler_traces(
     from projects.core.library import config
     from projects.rhaiis.postprocess.s3_dashboard import upload_profiler_traces_to_s3
 
-    trace_files = sorted(Path(env.ARTIFACT_DIR).glob("*__copy_profiler_traces/artifacts/traces/trace_*"))
+    trace_files = sorted(
+        Path(env.ARTIFACT_DIR).glob("*__copy_profiler_traces/artifacts/traces/trace_*")
+    )
     if not trace_files:
         logger.info("No profiler traces to upload")
         return
@@ -691,6 +730,7 @@ def _upload_profiler_traces(
         traces_dir.mkdir(parents=True, exist_ok=True)
         for f in trace_files:
             import shutil
+
             shutil.copy2(f, traces_dir / f.name)
     logger.info("Found %d profiler trace files in %s", len(trace_files), traces_dir)
 

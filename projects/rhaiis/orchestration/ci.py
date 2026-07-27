@@ -33,10 +33,7 @@ def _check_pipeline_failure_and_notify() -> None:
         test_ran = test_dir.exists()
 
         # Skip steps already handled by do_test's exception handler
-        failure_files = sorted(
-            f for f in base_dir.glob("*/FAILURE")
-            if f.parent.name != "03__test"
-        )
+        failure_files = sorted(f for f in base_dir.glob("*/FAILURE") if f.parent.name != "03__test")
 
         if not failure_files and test_ran:
             return
@@ -49,7 +46,9 @@ def _check_pipeline_failure_and_notify() -> None:
             errors.append(f"[{step_name}] {summary}")
 
         if not test_ran and not errors:
-            errors.append("Test step was skipped — likely an earlier pipeline step failed (e.g. image pull timeout)")
+            errors.append(
+                "Test step was skipped — likely an earlier pipeline step failed (e.g. image pull timeout)"
+            )
 
         error_text = "\n".join(errors)
 

@@ -339,7 +339,8 @@ def _copy_result_file(namespace: str, pod: str, remote_path: str, local_path) ->
         "cp",
         f"{namespace}/{pod}:{remote_path}",
         str(local_path),
-        "-c", "copy-helper",
+        "-c",
+        "copy-helper",
         check=False,
         log_stdout=False,
     )
@@ -347,14 +348,23 @@ def _copy_result_file(namespace: str, pod: str, remote_path: str, local_path) ->
         return local_path
 
     logging.getLogger(__name__).info(
-        "Direct oc cp failed (rc=%d), retrying with gzip compression", result.returncode,
+        "Direct oc cp failed (rc=%d), retrying with gzip compression",
+        result.returncode,
     )
 
     # Compress inside the pod, copy the gz, decompress locally
     gz_remote = f"{remote_path}.gz"
     compress = oc(
-        "exec", pod, "-n", namespace, "-c", "copy-helper", "--",
-        "gzip", "-kf", remote_path,
+        "exec",
+        pod,
+        "-n",
+        namespace,
+        "-c",
+        "copy-helper",
+        "--",
+        "gzip",
+        "-kf",
+        remote_path,
         check=False,
     )
     if compress.returncode != 0:
@@ -366,7 +376,8 @@ def _copy_result_file(namespace: str, pod: str, remote_path: str, local_path) ->
         "cp",
         f"{namespace}/{pod}:{gz_remote}",
         str(local_gz),
-        "-c", "copy-helper",
+        "-c",
+        "copy-helper",
         check=False,
         log_stdout=False,
     )

@@ -72,6 +72,7 @@ def sync_csv_to_s3(
         return {"status": "failed", "error": str(e)}
     finally:
         import os
+
         if consolidated_path and os.path.exists(consolidated_path):
             os.unlink(consolidated_path)
 
@@ -98,9 +99,9 @@ def upload_profiler_traces_to_s3(
         return {"status": "skipped", "reason": f"traces dir not found: {traces_dir}"}
 
     trace_files = [
-        f for f in traces_dir.iterdir()
-        if f.name.startswith("trace") and "rank0" in f.name
-        and f.suffix in (".json", ".gz")
+        f
+        for f in traces_dir.iterdir()
+        if f.name.startswith("trace") and "rank0" in f.name and f.suffix in (".json", ".gz")
     ]
     if not trace_files:
         return {"status": "skipped", "reason": "no trace files found"}
