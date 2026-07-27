@@ -13,6 +13,7 @@ janus:
 janus-intelligent:
   extends:
   - janus
+  - cpt
   - llama3-70b
 
   runtime.deployment_profile:
@@ -26,6 +27,7 @@ janus-intelligent:
 janus-pd:
   extends:
   - janus
+  - cpt
   - gpt-oss
 
   runtime.deployment_profile:

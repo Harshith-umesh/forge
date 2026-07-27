@@ -20,6 +20,7 @@ cks:
 cks-intelligent:
   extends:
   - cks
+  - cpt
   - llama3-70b
 
   runtime.deployment_profile:
@@ -33,6 +34,7 @@ cks-intelligent:
 cks-pd:
   extends:
   - cks
+  - cpt
   - gpt-oss
 
   runtime.deployment_profile:
