@@ -24,7 +24,12 @@ from projects.core.library.export import (
 )
 from projects.core.library.postprocess import run_postprocess_after_test
 from projects.core.library.replot import caliper_replot_entrypoint
-from projects.llm_d.orchestration.cleanup_phase import run as cleanup_toolbox_run
+from projects.llm_d.orchestration.cleanup_phase import (
+    cleanup_operators,
+)
+from projects.llm_d.orchestration.cleanup_phase import (
+    run as cleanup_toolbox_run,
+)
 from projects.llm_d.orchestration.preflight_phase import run as preflight_toolbox_run
 from projects.llm_d.orchestration.prepare_sequence import run_prepare_sequence
 
@@ -166,7 +171,8 @@ def pre_cleanup(ctx) -> int:
 
     for run_spec in runtime_config.get_run_specs():
         with runtime_config.activate_run_spec(run_spec):
-            cleanup_toolbox_run(namespace=run_spec.namespace, cleanup_subscriptions=True)
+            cleanup_toolbox_run(namespace=run_spec.namespace)
+    cleanup_operators()
     return 0
 
 
@@ -180,7 +186,8 @@ def post_cleanup(ctx) -> int:
 
     for run_spec in runtime_config.get_run_specs():
         with runtime_config.activate_run_spec(run_spec):
-            cleanup_toolbox_run(namespace=run_spec.namespace, cleanup_subscriptions=True)
+            cleanup_toolbox_run(namespace=run_spec.namespace)
+    cleanup_operators()
     return 0
 
 

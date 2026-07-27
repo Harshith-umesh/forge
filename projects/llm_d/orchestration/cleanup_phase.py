@@ -28,8 +28,7 @@ def cleanup_namespace(*, namespace: str | None = None) -> None:
 
     if namespace is None:
         namespace = runtime_config.get_namespace()
-    platform = runtime_config.get_platform_config()
-    inference_service_name = platform["inference_service"]["name"]
+    inference_service_name = runtime_config.get_inference_service_name()
     benchmark_name = runtime_config.get_benchmark_job_name()
 
     if not oc_resource_exists("namespace", namespace):

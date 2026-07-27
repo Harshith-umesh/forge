@@ -64,6 +64,13 @@ def test_release_deployment_profiles_have_expected_shape() -> None:
     assert distributed["scheduler"] == {}
 
 
+def test_active_profile_inference_service_name_matches_rendered_name() -> None:
+    _init_project_config()
+    core_config.project.set_config("runtime.deployment_profile", "precise-prefix-cache")
+
+    assert runtime_config.get_inference_service_name() == "llm-d-precise-prefix-cache"
+
+
 @pytest.mark.parametrize(
     ("preset", "expected_deployment"),
     [
@@ -204,7 +211,7 @@ def test_llama_release_preset_produces_deployment_workload_matrix() -> None:
         "heavy-heterogeneous",
         "multi-turn",
     }
-    assert len({spec.namespace for spec in run_specs}) == 9
+    assert {spec.namespace for spec in run_specs} == {"forge-llm-d"}
 
 
 def test_precise_profile_preserves_kv_events_json_for_the_serving_eval() -> None:

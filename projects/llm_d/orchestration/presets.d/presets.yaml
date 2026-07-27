@@ -48,7 +48,6 @@ gpt-oss-120b-inference-scheduling-release:
 
 llama-33-70b-rhoai-release:
   runtime.selected_preset: llama-33-70b-rhoai-release
-  runtime.isolate_run_specs: true
   runtime.model_name: RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
   runtime.deployment_profile:
     - distributed-default

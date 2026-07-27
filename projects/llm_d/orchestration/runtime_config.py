@@ -12,7 +12,7 @@ from typing import Any
 
 import yaml
 
-from projects.core.dsl.utils import slugify_identifier, truncate_k8s_name
+from projects.core.dsl.utils import slugify_identifier
 from projects.core.library import config, env, run
 
 logger = logging.getLogger(__name__)
@@ -444,6 +444,12 @@ def get_deployment_profile_name() -> str:
     return deployment_profiles[0]
 
 
+def get_inference_service_name() -> str:
+    """Return the rendered LLMInferenceService name for the active profile."""
+    base_name = get_platform_config()["inference_service"]["name"]
+    return f"{base_name}-{get_deployment_profile_name()}"
+
+
 def _resolve_template_profile(
     profile_name: str, deployment_config: dict[str, Any]
 ) -> dict[str, Any]:
@@ -611,25 +617,14 @@ def get_run_specs() -> list[RunSpec]:
         benchmark_entries = [(None, None)]
 
     combinations = list(product(model_names, profile_names, benchmark_entries))
-    base_namespace = get_namespace()
-    isolate_run_specs = bool(_get_runtime_value("isolate_run_specs"))
+    namespace = get_namespace()
 
     run_specs: list[RunSpec] = []
 
     for model_name, profile_name, (bench_key, bench_slug) in combinations:
         model_slug = get_model_slug(model_name)
         profile_slug = slugify_identifier(profile_name, max_length=24)
-        if not isolate_run_specs or len(combinations) == 1:
-            namespace = base_namespace
-            artifact_dirname = f"llmd__{bench_key or 'default'}"
-        else:
-            namespace_parts = [base_namespace, model_slug, profile_slug]
-            artifact_parts = ["llmd", model_slug, profile_slug]
-            if bench_slug:
-                namespace_parts.append(bench_slug)
-                artifact_parts.append(bench_slug)
-            namespace = truncate_k8s_name("-".join(namespace_parts), max_length=63)
-            artifact_dirname = "__".join(artifact_parts)
+        artifact_dirname = f"llmd__{bench_key or 'default'}"
 
         run_specs.append(
             RunSpec(
