@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import base64
 import json
+from contextlib import nullcontext
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -101,8 +103,9 @@ def test_benchmark_workloads_are_available() -> None:
     heavy = core_config.project.get_config("workloads.benchmarks.heavy-heterogeneous", print=False)
     multi_turn = core_config.project.get_config("workloads.benchmarks.multi-turn", print=False)
 
-    for benchmark in (short, concurrent, heavy, multi_turn):
+    for benchmark in (short, concurrent, heavy):
         assert benchmark["timeout_seconds"] == 3600
+    assert multi_turn["timeout_seconds"] == 7200
 
     assert concurrent["args"]["rate"] == [300, 200, 100, 50, 1]
     assert heavy["args"]["max_seconds"] == 600
@@ -131,7 +134,7 @@ def test_benchmark_resolution_applies_workload_defaults_and_per_benchmark_overri
     assert multi_turn["job_name"] == "guidellm-benchmark"
     assert multi_turn["image"] == "ghcr.io/vllm-project/guidellm:v0.5.4"
     assert multi_turn["pvc_size"] == "1Gi"
-    assert multi_turn["timeout_seconds"] == 3600
+    assert multi_turn["timeout_seconds"] == 7200
 
 
 def test_guidellm_benchmark_uses_original_model_name_as_processor(
@@ -212,6 +215,42 @@ def test_llama_release_preset_produces_deployment_workload_matrix() -> None:
         "multi-turn",
     }
     assert {spec.namespace for spec in run_specs} == {"forge-llm-d"}
+
+
+def test_test_matrix_continues_after_a_failed_entry(monkeypatch: pytest.MonkeyPatch) -> None:
+    _init_project_config()
+    run_specs = [
+        SimpleNamespace(
+            deployment_profile_name="distributed-default",
+            benchmark_key="multi-turn",
+            artifact_dirname="failed-entry",
+        ),
+        SimpleNamespace(
+            deployment_profile_name="precise-prefix-cache",
+            benchmark_key="multi-turn",
+            artifact_dirname="next-entry",
+        ),
+    ]
+    calls: list[str] = []
+
+    monkeypatch.setattr(llmd_ci.runtime_config, "get_run_specs", lambda: run_specs)
+    monkeypatch.setattr(
+        llmd_ci.runtime_config,
+        "activate_run_spec",
+        lambda _run_spec: nullcontext(),
+    )
+    monkeypatch.setattr(llmd_ci, "trigger_config_review_for_ci", lambda *_args, **_kwargs: None)
+
+    def _test_entry() -> int:
+        calls.append("run")
+        if len(calls) == 1:
+            raise RuntimeError("expected test failure")
+        return 0
+
+    monkeypatch.setattr(llmd_ci, "test_toolbox_run", _test_entry)
+
+    assert llmd_ci.run_test_matrix() == 1
+    assert calls == ["run", "run"]
 
 
 def test_precise_profile_preserves_kv_events_json_for_the_serving_eval() -> None:

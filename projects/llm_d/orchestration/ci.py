@@ -127,7 +127,6 @@ def preflight(ctx) -> int:
 @agent_review_on_failure
 def test(ctx) -> int:
     """Test phase - Execute the main testing logic."""
-
     # Trigger config review analysis asynchronously (don't block test execution)
     trigger_config_review_for_ci(env.BASE_ARTIFACT_DIR, async_mode=True)
 
