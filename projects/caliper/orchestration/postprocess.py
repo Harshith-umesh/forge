@@ -1131,7 +1131,10 @@ class CaliperPostprocessOrchestrator:
                     logger.warning(f"Step '{step_name}' completed with warning: {warning_msg}")
                 elif status == "failed":
                     error_msg = result.get("error", "unknown error")
+                    traceback_msg = result.get("traceback")
                     logger.error(f"Step '{step_name}' failed: {error_msg}")
+                    if traceback_msg:
+                        logger.error("Full traceback:\n%s", traceback_msg)
 
             return True
         return False
@@ -1233,7 +1236,10 @@ class CaliperPostprocessOrchestrator:
                 error_msg = (status_data or {}).get(
                     "error", f"Command failed with exit code {result.returncode}"
                 )
+                traceback_msg = (status_data or {}).get("traceback")
                 logger.error("Caliper parse failed: %s", error_msg)
+                if traceback_msg:
+                    logger.error("Full traceback:\n%s", traceback_msg)
                 self._add_step(
                     "parse",
                     {
@@ -1347,7 +1353,10 @@ class CaliperPostprocessOrchestrator:
                 error_msg = (status_data or {}).get(
                     "error", f"Command failed with exit code {result.returncode}"
                 )
+                traceback_msg = (status_data or {}).get("traceback")
                 logger.error("Caliper visualize failed: %s", error_msg)
+                if traceback_msg:
+                    logger.error("Full traceback:\n%s", traceback_msg)
                 self._add_step(
                     "visualize",
                     {
