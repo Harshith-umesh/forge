@@ -122,9 +122,8 @@ def run_regression_check(
     vllm_args: dict | None = None,
 ) -> None:
     from projects.caliper.cli.s3_export import create_s3_client, get_aws_credentials
-    from projects.caliper.engine.kpi.analyze import run_regression_analysis
     from projects.core.library import config
-    from projects.rhaiis.postprocess.regression import METRICS, PROFILE_MAP
+    from projects.rhaiis.postprocess.regression import METRICS, PROFILE_MAP, run_regression_analysis
 
     s3_cfg = config.project.get_config("rhaiis.s3", {})
     csv_dashboard_cfg = config.project.get_config("caliper.postprocess.csv_dashboard", {})
