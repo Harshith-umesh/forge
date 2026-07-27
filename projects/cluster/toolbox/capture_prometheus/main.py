@@ -8,10 +8,10 @@ as a compressed OpenMetrics archive. The output can later be imported into a
 local Prometheus instance for offline querying.
 
 Can be run standalone:
-    python -m projects.cluster.toolbox.capture_prometheus.main \\
-        --start-time "2026-07-26T10:00:00+00:00" \\
-        --end-time "2026-07-26T10:20:00+00:00" \\
-        --output-dir /path/to/output
+    ./bin/run_toolbox cluster capture_prometheus \\
+        "2026-07-26T10:00:00+00:00" \\
+        "2026-07-26T10:20:00+00:00" \\
+        /path/to/output
 """
 
 from __future__ import annotations
@@ -58,6 +58,21 @@ def run(
     return 0
 
 
+def _oc_exec(ctx, command: str, **kwargs):
+    """Run a command inside the Prometheus container via oc exec."""
+    return shell.run(
+        f"oc -n {ctx.namespace} exec {ctx.pod_name} -c {ctx.container} -- {command}",
+        **kwargs,
+    )
+
+
+def _oc_cp_from_pod(ctx, remote_path: str, local_path):
+    """Copy a file from the Prometheus container to a local path."""
+    return shell.run(
+        f"oc cp {ctx.namespace}/{ctx.pod_name}:{remote_path} {local_path} -c {ctx.container}",
+    )
+
+
 def _parse_time(value) -> datetime:
     """Parse a datetime from string (ISO format) or pass through if already datetime.
 
@@ -86,13 +101,10 @@ def validate_parameters(args, ctx):
     max_duration_seconds = 2 * 3600
     duration = (ctx.end_time - ctx.start_time).total_seconds()
     if duration > max_duration_seconds:
-        logger.warning(
-            "Test duration (%ds) exceeds the 2-hour WAL window. "
-            "Skipping Prometheus capture (persistent block handling not yet implemented).",
-            int(duration),
+        raise ValueError(
+            f"Test duration ({int(duration)}s) exceeds the 2-hour WAL window. "
+            f"Tests longer than 2 hours require persistent block handling (not yet implemented)."
         )
-        ctx.skip_capture = True
-        return f"SKIPPED: duration {int(duration)}s exceeds 2-hour WAL window"
 
     ctx.output_dir = Path(args.output_dir)
     ctx.output_dir.mkdir(parents=True, exist_ok=True)
@@ -100,9 +112,9 @@ def validate_parameters(args, ctx):
     ctx.end_ms = int(ctx.end_time.timestamp() * 1000)
     ctx.duration_seconds = int((ctx.end_time - ctx.start_time).total_seconds())
 
-    ctx.namespace = args.namespace or PROMETHEUS_NAMESPACE
-    ctx.pod_name = args.pod_name or PROMETHEUS_POD
-    ctx.container = args.container or PROMETHEUS_CONTAINER
+    ctx.namespace = args.namespace
+    ctx.pod_name = args.pod_name
+    ctx.container = args.container
 
     return (
         f"Capture window: {ctx.start_time.isoformat()} → {ctx.end_time.isoformat()} "
@@ -113,9 +125,6 @@ def validate_parameters(args, ctx):
 @task
 def validate_prometheus_pod(args, ctx):
     """Verify the Prometheus pod is running and accessible."""
-
-    if getattr(ctx, "skip_capture", False):
-        return "SKIPPED"
 
     result = shell.run(
         f"oc -n {ctx.namespace} get pod {ctx.pod_name} -o jsonpath='{{.status.phase}}'",
@@ -138,17 +147,14 @@ def create_temp_tsdb_dir(args, ctx):
     instead of the full TSDB which can be tens of GB.
     """
 
-    if getattr(ctx, "skip_capture", False):
-        return "SKIPPED"
-
     ctx.temp_dir = f"{TSDB_PATH}/.capture-tmp-{ctx.start_ms}"
 
-    shell.run(
-        f"oc -n {ctx.namespace} exec {ctx.pod_name} -c {ctx.container} -- "
+    _oc_exec(
+        ctx,
         f"sh -c '"
-        f"mkdir -p {ctx.temp_dir} && "
-        f"ln -sf {TSDB_PATH}/wal {ctx.temp_dir}/wal && "
-        f"ln -sf {TSDB_PATH}/chunks_head {ctx.temp_dir}/chunks_head"
+        f"mkdir -p {ctx.temp_dir}"
+        f" && ln -sf {TSDB_PATH}/wal {ctx.temp_dir}/wal"
+        f" && ln -sf {TSDB_PATH}/chunks_head {ctx.temp_dir}/chunks_head"
         f"'",
     )
 
@@ -159,26 +165,20 @@ def create_temp_tsdb_dir(args, ctx):
 def dump_metrics(args, ctx):
     """Run promtool tsdb dump-openmetrics with time filtering against the temp dir."""
 
-    if getattr(ctx, "skip_capture", False):
-        return "SKIPPED"
-
     ctx.remote_raw = f"{TSDB_PATH}/.capture-metrics-{ctx.start_ms}"
     ctx.remote_output = f"{ctx.remote_raw}.gz"
 
-    shell.run(
-        f"oc -n {ctx.namespace} exec {ctx.pod_name} -c {ctx.container} -- "
+    _oc_exec(
+        ctx,
         f"sh -c '"
-        f"promtool tsdb dump-openmetrics "
-        f"--min-time={ctx.start_ms} --max-time={ctx.end_ms} "
-        f"{ctx.temp_dir} > {ctx.remote_raw} && gzip -f {ctx.remote_raw}"
+        f"promtool tsdb dump-openmetrics"
+        f" --min-time={ctx.start_ms} --max-time={ctx.end_ms}"
+        f" {ctx.temp_dir} > {ctx.remote_raw}"
+        f" && gzip -f {ctx.remote_raw}"
         f"'",
     )
 
-    size_result = shell.run(
-        f"oc -n {ctx.namespace} exec {ctx.pod_name} -c {ctx.container} -- "
-        f"stat -c %s {ctx.remote_output}",
-        check=False,
-    )
+    size_result = _oc_exec(ctx, f"stat -c %s {ctx.remote_output}", check=False)
 
     ctx.archive_size_bytes = int(size_result.stdout.strip()) if size_result.success else 0
 
@@ -189,15 +189,9 @@ def dump_metrics(args, ctx):
 def copy_to_output(args, ctx):
     """Copy the compressed metrics file from the pod to the output directory."""
 
-    if getattr(ctx, "skip_capture", False):
-        return "SKIPPED"
-
     ctx.output_file = ctx.output_dir / "metrics.openmetrics.gz"
 
-    shell.run(
-        f"oc cp {ctx.namespace}/{ctx.pod_name}:{ctx.remote_output} "
-        f"{ctx.output_file} -c {ctx.container}",
-    )
+    _oc_cp_from_pod(ctx, ctx.remote_output, ctx.output_file)
 
     return f"Copied metrics to {ctx.output_file}"
 
@@ -207,30 +201,13 @@ def copy_to_output(args, ctx):
 def cleanup_pod(args, ctx):
     """Remove temp files from the Prometheus pod."""
 
-    namespace = getattr(ctx, "namespace", None) or PROMETHEUS_NAMESPACE
-    pod_name = getattr(ctx, "pod_name", None) or PROMETHEUS_POD
-    container = getattr(ctx, "container", None) or PROMETHEUS_CONTAINER
     temp_dir = getattr(ctx, "temp_dir", None)
     remote_output = getattr(ctx, "remote_output", None)
-
-    if temp_dir:
-        shell.run(
-            f"oc -n {namespace} exec {pod_name} -c {container} -- rm -rf {temp_dir}",
-            check=False,
-        )
-
-    if remote_output:
-        shell.run(
-            f"oc -n {namespace} exec {pod_name} -c {container} -- rm -f {remote_output}",
-            check=False,
-        )
-
     remote_raw = getattr(ctx, "remote_raw", None)
-    if remote_raw:
-        shell.run(
-            f"oc -n {namespace} exec {pod_name} -c {container} -- rm -f {remote_raw}",
-            check=False,
-        )
+
+    for path in [temp_dir, remote_output, remote_raw]:
+        if path:
+            _oc_exec(ctx, f"rm -rf {path}", check=False)
 
     return "Cleaned up temp files on Prometheus pod"
 

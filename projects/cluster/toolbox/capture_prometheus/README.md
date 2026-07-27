@@ -25,8 +25,7 @@ Extracts cluster Prometheus metrics for a specific time window and saves them as
 ### Standalone (CLI)
 
 ```bash
-cd forge-prom/forge
-python3 -m projects.cluster.toolbox.capture_prometheus.main \
+./bin/run_toolbox cluster capture_prometheus \
     "2026-07-26T10:00:00+00:00" \
     "2026-07-26T10:20:00+00:00" \
     /path/to/output
