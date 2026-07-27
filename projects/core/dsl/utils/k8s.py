@@ -24,6 +24,7 @@ def oc(
     log_stdout: bool = True,
     log_stderr: bool = True,
     stdout_dest: Path | None = None,
+    text: bool = True,
     handled_secretly: bool = False,
 ) -> shell.CommandResult:
     """Run an oc command.
@@ -36,6 +37,7 @@ def oc(
         log_stdout: Log stdout to console (default True)
         log_stderr: Log stderr to console (default True)
         stdout_dest: Optional file path to write stdout to
+        text: Optional. If False, handle binary output (default True)
         handled_secretly: If True, disable all logging to prevent secret leakage
 
     Returns:
@@ -58,6 +60,7 @@ def oc(
             stdout_dest=stdout_dest,
             input_text=input_text,
             timeout_seconds=timeout_seconds,
+            text=text,
         )
     except subprocess.CalledProcessError as e:
         if not handled_secretly:
