@@ -233,10 +233,10 @@ def test_prepare_phase_adds_rhoai_custom_catalog_vaults_only_for_custom_catalog_
     core_config.project.set_config("platform.rhoai.custom_catalog.enabled", True)
     llmd_ci.init_vaults_for_phase("prepare")
 
-    assert "psap-rhoai-rc" not in calls[0]["optional_vaults"]
-    assert "psap-forge-staging-image-pull" not in calls[0]["optional_vaults"]
-    assert "psap-rhoai-rc" in calls[1]["optional_vaults"]
-    assert "psap-forge-staging-image-pull" in calls[1]["optional_vaults"]
+    assert "psap-rhoai-rc" not in calls[0]["mandatory_vaults"]
+    assert "psap-forge-staging-image-pull" not in calls[0]["mandatory_vaults"]
+    assert "psap-rhoai-rc" in calls[1]["mandatory_vaults"]
+    assert "psap-forge-staging-image-pull" in calls[1]["mandatory_vaults"]
 
 
 def test_prepare_rhoai_operator_runs_registry_setup_before_custom_catalog_deployment(

@@ -69,7 +69,7 @@ def init_vaults_for_phase(phase: str) -> None:
     if phase == "prepare" and config.project.get_config(
         "platform.rhoai.custom_catalog.enabled", False
     ):
-        optional_vaults = [*optional_vaults, *RHOAI_CUSTOM_CATALOG_VAULTS]
+        mandatory_vaults = [*mandatory_vaults, *RHOAI_CUSTOM_CATALOG_VAULTS]
 
     vault.init(mandatory_vaults=mandatory_vaults, optional_vaults=optional_vaults)
 
