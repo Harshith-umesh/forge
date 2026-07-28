@@ -408,7 +408,38 @@ def _build_pd_pod_template(
     if deployment_profile.get("serving_image"):
         container["image"] = deployment_profile["serving_image"]
 
-    return {"containers": [container]}
+    # Build pod template with anti-affinity for P/D deployments
+    component_type = "prefill" if is_prefill else "decode"
+    opposite_component = "decode" if is_prefill else "prefill"
+
+    pod_template = {
+        "containers": [container],
+        "metadata": {"labels": {"app.kubernetes.io/component": component_type}},
+    }
+
+    # Add anti-affinity to prevent prefill and decode pods from landing on the same node
+    affinity = {
+        "podAntiAffinity": {
+            "preferredDuringSchedulingIgnoredDuringExecution": [
+                {
+                    "weight": 100,
+                    "podAffinityTerm": {
+                        "labelSelector": {
+                            "matchLabels": {
+                                # Anti-affinity between prefill and decode pods
+                                "app.kubernetes.io/component": opposite_component
+                            }
+                        },
+                        "topologyKey": "kubernetes.io/hostname",
+                    },
+                }
+            ]
+        }
+    }
+
+    pod_template["affinity"] = affinity
+
+    return pod_template
 
 
 def _calculate_total_gpu_usage(deployment_profile: dict[str, Any]) -> int:
