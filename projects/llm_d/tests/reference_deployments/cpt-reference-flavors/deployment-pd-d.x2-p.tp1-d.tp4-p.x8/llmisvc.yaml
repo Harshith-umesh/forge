@@ -43,6 +43,18 @@ spec:
           fieldRef:
             apiVersion: v1
             fieldPath: status.podIP
+    metadata:
+      labels:
+        app.kubernetes.io/component: decode
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/component: prefill
+            topologyKey: kubernetes.io/hostname
   prefill:
     replicas: 8
     parallelism:
@@ -67,5 +79,17 @@ spec:
             fieldRef:
               apiVersion: v1
               fieldPath: status.podIP
+      metadata:
+        labels:
+          app.kubernetes.io/component: prefill
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/component: decode
+              topologyKey: kubernetes.io/hostname
   parallelism:
     tensor: 4
