@@ -56,11 +56,13 @@ def list_trace_files(args, context):
 def copy_traces(args, context):
     traces_dir = args.artifact_dir / "artifacts/traces"
     shell.run(
-        f"oc exec {context.pod_name} -n {args.namespace} "
-        "-- sh -c 'cd /tmp && tar cf - trace_*.json*' "
-        f"| tar --no-same-owner -xf - -C {traces_dir}",
+        'bash -o pipefail -c "'
+        f"oc exec {context.pod_name} -n {args.namespace}"
+        " -- sh -c 'cd /tmp && tar cf - trace_*.json*'"
+        f' | tar --no-same-owner -xf - -C {traces_dir}"',
     )
-    return f"Copied {context.trace_count} trace files to {traces_dir}"
+    copied = list(traces_dir.glob("trace_*.json*"))
+    return f"Copied {len(copied)} trace files to {traces_dir}"
 
 
 if __name__ == "__main__":

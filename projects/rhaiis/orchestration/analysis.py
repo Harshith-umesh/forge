@@ -73,7 +73,7 @@ def run_standalone_analysis(
             (df["version"] == version)
             & (df["model"] == model_id)
             & (df["accelerator"] == accelerator)
-            & (df["TP"].fillna(-1).astype(float).astype(int).astype(str) == tp)
+            & (pd.to_numeric(df["TP"], errors="coerce").fillna(-1).astype(int).astype(str) == tp)
         ]
 
         if current_rows.empty:

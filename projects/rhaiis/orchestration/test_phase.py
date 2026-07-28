@@ -40,7 +40,8 @@ def run(
     try:
         _sync_postprocessed_dashboard_csv(model_key, workload_keys)
     except Exception:
-        logger.warning("Dashboard CSV S3 sync after postprocessing failed", exc_info=True)
+        logger.exception("Dashboard CSV S3 sync after postprocessing failed")
+        ret = 1
 
     return ret
 
@@ -53,7 +54,8 @@ def do_test(
     deployment_name: str | None = None,
 ) -> int:
     try:
-        with env.NextArtifactDir("testing"):
+        dir_name = f"test_{model_key}_{'_'.join(workload_keys)}"
+        with env.NextArtifactDir(dir_name):
             return _run_test(
                 model_key=model_key,
                 workload_keys=workload_keys,
@@ -74,6 +76,7 @@ def _run_test(
     namespace: str,
     deployment_name: str | None = None,
 ) -> int:
+    _warnings.clear()
     model_cfg = runtime_config.get_model(model_key)
     accelerator = runtime_config.get_accelerator()
     gpu_type = runtime_config.get_gpu_type(accelerator) or accelerator
@@ -140,7 +143,7 @@ def _run_test(
             )
             logger.info("Annotated FournosJob %s with run-uuid=%s", fjob_name, run_uuid)
         except Exception:
-            logger.debug("Failed to annotate FournosJob with UUID", exc_info=True)
+            logger.warning("Failed to annotate FournosJob with UUID", exc_info=True)
 
     from projects.core.library import config
 
@@ -217,37 +220,29 @@ def _run_test(
 
         # Phase 1: warmup or profiler for ALL workloads first
         for wl_key in workload_keys:
-            workload = runtime_config.get_workload(wl_key)
+            step_kwargs = dict(
+                deployment_name=deployment_name,
+                namespace=namespace,
+                endpoint_url=endpoint_url,
+                benchmark_cfg=benchmark_cfg,
+                model_cfg=model_cfg,
+                workload=runtime_config.get_workload(wl_key),
+                workload_key=wl_key,
+                benchmark_timeout=benchmark_timeout,
+            )
             if profiler_enabled:
                 logger.info("Running profiler for workload=%s", wl_key)
-                _run_profiler_step(
-                    deployment_name=deployment_name,
-                    namespace=namespace,
-                    endpoint_url=endpoint_url,
-                    benchmark_cfg=benchmark_cfg,
-                    model_cfg=model_cfg,
-                    workload=workload,
-                    workload_key=wl_key,
-                    benchmark_timeout=benchmark_timeout,
-                )
+                _run_profiler_step(**step_kwargs)
             elif warmup_enabled:
                 logger.info("Running warmup for workload=%s", wl_key)
-                _run_warmup_step(
-                    deployment_name=deployment_name,
-                    namespace=namespace,
-                    endpoint_url=endpoint_url,
-                    benchmark_cfg=benchmark_cfg,
-                    model_cfg=model_cfg,
-                    workload=workload,
-                    workload_key=wl_key,
-                    benchmark_timeout=benchmark_timeout,
-                )
+                _run_warmup_step(**step_kwargs)
 
         if profiler_enabled:
             try:
                 _upload_profiler_traces(model_cfg, gpu_type, vllm_args, profiler_cfg)
             except Exception:
-                logger.warning("Profiler trace upload failed; continuing", exc_info=True)
+                logger.exception("Profiler trace upload failed")
+                _warnings.append("Profiler trace upload failed")
 
         # Phase 2: benchmark + post-processing for ALL workloads
         for wl_key in workload_keys:
@@ -372,7 +367,13 @@ def _run_workload_benchmark(
             try:
                 from projects.rhaiis.orchestration.analysis import run_standalone_analysis
 
-                run_standalone_analysis(model_cfg, accelerator_key, vllm_args, run_uuid=run_uuid)
+                run_standalone_analysis(
+                    model_cfg,
+                    accelerator_key,
+                    vllm_args,
+                    run_uuid=run_uuid,
+                    restrict_profiles=[workload_key],
+                )
             except Exception:
                 logger.warning("Standalone analysis failed", exc_info=True)
                 _warnings.append(f"Standalone analysis failed for {workload_key}")

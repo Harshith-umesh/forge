@@ -25,7 +25,10 @@ def _check_pipeline_failure_and_notify() -> None:
     produced FAILURE artifacts or the test step was skipped entirely.
     """
     try:
-        base_dir = Path(os.environ.get("ARTIFACT_BASE_DIR", ""))
+        base_dir_env = os.environ.get("ARTIFACT_BASE_DIR", "")
+        if not base_dir_env:
+            return
+        base_dir = Path(base_dir_env)
         if not base_dir.is_dir():
             return
 

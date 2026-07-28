@@ -46,13 +46,13 @@ def prepare():
 
 
 def _delete_resources_by_suffix(resource_type: str, ns: str, suffix: str) -> None:
-    """Delete resources whose names contain the FJOB suffix."""
+    """Delete resources whose names end with the FJOB suffix."""
     result = oc("get", resource_type, "-n", ns, "-o", "name", check=False, log_stdout=False)
     if result.returncode != 0 or not result.stdout:
         return
     for line in result.stdout.strip().splitlines():
         name = line.strip()
-        if suffix in name:
+        if name.endswith(f"-{suffix}"):
             oc("delete", name, "-n", ns, "--ignore-not-found", check=False)
 
 
