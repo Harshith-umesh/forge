@@ -527,6 +527,45 @@ def _run_artifacts_to_kpis(
 
         # Convert to expected format
         if status_data.get("success"):
+            # Transform JSONL (schema v1) to hierarchical JSON (schema v2)
+            try:
+                logger.info(f"Transforming KPI output to hierarchical format: {output_file}")
+
+                # Read the generated JSONL file
+                kpis = []
+                with open(output_file) as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            import json
+
+                            kpis.append(json.loads(line))
+
+                if kpis:
+                    # Transform to hierarchical format
+                    hierarchical_data = _transform_kpis_to_hierarchical_format(kpis, model)
+
+                    # Write back as JSON (schema v2)
+                    import json
+
+                    with open(output_file, "w") as f:
+                        json.dump(hierarchical_data, f, indent=2, ensure_ascii=False)
+
+                    logger.info(
+                        f"Successfully transformed {len(kpis)} KPI records to hierarchical format"
+                    )
+                else:
+                    logger.warning("No KPI records found in output file")
+
+            except Exception as transform_error:
+                logger.error(f"Failed to transform KPIs to hierarchical format: {transform_error}")
+                return {
+                    "status": "failed",
+                    "error": f"KPI transformation failed: {transform_error}",
+                    "completed_at": time.time(),
+                    "log_file": log_file,
+                }
+
             relative_path = _make_path_relative_to_base(output_file, env.ARTIFACT_DIR)
             logger.info(
                 f"KPI generate: output_file={output_file}, env.ARTIFACT_DIR={env.ARTIFACT_DIR}, relative_path={relative_path}"
