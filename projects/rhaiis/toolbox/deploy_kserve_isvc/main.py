@@ -15,9 +15,12 @@ def run(
     deployment_name: str,
     namespace: str,
     model_id: str,
-    vllm_image: str,
+    serving_image: str,
     accelerator: str = "nvidia",
-    vllm_args: dict | None = None,
+    engine: str = "vllm",
+    engine_args: dict | None = None,
+    engine_port: int = 8080,
+    trtllm_config: dict | None = None,
     env_vars: dict | None = None,
     replicas: int = 1,
     cpu_request: str = "4",
@@ -37,8 +40,8 @@ def prepare_args(args, context):
     for key, value in (args.env_vars or {}).items():
         context.env_vars_list.append({"name": key, "value": str(value)})
 
-    vllm_args = args.vllm_args or {}
-    tp_size = vllm_args.get("tensor-parallel-size", 1)
+    ea = args.engine_args or {}
+    tp_size = ea.get("tensor-parallel-size") or ea.get("tp-size") or ea.get("tp_size") or 1
     context.gpu_count = int(tp_size)
 
     if args.storage_pvc:
@@ -48,7 +51,7 @@ def prepare_args(args, context):
         context.use_pvc = False
         context.pvc_name = ""
 
-    return f"GPU count={context.gpu_count}, env_vars={len(context.env_vars_list)}, pvc={context.use_pvc}"
+    return f"engine={args.engine}, GPU count={context.gpu_count}, env_vars={len(context.env_vars_list)}, pvc={context.use_pvc}"
 
 
 @task

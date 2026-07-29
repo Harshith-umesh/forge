@@ -3,41 +3,66 @@ kind: InferenceService
 metadata:
   annotations:
     serving.kserve.io/deploymentMode: RawDeployment
-    serving.kserve.io/enable-prometheus-scraping: "true"
     storage.kserve.io/readonly: "false"
+{%- if args.engine != "sglang" %}
+    serving.kserve.io/enable-prometheus-scraping: "true"
     prometheus.io/scrape: "true"
     prometheus.io/path: /metrics
-    prometheus.io/port: "8080"
+    prometheus.io/port: "{{ args.engine_port }}"
+{%- endif %}
 {%- if args.labels %}
   labels:
 {%- for key, val in args.labels.items() %}
     {{ key }}: "{{ val }}"
 {%- endfor %}
+{%- if args.engine == "sglang" or args.engine == "trtllm" %}
+    monitoring.opendatahub.io/scrape: "false"
+{%- endif %}
 {%- endif %}
   name: {{ args.deployment_name }}
   namespace: {{ args.namespace }}
 spec:
   predictor:
+{%- if args.engine == "trtllm" %}
+    terminationGracePeriodSeconds: 120
+{%- endif %}
     minReplicas: {{ args.replicas }}
     maxReplicas: {{ args.replicas }}
     model:
       modelFormat:
+{%- if args.engine == "sglang" %}
+        name: sglang
+{%- elif args.engine == "trtllm" %}
+        name: trtllm
+{%- else %}
         name: vLLM
+{%- endif %}
       runtime: {{ args.deployment_name }}
       resources:
 {%- if args.accelerator == "nvidia" %}
         limits:
           nvidia.com/gpu: "{{ ctx.gpu_count }}"
+{%- if args.engine == "trtllm" %}
+          memory: "{{ args.memory_request }}"
+          ephemeral-storage: "50Gi"
+{%- endif %}
         requests:
           nvidia.com/gpu: "{{ ctx.gpu_count }}"
+{%- if args.engine == "trtllm" %}
+          cpu: "{{ args.cpu_request }}"
+          memory: "{{ args.memory_request }}"
+          ephemeral-storage: "50Gi"
+{%- endif %}
 {%- elif args.accelerator == "amd" %}
         limits:
           amd.com/gpu: "{{ ctx.gpu_count }}"
         requests:
           amd.com/gpu: "{{ ctx.gpu_count }}"
 {%- endif %}
+{%- if not (args.accelerator == "nvidia" and args.engine == "trtllm") %}
           cpu: "{{ args.cpu_request }}"
           memory: "{{ args.memory_request }}"
+{%- endif %}
 {%- if args.storage_source == "hf" and ctx.use_pvc %}
       storageUri: pvc://{{ ctx.pvc_name }}/
 {%- elif args.storage_source != "hf" %}

@@ -25,11 +25,20 @@ def _send_alert(
     accelerator = runtime_config.get_accelerator()
     gpu_type = runtime_config.get_gpu_type(accelerator) or accelerator
     cluster_tag = _cfg.project.get_config("rhaiis.cluster_tag", "")
-    vllm_args = runtime_config.merge_vllm_args(
-        runtime_config.get_vllm_defaults(),
+    engine = runtime_config.get_engine()
+    engine_args = runtime_config.merge_engine_args(
+        runtime_config.get_engine_args(engine),
         model_cfg,
         runtime_config.get_workload(workload_keys[0]),
+        engine,
     )
+    tp = (
+        engine_args.get("tensor-parallel-size")
+        or engine_args.get("tp-size")
+        or engine_args.get("tp_size")
+        or ""
+    )
+    dp = engine_args.get("data-parallel-size") or engine_args.get("dp-size") or ""
 
     send_failure_notification(
         error=error_message,
@@ -38,8 +47,8 @@ def _send_alert(
         job_id=os.environ.get("FJOB_NAME", ""),
         slack_user=_cfg.project.get_config("tests.rhaiis.slack_user", ""),
         notification_vault="psap-forge-notifications",
-        tp=str(vllm_args.get("tensor-parallel-size", "")),
-        dp=str(vllm_args.get("data-parallel-size", "")),
+        tp=str(tp),
+        dp=str(dp),
         version=_cfg.project.get_config("tests.rhaiis.version", ""),
         workload_keys=workload_keys,
         cluster=cluster_tag,

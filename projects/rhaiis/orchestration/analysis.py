@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 def run_standalone_analysis(
     model_cfg: dict,
     accelerator_key: str,
-    vllm_args: dict,
+    engine_args: dict,
     *,
     run_uuid: str = "",
     restrict_profiles: list[str] | None = None,
@@ -67,7 +67,12 @@ def run_standalone_analysis(
                 df[col] = df[col].str.strip()
 
         model_id = model_cfg.get("hf_model_id", "")
-        tp = str(vllm_args.get("tensor-parallel-size", 1))
+        tp = str(
+            engine_args.get("tensor-parallel-size")
+            or engine_args.get("tp-size")
+            or engine_args.get("tp_size")
+            or 1
+        )
 
         current_rows = df[
             (df["version"] == version)
@@ -99,7 +104,7 @@ def run_standalone_analysis(
             accelerator,
             run_uuid=run_uuid,
             restrict_profiles=restrict_profiles,
-            vllm_args=vllm_args,
+            engine_args=engine_args,
         )
     except Exception:
         logger.warning("Standalone analysis failed", exc_info=True)
@@ -119,7 +124,7 @@ def run_regression_check(
     *,
     run_uuid: str = "",
     restrict_profiles: list[str] | None = None,
-    vllm_args: dict | None = None,
+    engine_args: dict | None = None,
 ) -> None:
     from projects.caliper.cli.s3_export import create_s3_client, get_aws_credentials
     from projects.core.library import config
@@ -176,7 +181,9 @@ def run_regression_check(
 
             from projects.rhaiis.postprocess.regression import send_regression_notification
 
-            _vllm = vllm_args or {}
+            _ea = engine_args or {}
+            tp = _ea.get("tensor-parallel-size") or _ea.get("tp-size") or _ea.get("tp_size") or ""
+            dp = _ea.get("data-parallel-size") or _ea.get("dp-size") or ""
             send_regression_notification(
                 analysis,
                 model=model_cfg.get("hf_model_id", ""),
@@ -185,8 +192,8 @@ def run_regression_check(
                 slack_user=config.project.get_config("tests.rhaiis.slack_user", ""),
                 notification_vault="psap-forge-notifications",
                 report_url=report_url,
-                tp=str(_vllm.get("tensor-parallel-size", "")),
-                dp=str(_vllm.get("data-parallel-size", "")),
+                tp=str(tp),
+                dp=str(dp),
             )
     except Exception:
         logger.warning("Regression analysis failed; continuing", exc_info=True)
@@ -233,7 +240,8 @@ def run_agent_analysis(
         logger.warning("Agent not reachable, skipping analysis: %s", detail)
         return ""
 
-    tp = str(model_cfg.get("vllm_args", {}).get("tensor-parallel-size", 1))
+    ea = model_cfg.get("engine_args", {})
+    tp = str(ea.get("tensor-parallel-size") or ea.get("tp-size") or ea.get("tp_size") or 1)
     model = model_cfg.get("hf_model_id", "")
     improvements = analysis.get("improvements", [])
 
