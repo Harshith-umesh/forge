@@ -178,8 +178,6 @@ spec:
         - name: {{ env_item.name }}
           value: "{{ env_item.value }}"
 {%- endfor %}
-      securityContext:
-        runAsUser: 0
       ports:
         - containerPort: {{ args.engine_port }}
           protocol: TCP
