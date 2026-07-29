@@ -144,6 +144,8 @@ spec:
   {%- endif %}
 {%- endfor %}
       env:
+        - name: USER
+          value: "{{ args.engine }}"
         - name: XDG_CACHE_HOME
           value: /tmp/.cache
         - name: XDG_CONFIG_HOME
