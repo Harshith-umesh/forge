@@ -729,6 +729,12 @@ def _build_enhanced_notification(
             notification_parts.append("**Test Logs**")
             notification_parts.extend(step_log_links)
 
+            # Add distinct test and post-processing status right under Test Logs
+            test_status_section = _build_test_status_section(status)
+            if test_status_section:
+                notification_parts.append("")
+                notification_parts.extend(test_status_section)
+
         if postprocess_status_links:
             notification_parts.append("")
             notification_parts.extend(postprocess_status_links)
@@ -738,6 +744,42 @@ def _build_enhanced_notification(
         notification_parts.append("**Artifact Links:** Error extracting links")
 
     return "\n".join(notification_parts)
+
+
+def _build_test_status_section(status: dict[str, Any]) -> list[str]:
+    """Build distinct test and post-processing status section."""
+    try:
+        test_phase = status.get("test_phase", {})
+        if not test_phase:
+            return []
+
+        test_status = test_phase.get("phase", "UNKNOWN")
+        test_message = test_phase.get("message", "")
+
+        # Determine post-processing status based on final status and test outcome
+        final_status = status.get("final_status", "unknown")
+        if test_status == "FAILED":
+            post_processing_status = "skipped"  # Don't run post-processing if test failed
+        elif final_status == "success":
+            post_processing_status = "success"
+        elif "failed" in final_status.lower():
+            post_processing_status = "failed"
+        else:
+            post_processing_status = "unknown"
+
+        status_lines = [f"**test:** {test_status}"]
+
+        if test_message:
+            # Format message with blockquote-style prefix
+            status_lines.append(f"> {test_message}")
+
+        status_lines.append(f"**post-processing:** {post_processing_status}")
+
+        return status_lines
+
+    except Exception as e:
+        logger.warning(f"Failed to build test status section: {e}")
+        return []
 
 
 def _extract_project_from_status(status: dict[str, Any]) -> str:

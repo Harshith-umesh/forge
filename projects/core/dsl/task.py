@@ -59,6 +59,7 @@ def _log_retry_attempt(
     result=None,
     exc=None,
     artifact_dirname_suffix=None,
+    retry_backoff=1.0,
 ):
     """
     Log a retry attempt with consistent formatting.
@@ -115,7 +116,21 @@ def _log_retry_attempt(
         retry_reason = f"returned: {result}"
 
     logger.warning(f"~~ RETRY ATTEMPT #{attempt + 1}/{retry_attempts} ({retry_reason})")
-    logger.info(f"~~ RETRY in {current_delay:.0f}s")
+
+    # Calculate total remaining time for all future retries with backoff
+    remaining_attempts = retry_attempts - 1 - attempt
+    total_remaining_time = 0
+    delay_for_calculation = current_delay
+
+    for _i in range(remaining_attempts):
+        total_remaining_time += delay_for_calculation
+        delay_for_calculation *= retry_backoff
+
+    # Calculate when retries will end
+    end_time = time.time() + total_remaining_time
+    end_timestamp = datetime.fromtimestamp(end_time).strftime("%H:%M")
+
+    logger.info(f"~~ RETRY in {current_delay:.0f}s until {end_timestamp}")
     logger.info("~" * LINE_WIDTH)
     logger.info("")
 
@@ -187,6 +202,7 @@ def _execute_with_retry(
                         retry_reason=retry_reason,
                         result=result,
                         artifact_dirname_suffix=artifact_dirname_suffix,
+                        retry_backoff=retry_backoff,
                     )
                     current_delay *= retry_backoff
                 else:
@@ -239,6 +255,7 @@ def _execute_with_retry(
                 current_delay,
                 exc=exc,
                 artifact_dirname_suffix=artifact_dirname_suffix,
+                retry_backoff=retry_backoff,
             )
             current_delay *= retry_backoff
 
