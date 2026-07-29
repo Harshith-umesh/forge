@@ -639,9 +639,9 @@ def kpi_analyze(
     output: Path,
     plugin_module: str,
 ) -> None:
-    """Analyze KPIs for regression."""
+    """Analyze KPIs for regressions using hierarchical format."""
     try:
-        from projects.caliper.engine.kpi.analyze import find_baseline_kpis
+        from projects.caliper.engine.kpi.analyze_hierarchical import find_most_recent_baseline
         from projects.caliper.engine.load_plugin import load_plugin
 
         # Load plugin for KPI definitions and analysis rules
@@ -652,7 +652,7 @@ def kpi_analyze(
 
         click.echo(f"🔌 Using plugin: {plugin_module}")
 
-        baseline_kpis = find_baseline_kpis(baseline_dir)
+        baseline_kpis = find_most_recent_baseline(baseline_dir)
         if not baseline_kpis:
             click.echo(
                 f"❌ No kpis.json files found in baseline directory: {baseline_dir}", err=True

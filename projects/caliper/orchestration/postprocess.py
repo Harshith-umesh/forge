@@ -21,7 +21,6 @@ from pydantic import ValidationError
 
 from projects.caliper.orchestration.cli_builder import (
     build_ai_eval_export_command,
-    build_analyse_kpis_command,
     build_kpi_csv_export_command,
     build_kpi_generate_command,
     build_parse_command,
@@ -896,23 +895,35 @@ def _run_analyse_kpis(
         # Create temporary status file for subprocess communication
         status_file = output_dir / "analyse_kpis_status.yaml"
 
-        # Build CLI command
-        command = build_analyse_kpis_command(
-            config=postprocess_config,
-            tree_root=base_dir,
-            manifest_path=manifest_path,
-            status_file=status_file,
-            output_file=output_file,
-            current_kpis_file=current_kpis_file,
-            historical_kpis_dir=historical_kpis_dir,
+        # Note: CLI command building removed in favor of direct function call
+
+        # Load plugin for KPI definitions
+        from projects.caliper.engine.load_plugin import load_plugin
+
+        plugin = load_plugin(plugin_module)
+
+        # Find the most recent baseline file
+        from projects.caliper.engine.kpi.analyze_hierarchical import (
+            analyze_hierarchical_kpis,
+            find_most_recent_baseline,
         )
 
-        # Execute command using generic function
-        result, status_data, log_file = _execute_caliper_command(
-            command=command,
-            step_name="caliper kpi analyse-kpis",
-            status_file=status_file,
-            step_logs_dir=step_logs_dir,
+        baseline_file = find_most_recent_baseline(historical_kpis_dir)
+        if not baseline_file:
+            return {
+                "status": "failed",
+                "error": f"No baseline KPI files found in {historical_kpis_dir}",
+                "completed_at": time.time(),
+                "log_file": None,
+            }
+
+        # Run hierarchical KPI analysis using core engine
+        logger.info(f"Running KPI analysis: {current_kpis_file} vs {baseline_file}")
+        result = analyze_hierarchical_kpis(
+            current_kpis_path=current_kpis_file,
+            baseline_kpis_path=baseline_file,
+            output_path=output_file,
+            plugin=plugin,
         )
 
         # Clean up temporary status file
@@ -921,20 +932,26 @@ def _run_analyse_kpis(
         except FileNotFoundError:
             pass
 
-        # Convert to expected format
-        if status_data.get("success"):
+        # Handle the analysis result
+        if result["status"] == "success":
+            logger.info(
+                f"Analysis completed: {result['regressions_count']} regressions, {result['improvements_count']} improvements"
+            )
             return {
                 "status": "success",
                 "output_file": _make_path_relative_to_base(output_file, env.ARTIFACT_DIR),
+                "findings_count": result["findings_count"],
+                "regressions_count": result["regressions_count"],
+                "improvements_count": result["improvements_count"],
                 "completed_at": time.time(),
-                "log_file": log_file,
+                "log_file": None,
             }
         else:
             return {
                 "status": "failed",
-                "error": status_data.get("error", "Unknown error"),
+                "error": result.get("error", "Analysis failed"),
                 "completed_at": time.time(),
-                "log_file": log_file,
+                "log_file": None,
             }
 
     except Exception as e:
