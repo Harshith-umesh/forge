@@ -122,9 +122,7 @@ class CaliperMLflowVerifier(NightlyVerifier):
             )
 
             if not runs:
-                raise ValueError(
-                    f"No runs found in MLflow experiment '{self.experiment}'."
-                )
+                raise ValueError(f"No runs found in MLflow experiment '{self.experiment}'.")
 
             latest_run = runs[0]
             run_name = latest_run.info.run_name or ""
