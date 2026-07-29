@@ -27,7 +27,7 @@ def run(
     memory_request: str = "16Gi",
     storage_source: str = "hf",
     storage_pvc: str = "",
-    image_pull_secret: str = "",
+    image_pull_secrets: list | None = None,
     service_account_name: str = "",
     labels: dict | None = None,
 ):

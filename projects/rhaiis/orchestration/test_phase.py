@@ -200,7 +200,7 @@ def _run_test(
             memory_request=deploy_cfg.get("memory_request", "16Gi"),
             storage_source=deploy_cfg.get("storage_source", "hf"),
             storage_pvc=deploy_cfg.get("storage_pvc", ""),
-            image_pull_secret=deploy_cfg.get("image_pull_secret", ""),
+            image_pull_secrets=deploy_cfg.get("image_pull_secrets") or [],
             service_account_name=deploy_cfg.get("service_account_name", ""),
             labels=isvc_labels,
         )

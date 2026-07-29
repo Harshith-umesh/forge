@@ -8,15 +8,11 @@ metadata:
   name: {{ args.deployment_name }}
   namespace: {{ args.namespace }}
 spec:
-{%- if args.image_pull_secret %}
+{%- if args.image_pull_secrets %}
   imagePullSecrets:
-    - name: {{ args.image_pull_secret }}
-{%- if args.engine == "trtllm" %}
-    - name: ngc-secret
-{%- endif %}
-{%- elif args.engine == "trtllm" %}
-  imagePullSecrets:
-    - name: ngc-secret
+{%- for secret in args.image_pull_secrets %}
+    - name: {{ secret }}
+{%- endfor %}
 {%- endif %}
   builtInAdapter:
     modelLoadingTimeoutMillis: 300000
