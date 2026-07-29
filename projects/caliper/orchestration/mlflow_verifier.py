@@ -96,9 +96,8 @@ class CaliperMLflowVerifier(NightlyVerifier):
         return data
 
     def _query_latest_run(self) -> str:
-        import urllib3
-
         import mlflow
+        import urllib3
 
         warnings.filterwarnings("ignore", category=urllib3.exceptions.InsecureRequestWarning)
 
