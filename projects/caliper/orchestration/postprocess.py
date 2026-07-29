@@ -18,6 +18,10 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from projects.caliper.orchestration.caliper_invocation import (
+    _execute_caliper_command,
+    run_analyse_kpis,
+)
 from projects.caliper.orchestration.cli_builder import (
     build_ai_eval_export_command,
     build_kpi_csv_export_command,
@@ -30,7 +34,6 @@ from projects.caliper.orchestration.cli_builder import (
 from projects.caliper.orchestration.postprocess_config import (
     CaliperOrchestrationPostprocessConfig,
 )
-from projects.caliper.orchestration.postprocess_logging import _execute_caliper_command
 from projects.caliper.orchestration.postprocess_outcome import (
     FINAL_KPI_PIPELINE_FAILED,
     FINAL_SUCCESS,
@@ -115,11 +118,122 @@ def _resolve_visualize_config_path(
 
     return (env.FORGE_HOME / p).resolve()
 
+    # _transform_kpis_to_hierarchical_format function removed - CLI commands now handle format conversion
+
+    for kpi in kpis:
+        run_id = kpi.get("run_id", "unknown")
+        test_data = tests_data[run_id]
+
+        # Extract common labels (excluding KPI-specific ones)
+        kpi_labels = kpi.get("labels", {})
+        test_labels = {
+            k: v for k, v in kpi_labels.items() if k not in ["higher_is_better"]
+        }  # Exclude KPI-specific labels
+
+        # Merge test labels (they should be the same for all KPIs in a test)
+        if not test_data["labels"]:
+            test_data["labels"] = test_labels
+
+        # Store test metadata from first KPI
+        if not test_data["metadata"]:
+            test_data["metadata"] = {
+                "timestamp": kpi.get("timestamp"),
+                "source": kpi.get("source", {}),
+                "run_id": run_id,
+            }
+
+        # Create KPI record with metadata
+        kpi_id = kpi.get("kpi_id")
+        raw_value = kpi.get("value")
+
+        # Transform 2D KPI values to structured format
+        if isinstance(raw_value, list) and raw_value and len(raw_value) > 0:
+            # Check if this looks like 2D data: list of tuples/lists with 2 elements
+            first_item = raw_value[0]
+            if isinstance(first_item, list | tuple) and len(first_item) == 2:
+                try:
+                    # Convert list of tuples [(x1, y1), (x2, y2), ...] to structured format
+                    structured_value = {
+                        "data_points": [{"x": float(x), "y": float(y)} for x, y in raw_value],
+                        "count": len(raw_value),
+                    }
+                    final_value = structured_value
+                except (ValueError, TypeError, IndexError):
+                    # If conversion fails, keep original value
+                    final_value = raw_value
+            else:
+                final_value = raw_value
+        else:
+            final_value = raw_value
+
+        kpi_record = {
+            "id": kpi_id,
+            "value": final_value,
+            "unit": kpi.get("unit"),
+            "higher_is_better": kpi_labels.get("higher_is_better", True),
+        }
+
+        # Add KPI metadata from function decorator if available
+        if kpi_id in kpi_functions:
+            func = kpi_functions[kpi_id]
+            kpi_record.update(
+                {
+                    "name": (
+                        func.__doc__.replace(" KPI.", "")
+                        if func.__doc__
+                        else kpi_id.replace("_", " ").title()
+                    ),
+                    "help": getattr(func, "_kpi_help", ""),
+                }
+            )
+
+            # Add 2D-specific metadata if present
+            if getattr(func, "_kpi_is_2d", False):
+                kpi_record.update(
+                    {
+                        "is_2d": True,
+                        "x_unit": getattr(func, "_kpi_x_unit", ""),
+                        "x_help": getattr(func, "_kpi_x_help", ""),
+                        "y_unit": getattr(func, "_kpi_y_unit", None) or kpi_record["unit"],
+                        "y_help": getattr(func, "_kpi_y_help", None)
+                        or getattr(func, "_kpi_help", ""),
+                    }
+                )
+            else:
+                kpi_record["is_2d"] = False
+
+            # Add formatting info if available
+            if hasattr(func, "_kpi_format"):
+                kpi_record["format"] = func._kpi_format
+        else:
+            # Fallback if no function metadata available
+            kpi_record.update(
+                {
+                    "name": kpi_id.replace("_", " ").title(),
+                    "help": f"KPI: {kpi_id}",
+                    "is_2d": isinstance(kpi.get("value"), list),
+                }
+            )
+
+        test_data["kpis"].append(kpi_record)
+
+    # Convert to final structure
+    tests_list = []
+    for run_id, test_data in tests_data.items():
+        tests_list.append(
+            {
+                "run_id": run_id,
+                "labels": test_data["labels"],
+                "metadata": test_data["metadata"],
+                "kpis": test_data["kpis"],
+            }
+        )
+
+    return {"schema_version": "2", "tests": tests_list}
+
 
 def _run_artifacts_to_kpis(
     postprocess_config: CaliperOrchestrationPostprocessConfig,
-    plugin,
-    model,
     output_dir: Path,
     plugin_module: str,
     base_dir: Path,
@@ -181,43 +295,6 @@ def _run_artifacts_to_kpis(
 
         # Convert to expected format
         if status_data.get("success"):
-            # Transform JSONL (schema v1) to hierarchical JSON (schema v2)
-            try:
-                logger.info(f"Transforming KPI output to hierarchical format: {output_file}")
-
-                # Read the generated JSONL file
-                kpis = []
-                with open(output_file, encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if line:
-                            import json
-
-                            kpis.append(json.loads(line))
-
-                if kpis:
-                    hierarchical_data = _transform_kpis_to_hierarchical_format(kpis, model)
-
-                    import json
-
-                    with open(output_file, "w", encoding="utf-8") as f:
-                        json.dump(hierarchical_data, f, indent=2, ensure_ascii=False)
-
-                    logger.info(
-                        f"Successfully transformed {len(kpis)} KPI records to hierarchical format"
-                    )
-                else:
-                    logger.warning("No KPI records found in output file")
-
-            except Exception as transform_error:
-                logger.error(f"Failed to transform KPIs to hierarchical format: {transform_error}")
-                return {
-                    "status": "failed",
-                    "error": f"KPI transformation failed: {transform_error}",
-                    "completed_at": time.time(),
-                    "log_file": log_file,
-                }
-
             relative_path = _make_path_relative_to_base(output_file, env.ARTIFACT_DIR)
             logger.info(
                 f"KPI generate: output_file={output_file}, env.ARTIFACT_DIR={env.ARTIFACT_DIR}, relative_path={relative_path}"
@@ -251,8 +328,6 @@ def _run_artifacts_to_kpis(
 
 def _run_artifacts_to_ai_data(
     postprocess_config,
-    plugin,
-    model,
     output_dir: Path,
     plugin_module: str,
     base_dir: Path,
@@ -346,94 +421,8 @@ def _load_test_labels(test_dir: Path) -> dict[str, Any]:
         return {}
 
 
-def _export_test_entries_with_artifacts(
-    model, ai_data_dir: Path, base_dir: Path, plugin
-) -> list[dict]:
-    """
-    Export test entries by creating directories and copying specific artifacts.
-
-    Args:
-        model: Unified model containing test results
-        ai_data_dir: Directory where test entries should be exported
-        base_dir: Base directory of the test artifacts (test directory)
-        plugin: Plugin instance to get artifact file list
-
-    Returns:
-        List of exported test entry information
-    """
-    import shutil
-
-    exported_entries = []
-
-    for idx, record in enumerate(model.unified_result_records):
-        # Create directory for this test entry
-        test_entry_dir = ai_data_dir / f"test_entry_{idx:03d}"
-        test_entry_dir.mkdir(parents=True, exist_ok=True)
-
-        # Load test labels from __test_labels__.yaml if available
-        test_dir = base_dir / record.test_base_path
-        test_labels = _load_test_labels(test_dir)
-
-        # Record test entry metadata
-        entry_info = {
-            "entry_id": f"test_entry_{idx:03d}",
-            "test_base_path": str(record.test_base_path),
-            "distinguishing_labels": record.distinguishing_labels,
-            "test_labels": test_labels,
-            "copied_files": [],
-            "missing_files": [],
-        }
-
-        # Get artifact files specific to this test directory only (plugin is scoped to test directory)
-        relevant_files = plugin.get_ai_data_artifact_files_for_test(test_dir)
-
-        logger.debug(
-            f"Test entry {idx}: found {len(relevant_files)} artifact files in test directory {test_dir}"
-        )
-
-        # Copy relevant files for this test entry (preserving directory structure)
-        for target_file in relevant_files:
-            # source is test_dir + test_relative_path, target is test_entry_dir + test_relative_path
-            source_file = test_dir / target_file
-            target_path = test_entry_dir / target_file
-
-            if source_file.exists():
-                target_path.parent.mkdir(parents=True, exist_ok=True)
-
-                try:
-                    shutil.copy2(source_file, target_path)
-                    entry_info["copied_files"].append(
-                        {
-                            "source": str(source_file),
-                            "target": str(target_path),
-                            "relative_path": target_file,
-                            "size_bytes": source_file.stat().st_size,
-                        }
-                    )
-                    logger.debug(f"Copied {source_file} -> {target_path}")
-                except Exception as e:
-                    logger.warning(f"Failed to copy {source_file}: {e}")
-                    entry_info["missing_files"].append({"file": str(source_file), "error": str(e)})
-            else:
-                entry_info["missing_files"].append(
-                    {"file": str(source_file), "error": "File does not exist"}
-                )
-
-        # Write entry metadata
-        entry_metadata_file = test_entry_dir / "entry_metadata.json"
-
-        with open(entry_metadata_file, "w") as f:
-            json.dump(entry_info, f, indent=2)
-
-        exported_entries.append(entry_info)
-
-    return exported_entries
-
-
 def _run_kpis_to_csv(
     postprocess_config: CaliperOrchestrationPostprocessConfig,
-    plugin,
-    model,
     output_dir: Path,
     kpi_json_path: Path,
     base_dir: Path,
@@ -552,35 +541,23 @@ def _run_analyse_kpis(
         # Create temporary status file for subprocess communication
         status_file = output_dir / "analyse_kpis_status.yaml"
 
-        # Note: CLI command building removed in favor of direct function call
-
-        # Load plugin for KPI definitions
-        from projects.caliper.engine.load_plugin import load_plugin
-
-        plugin = load_plugin(plugin_module)
-
-        # Find the most recent baseline file
-        from projects.caliper.engine.kpi.analyze_hierarchical import (
-            analyze_hierarchical_kpis,
-            find_most_recent_baseline,
+        # Build CLI command
+        command = build_analyse_kpis_command(
+            config=postprocess_config,
+            tree_root=base_dir,
+            manifest_path=manifest_path,
+            status_file=status_file,
+            output_file=output_file,
+            current_kpis_file=current_kpis_file,
+            historical_kpis_dir=historical_kpis_dir,
         )
 
-        baseline_file = find_most_recent_baseline(historical_kpis_dir)
-        if not baseline_file:
-            return {
-                "status": "failed",
-                "error": f"No baseline KPI files found in {historical_kpis_dir}",
-                "completed_at": time.time(),
-                "log_file": None,
-            }
-
-        # Run hierarchical KPI analysis using core engine
-        logger.info(f"Running KPI analysis: {current_kpis_file} vs {baseline_file}")
-        result = analyze_hierarchical_kpis(
-            current_kpis_path=current_kpis_file,
-            baseline_kpis_path=baseline_file,
-            output_path=output_file,
-            plugin=plugin,
+        # Execute command using generic function
+        result, status_data, log_file = _execute_caliper_command(
+            command=command,
+            step_name="caliper kpi analyse-kpis",
+            status_file=status_file,
+            step_logs_dir=step_logs_dir,
         )
 
         # Clean up temporary status file
@@ -589,19 +566,16 @@ def _run_analyse_kpis(
         except FileNotFoundError:
             pass
 
-        # Handle the analysis result
-        if result["status"] == "success":
-            logger.info(
-                f"Analysis completed: {result['regressions_count']} regressions, {result['improvements_count']} improvements"
-            )
+        # Convert to expected format
+        if status_data.get("success"):
             return {
                 "status": "success",
                 "output_file": _make_path_relative_to_base(output_file, env.ARTIFACT_DIR),
-                "findings_count": result["findings_count"],
-                "regressions_count": result["regressions_count"],
-                "improvements_count": result["improvements_count"],
+                "findings_count": status_data.get("findings_count", 0),
+                "regressions_count": status_data.get("regressions_count", 0),
+                "improvements_count": status_data.get("improvements_count", 0),
                 "completed_at": time.time(),
-                "log_file": None,
+                "log_file": log_file,
             }
         else:
             return {
@@ -1077,117 +1051,66 @@ class CaliperPostprocessOrchestrator:
         if not self.config.kpi.enabled:
             return
 
+        # Setup output directory and module string with focused error handling
         try:
             # Determine output directory for KPI/AI data steps - use base artifact directory
             output_dir = env.ARTIFACT_DIR
             logger.info(f"KPI steps using base artifact directory: {output_dir}")
             output_dir.mkdir(parents=True, exist_ok=True)
 
-            # Load plugin and model
-            from projects.caliper.engine.load_plugin import load_plugin
-            from projects.caliper.engine.parse import run_parse
-            from projects.caliper.engine.plugin_config import resolve_plugin_module_string
-
-            # Load plugin
-            mod_str, _manifest = resolve_plugin_module_string(
-                base_dir=self.tree_root,
-                postprocess_config=self.manifest_path,
-                cli_plugin=self.config.plugin_module,
-            )
-            plugin = load_plugin(mod_str)
-
-            # Parse model
-            model = run_parse(
-                base_dir=self.tree_root,
-                plugin_module=mod_str,
-                plugin=plugin,
-                use_cache=not self.config.parse.no_cache,
-            )
-
-            # KPI JSON generation
-            self._run_artifacts_to_kpis_step(plugin, model, output_dir, mod_str)
-
-            # KPI CSV export
-            self._run_kpis_to_csv_step(plugin, model, output_dir)
-
-            # AI evaluation export
-            self._run_artifacts_to_ai_data_step(plugin, model, output_dir, mod_str)
-
-            # S3 import (historical data)
-            self._run_s3_import_step(output_dir)
-
-            # Analyze KPIs (current vs historical) - moved before S3 export
-            self._run_analyse_kpis_step(output_dir, mod_str)
-
-            # S3 export
-            self._run_s3_export_step(output_dir)
-
+            # Resolve plugin module string (this is just string manipulation, not engine access)
+            mod_str = self.config.plugin_module or "unknown"
         except Exception as e:
             completion_time = time.time()
-            logger.error(f"Failed to run KPI/AI eval operations: {e}")
-            self._add_step(
+            logger.error(f"Failed to setup KPI/AI eval operations: {e}")
+            # Only mark all steps as failed if basic setup fails
+            for step_name in [
                 "artifacts_to_kpis",
-                {
-                    "status": "failed",
-                    "error": str(e),
-                    "completed_at": completion_time,
-                },
-            )
-            self._add_step(
                 "kpis_to_csv",
-                {
-                    "status": "failed",
-                    "error": str(e),
-                    "completed_at": completion_time,
-                },
-            )
-            self._add_step(
                 "artifacts_to_ai_data",
-                {
-                    "status": "failed",
-                    "error": str(e),
-                    "completed_at": completion_time,
-                },
-            )
-            self._add_step(
                 "s3_import",
-                {
-                    "status": "skipped",
-                    "reason": "failed to load plugin",
-                    "completed_at": completion_time,
-                },
-            )
-            self._add_step(
                 "analyse_kpis",
-                {
-                    "status": "skipped",
-                    "reason": "failed to load plugin",
-                    "completed_at": completion_time,
-                },
-            )
-            self._add_step(
                 "s3_export",
-                {
-                    "status": "skipped",
-                    "reason": "failed to load plugin",
-                    "completed_at": completion_time,
-                },
-            )
+            ]:
+                self._add_step(
+                    step_name,
+                    {
+                        "status": "failed",
+                        "error": f"Setup failed: {e}",
+                        "completed_at": completion_time,
+                    },
+                )
             self.artifacts_to_kpis_failed = True
             self.ai_data_failed = True
             self.s3_import_failed = True
             self.analyze_failed = True
             self.s3_export_failed = True
+            return
 
-    def _run_artifacts_to_kpis_step(
-        self, plugin: Any, model: Any, output_dir: Path, mod_str: str
-    ) -> None:
+        # Run each step independently - each has its own error handling
+        # KPI JSON generation
+        self._run_artifacts_to_kpis_step(output_dir, mod_str)
+
+        # KPI CSV export
+        self._run_kpis_to_csv_step(output_dir)
+
+        # AI evaluation export
+        self._run_artifacts_to_ai_data_step(output_dir, mod_str)
+
+        # S3 import (historical data)
+        self._run_s3_import_step(output_dir)
+
+        # Analyze KPIs (current vs historical) - moved before S3 export
+        self._run_analyse_kpis_step(output_dir, mod_str)
+
+        # S3 export
+        self._run_s3_export_step(output_dir)
+
+    def _run_artifacts_to_kpis_step(self, output_dir: Path, mod_str: str) -> None:
         """Execute the KPI generation step."""
         if self.config.kpi.artifacts_to_kpis.enabled:
             result = _run_artifacts_to_kpis(
                 self.config,
-                plugin,
-                model,
                 output_dir,
                 mod_str,
                 self.tree_root,
@@ -1207,7 +1130,7 @@ class CaliperPostprocessOrchestrator:
                 },
             )
 
-    def _run_kpis_to_csv_step(self, plugin: Any, model: Any, output_dir: Path) -> None:
+    def _run_kpis_to_csv_step(self, output_dir: Path) -> None:
         """Execute the KPI CSV export step."""
         if not self.config.kpi.kpis_to_csv.enabled:
             self._add_step(
@@ -1223,8 +1146,6 @@ class CaliperPostprocessOrchestrator:
         kpi_json_path = output_dir / self.config.kpi.artifacts_to_kpis.output
         result = _run_kpis_to_csv(
             self.config,
-            plugin,
-            model,
             output_dir,
             kpi_json_path,
             self.tree_root,
@@ -1237,9 +1158,7 @@ class CaliperPostprocessOrchestrator:
             # CSV export failure doesn't affect overall status - it's supplementary
             logger.warning("KPI CSV export failed but continuing execution")
 
-    def _run_artifacts_to_ai_data_step(
-        self, plugin: Any, model: Any, output_dir: Path, mod_str: str
-    ) -> None:
+    def _run_artifacts_to_ai_data_step(self, output_dir: Path, mod_str: str) -> None:
         """Execute the AI evaluation export step."""
         if not self.config.kpi.artifacts_to_ai_data.enabled:
             self._add_step(
@@ -1255,8 +1174,6 @@ class CaliperPostprocessOrchestrator:
         try:
             result = _run_artifacts_to_ai_data(
                 self.config,
-                plugin,
-                model,
                 output_dir,
                 mod_str,
                 self.tree_root,
@@ -1385,7 +1302,7 @@ class CaliperPostprocessOrchestrator:
             self.analyze_failed = True
             return
 
-        result = _run_analyse_kpis(
+        result = run_analyse_kpis(
             postprocess_config=self.config,
             output_dir=output_dir,
             plugin_module=plugin_module,
