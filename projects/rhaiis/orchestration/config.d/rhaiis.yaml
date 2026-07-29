@@ -1,5 +1,6 @@
-namespace: forge-rhaiis
+namespace: kserve-e2e-perf
 accelerator: nvidia
+cluster_tag: ""
 
 gpu_types:
   nvidia: h200
@@ -15,7 +16,7 @@ deploy:
   cpu_request: "4"
   memory_request: "16Gi"
   storage_source: hf
-  storage_pvc: model-pvc-2
+  storage_pvc: model-pvc
   image_pull_secret: ""
   service_account_name: ""
   ready_timeout: 3600
@@ -27,8 +28,6 @@ vllm_args:
   no-enable-log-requests: true
   no-enable-prefix-caching: true
   uvicorn-log-level: debug
-  max-model-len: 8192
-  tensor-parallel-size: 1
 
 env_vars: {}
 
@@ -36,3 +35,26 @@ accelerator_env_vars:
   nvidia: {}
   amd:
     VLLM_ROCM_USE_AITER: "1"
+
+s3:
+  bucket: psap-dashboard-data
+  vault: psap-forge-dashboard-s3
+  credentials_file: aws.credentials
+
+warmup:
+  rate: 200
+  max_seconds: 60
+
+profiler:
+  enabled: false
+  s3_bucket: psap-dashboard-data
+  s3_prefix: pytorch-profiles/rhaiis
+  vault: psap-forge-dashboard-s3
+  labels: []
+  rates: [200]
+  max_seconds: 200
+
+agent_analysis:
+  enabled: false
+  severity_threshold: 10
+  url: "http://agent-gateway.psap-ai-analysis-agent-gateway.svc.cluster.local:8443/v1/stream"

@@ -8,8 +8,12 @@ metadata:
     prometheus.io/scrape: "true"
     prometheus.io/path: /metrics
     prometheus.io/port: "8080"
+{%- if args.labels %}
   labels:
-    opendatahub.io/dashboard: "true"
+{%- for key, val in args.labels.items() %}
+    {{ key }}: "{{ val }}"
+{%- endfor %}
+{%- endif %}
   name: {{ args.deployment_name }}
   namespace: {{ args.namespace }}
 spec:

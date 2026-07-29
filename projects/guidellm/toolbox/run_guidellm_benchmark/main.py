@@ -33,6 +33,7 @@ def run(
     timeout: int = 900,
     pvc_size: str = "1Gi",
     guidellm_args: list[str] | None = None,
+    hf_token_secret: str = "",
 ) -> int:
     """
     Run the GuideLLM benchmark against a resolved endpoint.
@@ -45,6 +46,7 @@ def run(
         timeout: Timeout in seconds to wait for job completion
         pvc_size: Size of the PersistentVolumeClaim for storing results
         guidellm_args: List of additional guidellm arguments (e.g., ["--rate=10", "--max-seconds=30"])
+        hf_token_secret: Name of the K8s secret containing HF_TOKEN. If empty, HF_TOKEN is not injected.
     """
 
     execute_tasks(locals())
@@ -139,6 +141,7 @@ def create_guidellm_resources_task(args, ctx):
             image=ctx.image,
             endpoint_url=args.endpoint_url,
             guidellm_args=ctx.guidellm_args,
+            hf_token_secret=args.hf_token_secret,
         ),
     )
     return f"GuideLLM benchmark {ctx.benchmark_name} created"
@@ -264,7 +267,7 @@ def create_copy_pod(args, ctx):
     return f"Created copy pod {ctx.benchmark_name}-copy"
 
 
-@retry(attempts=24, delay=5, backoff=1.0)
+@retry(attempts=60, delay=5, backoff=1.0)
 @task
 def wait_copy_pod_ready(args, ctx):
     """Wait for copy pod to be ready"""
@@ -288,6 +291,8 @@ def extract_results(args, ctx):
     """Extract GuideLLM results from copy pod"""
 
     results_dir = args.artifact_dir / "artifacts" / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    copy_pod = f"{ctx.benchmark_name}-copy"
     extracted_files: list[dict[str, str | None]] = []
     for run in ctx.guidellm_runs:
         if run.rate is None:
@@ -297,21 +302,10 @@ def extract_results(args, ctx):
             remote_path = f"/results/benchmarks-{run.label}.json"
             local_path = results_dir / f"benchmarks-{run.label}.json"
 
-        result = oc(
-            "exec",
-            "-n",
-            ctx.target_namespace,
-            f"{ctx.benchmark_name}-copy",
-            "--",
-            "cat",
-            remote_path,
-            check=False,
-            log_stdout=False,
-        )
-        if result.returncode != 0 or not result.stdout:
+        local_path = _copy_result_file(ctx.target_namespace, copy_pod, remote_path, local_path)
+        if local_path is None:
             raise RuntimeError(f"No results found for {ctx.benchmark_name} run {run.label}")
 
-        write_text(local_path, result.stdout)
         extracted_files.append(
             {
                 "label": run.label,
@@ -330,6 +324,76 @@ def extract_results(args, ctx):
     )
 
     return f"Extracted results for {ctx.benchmark_name}"
+
+
+def _copy_result_file(namespace: str, pod: str, remote_path: str, local_path) -> Path | None:
+    """Copy a result file from a pod, compressing first to handle large files.
+
+    Falls back to direct ``oc cp`` for small files.
+    """
+    import gzip
+    import shutil
+
+    # Try direct oc cp first
+    result = oc(
+        "cp",
+        f"{namespace}/{pod}:{remote_path}",
+        str(local_path),
+        "-c",
+        "copy-helper",
+        check=False,
+        log_stdout=False,
+    )
+    if result.returncode == 0 and local_path.exists() and local_path.stat().st_size > 0:
+        return local_path
+
+    logging.getLogger(__name__).info(
+        "Direct oc cp failed (rc=%d), retrying with gzip compression",
+        result.returncode,
+    )
+
+    # Compress inside the pod, copy the gz, decompress locally
+    gz_remote = f"{remote_path}.gz"
+    compress = oc(
+        "exec",
+        pod,
+        "-n",
+        namespace,
+        "-c",
+        "copy-helper",
+        "--",
+        "gzip",
+        "-kf",
+        remote_path,
+        check=False,
+    )
+    if compress.returncode != 0:
+        logging.getLogger(__name__).warning("gzip inside pod failed (rc=%d)", compress.returncode)
+        return None
+
+    local_gz = local_path.parent / f"{local_path.name}.gz"
+    cp_result = oc(
+        "cp",
+        f"{namespace}/{pod}:{gz_remote}",
+        str(local_gz),
+        "-c",
+        "copy-helper",
+        check=False,
+        log_stdout=False,
+    )
+    if cp_result.returncode != 0 or not local_gz.exists() or local_gz.stat().st_size == 0:
+        logging.getLogger(__name__).warning("oc cp of gzipped file failed")
+        local_gz.unlink(missing_ok=True)
+        return None
+
+    with gzip.open(local_gz, "rb") as f_in, open(local_path, "wb") as f_out:
+        shutil.copyfileobj(f_in, f_out)
+    local_gz.unlink(missing_ok=True)
+
+    if local_path.exists() and local_path.stat().st_size > 0:
+        return local_path
+
+    return None
 
 
 @task

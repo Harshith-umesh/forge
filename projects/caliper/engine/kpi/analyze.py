@@ -1,4 +1,4 @@
-"""Regression analysis vs baseline KPI set."""
+"""Generic KPI analysis against historical baselines."""
 
 from __future__ import annotations
 

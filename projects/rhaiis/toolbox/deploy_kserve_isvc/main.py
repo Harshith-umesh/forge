@@ -26,6 +26,7 @@ def run(
     storage_pvc: str = "",
     image_pull_secret: str = "",
     service_account_name: str = "",
+    labels: dict | None = None,
 ):
     return execute_tasks(locals())
 
