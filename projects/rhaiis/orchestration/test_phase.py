@@ -121,6 +121,10 @@ def _run_test(
     from projects.guidellm.toolbox.run_guidellm_benchmark.main import (
         wait_guidellm_benchmark_task,
     )
+    from projects.rhaiis.orchestration.manifests import (
+        build_inferenceservice,
+        build_servingruntime,
+    )
     from projects.rhaiis.toolbox.deploy_kserve_isvc.main import run as deploy_kserve_isvc
     from projects.rhaiis.toolbox.wait_isvc_ready.main import run as wait_isvc_ready
 
@@ -185,28 +189,46 @@ def _run_test(
             profiler_enabled = False
 
         logger.info("Deploying %s to %s/%s", model_cfg["hf_model_id"], namespace, deployment_name)
-        deploy_kwargs = dict(
+        ea = engine_args or {}
+        gpu_count = int(
+            ea.get("tensor-parallel-size") or ea.get("tp-size") or ea.get("tp_size") or 1
+        )
+
+        sr_manifest = build_servingruntime(
             deployment_name=deployment_name,
             namespace=namespace,
             model_id=model_cfg["hf_model_id"],
             serving_image=serving_image,
-            accelerator=accelerator,
             engine=engine,
             engine_args=engine_args,
             engine_port=engine_port,
+            storage_source=deploy_cfg.get("storage_source", "hf"),
+            gpu_count=gpu_count,
+            image_pull_secrets=deploy_cfg.get("image_pull_secrets") or [],
             env_vars=env_vars,
+            trtllm_config=runtime_config.get_trtllm_config() if engine == "trtllm" else None,
+        )
+        isvc_manifest = build_inferenceservice(
+            deployment_name=deployment_name,
+            namespace=namespace,
+            engine=engine,
+            engine_port=engine_port,
+            accelerator=accelerator,
+            gpu_count=gpu_count,
             replicas=deploy_cfg.get("replicas", 1),
             cpu_request=deploy_cfg.get("cpu_request", "4"),
             memory_request=deploy_cfg.get("memory_request", "16Gi"),
             storage_source=deploy_cfg.get("storage_source", "hf"),
             storage_pvc=deploy_cfg.get("storage_pvc", ""),
-            image_pull_secrets=deploy_cfg.get("image_pull_secrets") or [],
+            model_id=model_cfg["hf_model_id"],
             service_account_name=deploy_cfg.get("service_account_name", ""),
             labels=isvc_labels,
         )
-        if engine == "trtllm":
-            deploy_kwargs["trtllm_config"] = runtime_config.get_trtllm_config() or None
-        deploy_kserve_isvc(**deploy_kwargs)
+        deploy_kserve_isvc(
+            namespace=namespace,
+            servingruntime_manifest=sr_manifest,
+            inferenceservice_manifest=isvc_manifest,
+        )
 
         logger.info("Waiting for InferenceService to be ready")
         wait_isvc_ready(
