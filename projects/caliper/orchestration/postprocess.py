@@ -542,17 +542,18 @@ def _run_artifacts_to_kpis(
                             kpis.append(json.loads(line))
 
                 if kpis:
-                    # Transform to hierarchical format
+                    # Transform to hierarchical format and write to a separate file
+                    # so the original JSONL is preserved for csv-export
                     hierarchical_data = _transform_kpis_to_hierarchical_format(kpis, model)
 
-                    # Write back as JSON (schema v2)
                     import json
 
-                    with open(output_file, "w") as f:
+                    hierarchical_file = output_file.with_suffix(".hierarchical.json")
+                    with open(hierarchical_file, "w") as f:
                         json.dump(hierarchical_data, f, indent=2, ensure_ascii=False)
 
                     logger.info(
-                        f"Successfully transformed {len(kpis)} KPI records to hierarchical format"
+                        f"Successfully transformed {len(kpis)} KPI records to hierarchical format: {hierarchical_file}"
                     )
                 else:
                     logger.warning("No KPI records found in output file")
