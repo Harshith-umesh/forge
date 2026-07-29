@@ -16,6 +16,7 @@ class NightlyVerifier(ABC):
     def get_last_tested_version(self) -> str:
         """Return the version string of the last successful run.
 
-        Returns empty string if no previous run exists.
+        Raises an exception if the version cannot be determined
+        (missing credentials, experiment not found, etc.).
         """
         ...

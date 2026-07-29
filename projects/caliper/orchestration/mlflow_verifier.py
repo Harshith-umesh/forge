@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import time
+import warnings
 
 from projects.caliper.engine.file_export.mlflow_secrets import (
     load_mlflow_secrets_yaml,
@@ -62,8 +63,6 @@ class CaliperMLflowVerifier(NightlyVerifier):
 
     def get_last_tested_version(self) -> str:
         connection = self._load_connection()
-        if not connection:
-            return ""
 
         last_error = None
         for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -87,47 +86,65 @@ class CaliperMLflowVerifier(NightlyVerifier):
         secret_path = vault.get_vault_content_path(self.secret_name, self.secret_file)
 
         if secret_path is None or not secret_path.exists():
-            logger.warning("MLflow secret not found in vault, assuming no previous run")
-            return {}
+            raise FileNotFoundError(
+                f"MLflow secret '{self.secret_name}/{self.secret_file}' not found in vault. "
+                "Ensure the vault configuration is correct."
+            )
 
         data = load_mlflow_secrets_yaml(secret_path)
         validate_mlflow_secrets(data)
         return data
 
     def _query_latest_run(self) -> str:
+        import urllib3
+
         import mlflow
 
-        if self.workspace:
-            os.environ["MLFLOW_WORKSPACE"] = self.workspace
+        warnings.filterwarnings("ignore", category=urllib3.exceptions.InsecureRequestWarning)
 
-        client = mlflow.tracking.MlflowClient()
+        previous_workspace = os.environ.get("MLFLOW_WORKSPACE")
+        try:
+            if self.workspace:
+                os.environ["MLFLOW_WORKSPACE"] = self.workspace
 
-        experiment = client.get_experiment_by_name(self.experiment)
-        if experiment is None:
-            logger.warning("Experiment '%s' not found in MLflow", self.experiment)
-            return ""
+            client = mlflow.tracking.MlflowClient()
 
-        runs = client.search_runs(
-            experiment_ids=[experiment.experiment_id],
-            order_by=["start_time DESC"],
-            max_results=1,
-        )
+            experiment = client.get_experiment_by_name(self.experiment)
+            if experiment is None:
+                raise ValueError(
+                    f"MLflow experiment '{self.experiment}' not found. "
+                    "Create the experiment first or check the configuration."
+                )
 
-        if not runs:
-            logger.info("No runs found in experiment '%s'", self.experiment)
-            return ""
+            runs = client.search_runs(
+                experiment_ids=[experiment.experiment_id],
+                order_by=["start_time DESC"],
+                max_results=1,
+            )
 
-        latest_run = runs[0]
-        run_name = latest_run.info.run_name or ""
-        logger.info("Latest MLflow run: %s", run_name)
+            if not runs:
+                raise ValueError(
+                    f"No runs found in MLflow experiment '{self.experiment}'."
+                )
 
-        return self._extract_version(run_name)
+            latest_run = runs[0]
+            run_name = latest_run.info.run_name or ""
+            logger.info("Latest MLflow run: %s", run_name)
+
+            return self._extract_version(run_name)
+        finally:
+            if previous_workspace is None:
+                os.environ.pop("MLFLOW_WORKSPACE", None)
+            else:
+                os.environ["MLFLOW_WORKSPACE"] = previous_workspace
 
     def _extract_version(self, run_name: str) -> str:
         match = self._version_re.search(run_name)
         if not match:
-            logger.warning("Could not extract version from run name: %s", run_name)
-            return ""
+            raise ValueError(
+                f"Could not extract version from run name '{run_name}' "
+                f"using pattern '{self._version_re.pattern}'."
+            )
 
         version = match.group(1)
 

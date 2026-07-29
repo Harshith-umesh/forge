@@ -80,13 +80,14 @@ def parse_project_directives(comment_text: str) -> tuple[dict[str, Any], list[st
             logger.info("Parsed mcp_gateway version: %s", parts[0])
 
         # Parse /pipeline nightly <source> — extract source from pipeline directive
+        # The directive line itself is already captured by the FOURNOS /pipeline handler,
+        # so only extract the config overrides here to avoid duplicating it in notifications.
         if line.startswith("/pipeline nightly "):
             parts = line.split()
             if len(parts) == 3:
                 source = parts[2]
                 config_overrides["nightly.source"] = source
                 config_overrides["fournos.job.pipeline_name"] = "nightly"
-                parsed_directives.append(line)
                 logger.info("Parsed nightly source from pipeline directive: %s", source)
 
     return config_overrides, parsed_directives
