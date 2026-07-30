@@ -39,7 +39,18 @@ def discover_test_bases(
             continue
 
         path = Path(dirpath)
-        marker_path = path / marker_found
+
+        # Use hierarchical label loading for both marker types
+        if marker_found == MARKER:
+            labels = _load_hierarchical_labels(path, base_dir)
+        else:
+            # Use hierarchical loading for MatrixBenchmarking settings.yaml too
+            labels = _load_hierarchical_labels_matrixbenchmarking(path, base_dir)
+
+        # Skip directory if skip: true is set in labels
+        if labels.get("skip") is True:
+            continue
+
         # Apply label filtering if specified
         if label_filter is not None and not _matches_label_filter(labels, label_filter):
             continue
