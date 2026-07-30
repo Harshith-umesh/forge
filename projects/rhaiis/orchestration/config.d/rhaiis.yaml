@@ -41,10 +41,15 @@ engines:
         dtype: auto
         enable_block_reuse: false
         free_gpu_memory_fraction: 0.90
+        mamba_ssm_cache_dtype: ""
+        mamba_ssm_stochastic_rounding: false
+        mamba_ssm_philox_rounds: 0
       cuda_graph_config:
         enable_padding: false
         max_batch_size: 256
       enable_attention_dp: false
+      enable_chunked_prefill: false
+      num_postprocess_workers: 0
       moe_config:
         backend: CUTLASS
       stream_interval: 0
