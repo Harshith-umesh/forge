@@ -88,6 +88,15 @@ def parse_project_directives(comment_text: str) -> tuple[dict[str, Any], list[st
                 source = parts[2]
                 config_overrides["nightly.source"] = source
                 config_overrides["fournos.job.pipeline_name"] = "nightly"
+                config_overrides["caliper.export.backend.mlflow.config.experiment"] = (
+                    "nightly-pipeline-experiment"
+                )
+                config_overrides["caliper.export.backend.mlflow.config.run_naming.prefix"] = (
+                    "mcp-gw-nightly"
+                )
+                config_overrides["caliper.export.backend.mlflow.config.run_naming.single_run"] = (
+                    "{prefix}-{timestamp}-{outcome}"
+                )
                 logger.info("Parsed nightly source from pipeline directive: %s", source)
 
     return config_overrides, parsed_directives

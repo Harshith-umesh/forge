@@ -41,3 +41,23 @@ spec:
           value: nightly
         - name: job-step-name
           value: 00__nightly
+
+  finally:
+    - name: 01-export-artifacts
+      taskRef:
+        name: forge-step
+        kind: Task
+      workspaces:
+        - name: artifacts
+          workspace: artifacts
+      params:
+        - name: fjob-name
+          value: "$(params.fjob-name)"
+        - name: fournos-workload-namespace
+          value: "$(params.fournos-workload-namespace)"
+        - name: kubeconfig-secret
+          value: "$(params.kubeconfig-secret)"
+        - name: job-step
+          value: export-artifacts
+        - name: job-step-name
+          value: 01__export-artifacts

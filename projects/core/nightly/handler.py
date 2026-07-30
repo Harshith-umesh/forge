@@ -13,6 +13,8 @@ import importlib
 import logging
 import os
 
+import yaml
+
 from projects.core.library import ci as ci_lib
 from projects.core.library import config, env
 from projects.core.library.config import requires
@@ -116,6 +118,21 @@ def _create_fournos_job(project: str, version: str, source_cfg: dict, _cfg) -> N
     )
 
 
+def _write_test_labels() -> None:
+    """Write ``__test_labels__.yaml`` so the caliper export ``run_naming``
+    templates can resolve the ``{outcome}`` placeholder."""
+    result_file = env.ARTIFACT_DIR / "result.txt"
+    if result_file.exists():
+        outcome = "noop" if result_file.read_text().strip() == "NO-OP" else "launched"
+    else:
+        outcome = "error"
+
+    labels = {"outcome": outcome}
+    labels_path = env.ARTIFACT_DIR / "__test_labels__.yaml"
+    labels_path.write_text(yaml.dump({"labels": labels}))
+    logger.info("Wrote test labels: %s", labels)
+
+
 def run():
     """Entrypoint for the nightly phase."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -137,3 +154,5 @@ def run():
         logger.error("confirm-nightly failed: %s", e)
         ci_lib.add_notification_file("nightly-confirm-failed", f"FATAL: {e}")
         raise
+    finally:
+        _write_test_labels()

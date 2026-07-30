@@ -1,4 +1,9 @@
 nightly:
+  caliper_export:
+    experiment: nightly-pipeline-experiment
+    run_naming:
+      prefix: "mcp-gw-nightly"
+      single_run: "{prefix}-{timestamp}-{outcome}"
   sources:
     ghcr:
       receiver: "projects.mcp_gateway.nightly_resolvers.ghcr_receiver.GHCRReceiver"
