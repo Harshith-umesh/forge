@@ -17,6 +17,8 @@ spec:
     spec:
       serviceAccountName: default
       restartPolicy: Never
+      securityContext:
+        fsGroup: 0
       containers:
         - name: guidellm
           image: {{ image }}
