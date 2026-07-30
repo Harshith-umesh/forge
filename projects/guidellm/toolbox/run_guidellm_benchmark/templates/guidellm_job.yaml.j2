@@ -17,8 +17,10 @@ spec:
     spec:
       serviceAccountName: default
       restartPolicy: Never
+{% if fs_group is not none %}
       securityContext:
-        fsGroup: 0
+        fsGroup: {{ fs_group }}
+{% endif %}
       containers:
         - name: guidellm
           image: {{ image }}

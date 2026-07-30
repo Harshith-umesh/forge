@@ -435,6 +435,7 @@ def _run_workload_benchmark(
                 pvc_size=benchmark_cfg.get("pvc_size", "5Gi"),
                 guidellm_args=guidellm_args,
                 hf_token_secret=benchmark_cfg.get("hf_token_secret", ""),
+                fs_group=benchmark_cfg.get("fs_group"),
             )
 
 
@@ -655,6 +656,7 @@ def _run_warmup_step(
             pvc_size=benchmark_cfg.get("pvc_size", "5Gi"),
             guidellm_args=guidellm_args,
             hf_token_secret=benchmark_cfg.get("hf_token_secret", ""),
+            fs_group=benchmark_cfg.get("fs_group"),
         )
         logger.info("Warmup completed")
     except Exception:
@@ -720,6 +722,7 @@ def _run_profiler_step(
                 pvc_size=benchmark_cfg.get("pvc_size", "5Gi"),
                 guidellm_args=guidellm_args,
                 hf_token_secret=benchmark_cfg.get("hf_token_secret", ""),
+                fs_group=benchmark_cfg.get("fs_group"),
             )
         finally:
             enable_profiler_gate(

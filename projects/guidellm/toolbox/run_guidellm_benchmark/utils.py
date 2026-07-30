@@ -176,6 +176,7 @@ def render_guidellm_job_from_parts(
     endpoint_url: str,
     guidellm_args: list[str],
     hf_token_secret: str = "",
+    fs_group: int | None = None,
 ) -> dict[str, Any]:
     """Render a GuideLL-M job manifest from individual components.
 
@@ -186,6 +187,9 @@ def render_guidellm_job_from_parts(
         endpoint_url: Gateway endpoint URL
         guidellm_args: Additional arguments for GuideLLM
         hf_token_secret: Name of the K8s secret containing HF_TOKEN. If empty, HF_TOKEN is not injected.
+        fs_group: If set, adds a pod-level securityContext.fsGroup to ensure
+            the PVC is writable by the container. Needed on clusters where the
+            CSI driver provisions volumes with root-only permissions.
 
     Returns:
         Job manifest as dict
@@ -198,6 +202,7 @@ def render_guidellm_job_from_parts(
             "name": name,
             "image": image,
             "hf_token_secret": hf_token_secret,
+            "fs_group": fs_group,
         },
     )
     manifest = yaml.safe_load(rendered_yaml)
