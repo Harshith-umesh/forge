@@ -146,13 +146,16 @@ def _build_multi_run_script(*, endpoint_url: str, runs: list[GuideLLMRun]) -> st
     return "\n".join(lines)
 
 
-def render_guidellm_pvc_from_parts(*, namespace: str, name: str, pvc_size: str) -> dict[str, Any]:
+def render_guidellm_pvc_from_parts(
+    *, namespace: str, name: str, pvc_size: str, owner_reference: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Render a GuideLL-M PVC manifest from individual components.
 
     Args:
         namespace: Target namespace
         name: Name of the benchmark job and PVC
         pvc_size: Size of the PVC
+        owner_reference: Optional owner reference to set (e.g., for job ownership)
 
     Returns:
         PVC manifest as dict
@@ -165,7 +168,13 @@ def render_guidellm_pvc_from_parts(*, namespace: str, name: str, pvc_size: str) 
             "pvc_size": pvc_size,
         },
     )
-    return yaml.safe_load(rendered_yaml)
+    manifest = yaml.safe_load(rendered_yaml)
+
+    # Add owner reference if provided
+    if owner_reference:
+        manifest["metadata"]["ownerReferences"] = [owner_reference]
+
+    return manifest
 
 
 def render_guidellm_job_from_parts(

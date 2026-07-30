@@ -120,19 +120,12 @@ def _best_effort_delete(description: str, *oc_args: str) -> None:
 
 @task
 def create_guidellm_resources_task(args, ctx):
-    """Create the GuideLLM benchmark PVC and job"""
+    """Create the GuideLLM benchmark job and PVC with job as owner"""
 
     # Ensure src directory exists
     (args.artifact_dir / "src").mkdir(parents=True, exist_ok=True)
 
-    oc_apply(
-        args.artifact_dir / "src" / "guidellm-pvc.yaml",
-        render_guidellm_pvc_from_parts(
-            namespace=ctx.target_namespace,
-            name=ctx.benchmark_name,
-            pvc_size=args.pvc_size,
-        ),
-    )
+    # Create the job first
     oc_apply(
         args.artifact_dir / "src" / "guidellm-job.yaml",
         render_guidellm_job_from_parts(
@@ -144,10 +137,35 @@ def create_guidellm_resources_task(args, ctx):
             hf_token_secret=args.hf_token_secret,
         ),
     )
-    return f"GuideLLM benchmark {ctx.benchmark_name} created"
+
+    # Get the job metadata for owner reference
+    job_data = oc_get_json("job", name=ctx.benchmark_name, namespace=ctx.target_namespace)
+
+    # Create owner reference from job metadata
+    owner_reference = {
+        "apiVersion": "batch/v1",
+        "kind": "Job",
+        "name": job_data["metadata"]["name"],
+        "uid": job_data["metadata"]["uid"],
+        "controller": True,
+        "blockOwnerDeletion": True,
+    }
+
+    # Create the PVC with job as owner
+    oc_apply(
+        args.artifact_dir / "src" / "guidellm-pvc.yaml",
+        render_guidellm_pvc_from_parts(
+            namespace=ctx.target_namespace,
+            name=ctx.benchmark_name,
+            pvc_size=args.pvc_size,
+            owner_reference=owner_reference,
+        ),
+    )
+
+    return f"GuideLLM benchmark {ctx.benchmark_name} created with job as PVC owner"
 
 
-@retry(attempts=180, delay=10, backoff=1.0)
+@retry(attempts=1080, delay=10, backoff=1.0)
 @task
 def wait_guidellm_benchmark_task(args, ctx):
     """Wait for the GuideLLM benchmark job to complete"""
