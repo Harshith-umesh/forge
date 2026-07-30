@@ -220,7 +220,7 @@ def _build_vllm_sglang_container(
     env_vars_list: list[dict],
 ) -> dict[str, Any]:
     if engine == "sglang":
-        command = ["python3", "-m", "sglang.launch_server"]
+        command = ["sglang", "serve"]
         if storage_source == "hf":
             args = [f"--model-path={model_id}", "--port=8080", "--host=0.0.0.0"]
         else:
