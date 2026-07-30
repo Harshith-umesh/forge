@@ -39,7 +39,7 @@ class CaliperMLflowVerifier(NightlyVerifier):
     """Check MLflow experiment runs for the last tested version.
 
     Config requirements (via @requires on __init__):
-        caliper.export.backend.mlflow.config.experiment
+        nightly.mlflow_verifier.experiment             (experiment to query for previous runs)
         caliper.export.backend.mlflow.config.workspace
         caliper.export.backend.mlflow.secrets.vault   (dict with 'name' and 'mlflow_secret')
         nightly.mlflow_verifier.version_pattern        (regex with one capture group)
@@ -47,7 +47,7 @@ class CaliperMLflowVerifier(NightlyVerifier):
     """
 
     @requires(
-        experiment="caliper.export.backend.mlflow.config.experiment",
+        experiment="nightly.mlflow_verifier.experiment",
         workspace="caliper.export.backend.mlflow.config.workspace",
         vault_cfg="caliper.export.backend.mlflow.secrets.vault",
         version_pattern="nightly.mlflow_verifier.version_pattern",

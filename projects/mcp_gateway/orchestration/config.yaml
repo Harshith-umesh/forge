@@ -12,6 +12,7 @@ nightly:
       mlflow_experiment: "mcp-gw-cpt-ghcr"
   verifier: "projects.caliper.orchestration.mlflow_verifier.CaliperMLflowVerifier"
   mlflow_verifier:
+    experiment: "mcp-gw-cpt-ghcr"
     version_pattern: "-v(.+?)-\\d{8}-\\d{6}$"
     strip_prefix: "sha-"
   cluster: "forge-smoke-testing"
