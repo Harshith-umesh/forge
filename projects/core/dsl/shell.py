@@ -32,6 +32,8 @@ def run(
     stdout_dest: str | Path | None = None,
     log_stdout: bool = True,
     log_stderr: bool = True,
+    input_text: str | None = None,
+    timeout_seconds: float | None = None,
 ) -> CommandResult:
     """
     Execute a shell command
@@ -43,6 +45,8 @@ def run(
         stdout_dest: Optional file path to write stdout to
         log_stdout: Optional. If False, don't log the content of stdout.
         log_stderr: Optional. If False, don't log the content of stderr.
+        input_text: Optional text to send to command's stdin
+        timeout_seconds: Optional timeout in seconds
     Returns:
         CommandResult with execution details
     """
@@ -65,6 +69,8 @@ def run(
             check=False,  # We handle check ourselves
             capture_output=True,
             text=True,
+            input=input_text,
+            timeout=timeout_seconds,
         )
 
         cmd_result = CommandResult(
