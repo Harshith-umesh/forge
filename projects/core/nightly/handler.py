@@ -57,7 +57,15 @@ def _confirm_nightly(project: str, image_version: str, source_cfg: dict) -> None
     verifier = verifier_cls()
 
     logger.info("Using verifier: %s", type(verifier).__name__)
-    last_version = verifier.get_last_tested_version()
+    try:
+        last_version = verifier.get_last_tested_version()
+    except Exception as e:
+        logger.warning(
+            "Verifier failed (bootstrap scenario?): %s. "
+            "Treating as no previous version — will launch a new run.",
+            e,
+        )
+        last_version = ""
     logger.info("Last tested version: '%s'", last_version or "<none>")
 
     if image_version == last_version:
