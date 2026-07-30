@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import uuid as _uuid_mod
@@ -281,6 +282,7 @@ def _run_test(
                 _warnings.append("Profiler trace upload failed")
 
         # Phase 2: benchmark + post-processing for ALL workloads
+        trtllm_cfg = runtime_config.get_trtllm_config() if engine == "trtllm" else None
         for wl_key in workload_keys:
             _run_workload_benchmark(
                 model_key=model_key,
@@ -299,6 +301,7 @@ def _run_test(
                 run_uuid=run_uuid,
                 version=version,
                 cluster_tag=cluster_tag,
+                trtllm_config=trtllm_cfg,
             )
 
         try:
@@ -364,6 +367,7 @@ def _run_workload_benchmark(
     run_uuid: str,
     version: str,
     cluster_tag: str,
+    trtllm_config: dict | None = None,
 ) -> None:
     """Run benchmark and post-processing for a single workload.
 
@@ -396,6 +400,7 @@ def _run_workload_benchmark(
             cluster_tag=cluster_tag,
             accelerator_chip=gpu_type.upper(),
             run_uuid=run_uuid,
+            trtllm_config=trtllm_config,
         )
 
         if not run_benchmark:
@@ -451,9 +456,16 @@ def _create_test_labels(
     cluster_tag: str = "",
     accelerator_chip: str = "",
     run_uuid: str = "",
+    trtllm_config: dict | None = None,
 ) -> None:
     _, image_tag = runtime_config.split_image_tag(serving_image) if serving_image else ("", "")
-    runtime_args = "; ".join(f"{k}: {v}" for k, v in engine_args.items())
+    parts = [f"{k}: {v}" for k, v in engine_args.items()]
+    for key, value in (trtllm_config or {}).items():
+        formatted_value = (
+            json.dumps(value, separators=(",", ":")) if isinstance(value, (dict, list)) else value
+        )
+        parts.append(f"trtllm.{key}: {formatted_value}")
+    runtime_args = "; ".join(parts)
     tp = (
         engine_args.get("tensor-parallel-size")
         or engine_args.get("tp-size")
