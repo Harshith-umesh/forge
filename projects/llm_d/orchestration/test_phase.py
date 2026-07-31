@@ -140,6 +140,32 @@ def ensure_kueue_local_queue() -> None:
     logger.info("LocalQueue %s created successfully", queue_name)
 
 
+def extract_kpi_labels_from_config() -> dict[str, str]:
+    """Extract kpi_labels from project configuration.
+
+    Returns:
+        Dictionary of kpi_labels for system context
+    """
+    kpi_labels = {}
+
+    # Extract platform name
+    platform_name = config.project.get_config("cpt.kpi.labels.platform_name")
+    if platform_name:
+        kpi_labels["platform"] = platform_name
+
+    # Extract gpu_type
+    gpu_type = config.project.get_config("cpt.kpi.labels.gpu_type")
+    if gpu_type:
+        kpi_labels["gpu_type"] = gpu_type
+
+    # Extract test_harness
+    test_harness = config.project.get_config("cpt.kpi.labels.test_harness")
+    if test_harness:
+        kpi_labels["test_harness"] = test_harness
+
+    return kpi_labels
+
+
 def create_test_labels() -> None:
     """Create __test_labels__.yaml with model name and guidellm configuration."""
 
@@ -155,7 +181,10 @@ def create_test_labels() -> None:
     if benchmark_keys:
         labels["guidellm_loadshape"] = benchmark_keys[0]
 
-    write_test_labels(env.ARTIFACT_DIR, labels)
+    # Extract kpi_labels from config
+    kpi_labels = extract_kpi_labels_from_config()
+
+    write_test_labels(env.ARTIFACT_DIR, labels, kpi_labels=kpi_labels if kpi_labels else None)
     logger.info("Created test labels: %s", labels)
 
     # Dump config.project to config.yaml
