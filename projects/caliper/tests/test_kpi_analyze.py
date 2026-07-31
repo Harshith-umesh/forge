@@ -197,14 +197,14 @@ class TestEndToEnd:
         self._write_hierarchical_kpi(historical_dir / "run1" / "kpis.json", baseline1)
         self._write_hierarchical_kpi(historical_dir / "run2" / "kpis.json", baseline2)
 
-        exit_code = run_kpi_analysis(
+        test_status = run_kpi_analysis(
             current_kpi_file=current_dir / "kpis.json",
             historical_data_dir=historical_dir,
             output_file=output_file,
             plugin_module="nonexistent_plugin",
         )
 
-        assert exit_code == 0
+        assert test_status["exit_code"] == 0
         assert output_file.exists()
 
         with open(output_file) as f:
@@ -247,14 +247,14 @@ class TestEndToEnd:
         )
         self._write_hierarchical_kpi(historical_dir / "run1" / "kpis.json", baseline)
 
-        exit_code = run_kpi_analysis(
+        test_status = run_kpi_analysis(
             current_kpi_file=current_dir / "kpis.json",
             historical_data_dir=historical_dir,
             output_file=output_file,
             plugin_module="nonexistent_plugin",
         )
 
-        assert exit_code == 3
+        assert test_status["exit_code"] == 3
         with open(output_file) as f:
             report = yaml.safe_load(f)
 
@@ -282,14 +282,14 @@ class TestEndToEnd:
         )
         self._write_hierarchical_kpi(current_dir / "kpis.json", current)
 
-        exit_code = run_kpi_analysis(
+        test_status = run_kpi_analysis(
             current_kpi_file=current_dir / "kpis.json",
             historical_data_dir=historical_dir,
             output_file=output_file,
             plugin_module="nonexistent_plugin",
         )
 
-        assert exit_code == 2
+        assert test_status["exit_code"] == 2
         with open(output_file) as f:
             report = yaml.safe_load(f)
         assert report["overall"]["verdict"] == "NO_BASELINE"
@@ -327,14 +327,14 @@ class TestEndToEnd:
         )
         self._write_hierarchical_kpi(historical_dir / "run1" / "kpis.json", baseline)
 
-        exit_code = run_kpi_analysis(
+        test_status = run_kpi_analysis(
             current_kpi_file=current_dir / "kpis.json",
             historical_data_dir=historical_dir,
             output_file=output_file,
             plugin_module="nonexistent_plugin",
         )
 
-        assert exit_code == 3
+        assert test_status["exit_code"] == 3
         with open(output_file) as f:
             report = yaml.safe_load(f)
 
@@ -376,14 +376,14 @@ class TestEndToEnd:
         )
         self._write_hierarchical_kpi(historical_dir / "run1" / "kpis.json", baseline)
 
-        exit_code = run_kpi_analysis(
+        test_status = run_kpi_analysis(
             current_kpi_file=current_dir / "kpis.json",
             historical_data_dir=historical_dir,
             output_file=output_file,
             plugin_module="nonexistent_plugin",
         )
 
-        assert exit_code == 0
+        assert test_status["exit_code"] == 0
         with open(output_file) as f:
             report = yaml.safe_load(f)
 
@@ -426,7 +426,7 @@ class TestEndToEnd:
 
         # With version as comparison_key, both match on platform=A100
         # (plugin would expose this config; here we test the core logic directly)
-        exit_code = run_kpi_analysis(
+        test_status = run_kpi_analysis(
             current_kpi_file=current_dir / "kpis.json",
             historical_data_dir=historical_dir,
             output_file=output_file,
@@ -435,7 +435,7 @@ class TestEndToEnd:
 
         # Without plugin config, default AnalysisConfig has no comparison_keys,
         # so version must also match → no baselines found → skip
-        assert exit_code == 0 or exit_code == 2
+        assert test_status["exit_code"] in (0, 2)
         with open(output_file) as f:
             report = yaml.safe_load(f)
         # The version label differs, so with empty comparison_keys they don't match
