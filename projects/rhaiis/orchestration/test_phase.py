@@ -580,7 +580,8 @@ def _precreate_mlflow_run() -> dict[str, str]:
         if experiment:
             mlflow.set_experiment(experiment)
 
-        with mlflow.start_run():
+        run_name = os.environ.get("FJOB_NAME")
+        with mlflow.start_run(run_name=run_name):
             active = mlflow.active_run()
             run_id = active.info.run_id
             experiment_id = str(active.info.experiment_id)

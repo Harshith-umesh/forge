@@ -416,7 +416,7 @@ def log_artifacts(
         start_kw: dict[str, Any] = {}
         if run_id:
             start_kw["run_id"] = run_id
-        elif run_name:
+        if run_name:
             start_kw["run_name"] = run_name
 
         meta: dict[str, Any] | None = None
@@ -555,7 +555,7 @@ def log_multi_run_artifacts(
         start_kw: dict[str, Any] = {}
         if run_id:
             start_kw["run_id"] = run_id
-        elif parent_run_name:
+        if parent_run_name:
             start_kw["run_name"] = parent_run_name
 
         with mlflow.start_run(**start_kw) as parent:
