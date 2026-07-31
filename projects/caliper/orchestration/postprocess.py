@@ -354,17 +354,33 @@ def _transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
     except (ImportError, AttributeError):
         kpi_functions = {}
 
+    # First pass: determine which labels are common (same value for all KPIs in a run)
+    # vs per-KPI (vary across KPIs, e.g. rate_index, intended_concurrency)
+    run_label_values: dict[str, dict[str, set]] = defaultdict(lambda: defaultdict(set))
+    for kpi in kpis:
+        run_id = kpi.get("run_id", "unknown")
+        for k, v in kpi.get("labels", {}).items():
+            if k == "higher_is_better":
+                continue
+            run_label_values[run_id][k].add(str(v))
+
+    # Labels with more than one distinct value per run are per-KPI
+    per_kpi_label_keys: dict[str, set[str]] = {}
+    for run_id, label_vals in run_label_values.items():
+        per_kpi_label_keys[run_id] = {k for k, vals in label_vals.items() if len(vals) > 1}
+
     for kpi in kpis:
         run_id = kpi.get("run_id", "unknown")
         test_data = tests_data[run_id]
+        varying_keys = per_kpi_label_keys.get(run_id, set())
 
-        # Extract common labels (excluding KPI-specific ones)
         kpi_labels = kpi.get("labels", {})
         test_labels = {
-            k: v for k, v in kpi_labels.items() if k not in ["higher_is_better"]
-        }  # Exclude KPI-specific labels
+            k: v
+            for k, v in kpi_labels.items()
+            if k not in ("higher_is_better",) and k not in varying_keys
+        }
 
-        # Merge test labels (they should be the same for all KPIs in a test)
         if not test_data["labels"]:
             test_data["labels"] = test_labels
 
@@ -375,6 +391,9 @@ def _transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
                 "source": kpi.get("source", {}),
                 "run_id": run_id,
             }
+
+        # Per-KPI labels that vary across rate points
+        kpi_specific_labels = {k: kpi_labels[k] for k in varying_keys if k in kpi_labels}
 
         # Create KPI record with metadata
         kpi_id = kpi.get("kpi_id")
@@ -400,12 +419,14 @@ def _transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
         else:
             final_value = raw_value
 
-        kpi_record = {
+        kpi_record: dict[str, Any] = {
             "id": kpi_id,
             "value": final_value,
             "unit": kpi.get("unit"),
             "higher_is_better": kpi_labels.get("higher_is_better", True),
         }
+        if kpi_specific_labels:
+            kpi_record["labels"] = kpi_specific_labels
 
         # Add KPI metadata from function decorator if available
         if kpi_id in kpi_functions:

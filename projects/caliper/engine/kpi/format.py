@@ -38,24 +38,33 @@ def transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
     except (ImportError, AttributeError):
         kpi_functions = {}
 
+    # First pass: determine which labels vary across KPIs in the same run
+    run_label_values: dict[str, dict[str, set]] = defaultdict(lambda: defaultdict(set))
+    for kpi in kpis:
+        run_id = kpi.get("run_id", "unknown")
+        for k, v in kpi.get("labels", {}).items():
+            if k == "higher_is_better":
+                continue
+            run_label_values[run_id][k].add(str(v))
+
+    per_kpi_label_keys: dict[str, set[str]] = {}
+    for run_id, label_vals in run_label_values.items():
+        per_kpi_label_keys[run_id] = {k for k, vals in label_vals.items() if len(vals) > 1}
+
     for kpi in kpis:
         run_id = kpi.get("run_id", "unknown")
         test_data = tests_data[run_id]
+        varying_keys = per_kpi_label_keys.get(run_id, set())
 
-        # Extract common labels (excluding KPI-specific ones)
         kpi_labels = kpi.get("labels", {})
         test_labels = {
-            k: v for k, v in kpi_labels.items() if k not in ["higher_is_better"]
-        }  # Exclude KPI-specific labels
+            k: v
+            for k, v in kpi_labels.items()
+            if k not in ("higher_is_better",) and k not in varying_keys
+        }
 
-        # Validate and merge test labels from all KPIs in the test
-        for key, value in test_labels.items():
-            if key in test_data["labels"] and test_data["labels"][key] != value:
-                raise ValueError(
-                    f"Label mismatch for run_id '{run_id}': key '{key}' has conflicting values "
-                    f"'{test_data['labels'][key]}' vs '{value}'"
-                )
-        test_data["labels"].update(test_labels)
+        if not test_data["labels"]:
+            test_data["labels"] = test_labels
 
         # Store test metadata from first KPI
         if not test_data["metadata"]:
@@ -64,6 +73,9 @@ def transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
                 "source": kpi.get("source", {}),
                 "run_id": run_id,
             }
+
+        # Per-KPI labels that vary across rate points
+        kpi_specific_labels = {k: kpi_labels[k] for k in varying_keys if k in kpi_labels}
 
         # Create KPI record with metadata
         kpi_id = kpi.get("kpi_id")
@@ -104,13 +116,15 @@ def transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
             # Not 2D or no valid tuple-pair structure, keep original value
             final_value = raw_value
 
-        kpi_record = {
+        kpi_record: dict[str, Any] = {
             "id": kpi_id,
             "value": final_value,
             "unit": kpi.get("unit"),
             "higher_is_better": kpi_labels.get("higher_is_better", True),
-            "is_2d": is_2d,  # Set is_2d consistently based on resolved value
+            "is_2d": is_2d,
         }
+        if kpi_specific_labels:
+            kpi_record["labels"] = kpi_specific_labels
 
         # Add KPI metadata from function decorator if available
         if kpi_id in kpi_functions:
@@ -269,6 +283,13 @@ def read_kpis_from_file(file_path: Path) -> list[dict]:
                     raw_value = kpi_record.get("value")
                     converted_value = _convert_to_schema_v1_value(raw_value)
 
+                    # Merge test-level labels with any per-KPI labels
+                    merged_labels = {
+                        **test_labels,
+                        **kpi_record.get("labels", {}),
+                        "higher_is_better": kpi_record.get("higher_is_better", True),
+                    }
+
                     flat_kpi = {
                         "schema_version": "1",
                         "kpi_id": kpi_record.get("id"),
@@ -276,10 +297,7 @@ def read_kpis_from_file(file_path: Path) -> list[dict]:
                         "unit": kpi_record.get("unit"),
                         "run_id": test_metadata.get("run_id"),
                         "timestamp": test_metadata.get("timestamp"),
-                        "labels": {
-                            **test_labels,
-                            "higher_is_better": kpi_record.get("higher_is_better", True),
-                        },
+                        "labels": merged_labels,
                         "source": test_metadata.get("source", {}),
                     }
 
