@@ -303,10 +303,6 @@ def _run_test(
             logger.warning("MLflow run pre-creation failed; continuing", exc_info=True)
 
         if mlflow_run_meta.get("run_id"):
-            config.project.set_config("caliper.export.mlflow_run_id", mlflow_run_meta["run_id"])
-            config.project.set_config(
-                "caliper.export.mlflow_experiment_id", mlflow_run_meta["experiment_id"]
-            )
             try:
                 _write_mlflow_precreated_run_marker(mlflow_run_meta)
             except Exception:
