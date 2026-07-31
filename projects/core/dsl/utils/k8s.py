@@ -24,31 +24,52 @@ def oc(
     log_stdout: bool = True,
     log_stderr: bool = True,
     stdout_dest: Path | None = None,
+    handled_secretly: bool = False,
 ) -> shell.CommandResult:
     """Run an oc command.
 
     Args:
         *args: Arguments to pass to oc
         check: Raise subprocess.CalledProcessError if command fails
-        input_text: Input to send to command (not supported)
-        timeout_seconds: Command timeout (not supported)
+        input_text: Input to send to command
+        timeout_seconds: Command timeout
         log_stdout: Log stdout to console (default True)
         log_stderr: Log stderr to console (default True)
         stdout_dest: Optional file path to write stdout to
+        handled_secretly: If True, disable all logging to prevent secret leakage
 
     Returns:
         CommandResult with execution details
     """
     cmd = ["oc", *args]
 
-    return shell.run(
-        cmd,
-        check=check,
-        shell=False,
-        log_stdout=log_stdout,
-        log_stderr=log_stderr,
-        stdout_dest=stdout_dest,
-    )
+    # When handled secretly, disable all logging to prevent credential leakage
+    if handled_secretly:
+        log_stdout = False
+        log_stderr = False
+
+    try:
+        return shell.run(
+            cmd,
+            check=check,
+            shell=False,
+            log_stdout=log_stdout,
+            log_stderr=log_stderr,
+            stdout_dest=stdout_dest,
+            input_text=input_text,
+            timeout_seconds=timeout_seconds,
+        )
+    except subprocess.CalledProcessError as e:
+        if not handled_secretly:
+            raise
+
+        # When handled secretly, sanitize error to prevent credential leakage
+        raise subprocess.CalledProcessError(
+            e.returncode,
+            "oc command failed",
+            "",
+            "Error output suppressed for secret handling",
+        ) from e
 
 
 def oc_get_json(
@@ -58,6 +79,7 @@ def oc_get_json(
     namespace: str | None = None,
     selector: str | None = None,
     ignore_not_found: bool = False,
+    handled_secretly: bool = False,
 ) -> dict[str, Any] | None:
     """Get a Kubernetes resource as JSON using oc.
 
@@ -67,6 +89,7 @@ def oc_get_json(
         namespace: Namespace (optional)
         selector: Label selector (optional)
         ignore_not_found: Return None instead of raising error if not found
+        handled_secretly: If True, disable all logging to prevent secret leakage
 
     Returns:
         Resource data as dict, or None if not found and ignore_not_found=True
@@ -83,20 +106,30 @@ def oc_get_json(
         args.extend(["-l", selector])
     args.extend(["-o", "json"])
 
+    # When handled secretly, disable all logging to prevent credential leakage
+    log_stderr_enabled = not ignore_not_found and not handled_secretly
+
     result = oc(
         *args,
         check=not ignore_not_found,
-        log_stdout=False,
-        log_stderr=not ignore_not_found,
+        log_stdout=False,  # Always disabled to prevent data exposure
+        log_stderr=log_stderr_enabled,  # Disabled when handled secretly
+        handled_secretly=handled_secretly,
     )
     if result.returncode != 0:
         if ignore_not_found and _is_oc_not_found_error(result.stderr):
             return None
+        # Re-raise error (oc() already sanitized if handled_secretly=True)
         raise subprocess.CalledProcessError(
             result.returncode, f"oc {' '.join(args)}", result.stdout, result.stderr
         )
     if not result.stdout:
-        raise ValueError(f"oc {' '.join(args)} returned no output")
+        error_msg = (
+            f"oc get {kind} returned no output"
+            if handled_secretly
+            else f"oc {' '.join(args)} returned no output"
+        )
+        raise ValueError(error_msg)
     return json.loads(result.stdout)
 
 

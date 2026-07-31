@@ -247,6 +247,7 @@ def capture_smoke_pod_debug_info(args, ctx):
             "-o",
             "yaml",
             check=False,
+            stdout_dest=artifacts_dir / f"{ctx.pod_name}.yaml",
         )
 
         # Capture pod description
@@ -283,6 +284,7 @@ def cleanup_smoke_pod(args, ctx):
         "-n",
         args.namespace,
         "--ignore-not-found=true",
+        "--wait=false",
         check=False,
     )
     return f"Cleaned up smoke pod {ctx.pod_name}"

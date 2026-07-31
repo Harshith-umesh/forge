@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import yaml
@@ -24,6 +25,8 @@ from projects.core.dsl.utils.k8s import (
 
 from .on_failure_helpers import on_wait_pods_appear_failure
 
+logger = logging.getLogger(__name__)
+
 
 def load_yaml(path: Path):
     with path.open(encoding="utf-8") as handle:
@@ -35,8 +38,9 @@ def run(
     *,
     namespace: str,
     inference_service_manifest_path: str,
-    gateway_status_address_name: str = "gateway-external",
+    gateway_status_address_name: str | None = "gateway-external",
     dry_run: bool = False,
+    wait_pods_scheduled: bool = False,
 ) -> str:
     """
     Deploy an LLMInferenceService and wait for its endpoint.
@@ -46,6 +50,7 @@ def run(
         inference_service_manifest_path: Path to the InferenceService YAML manifest file
         gateway_status_address_name: Gateway status address name for endpoint resolution
         dry_run: If True, only prepare the manifest without deploying
+        wait_pods_scheduled: If True, wait for all pods to be scheduled before checking service readiness
     """
 
     ctx = execute_tasks(locals())
@@ -119,10 +124,20 @@ def delete_existing_service(args, ctx):
 def wait_old_pods_gone(args, ctx):
     """Wait for old llm-d pods to disappear"""
 
-    pods = oc_get_json(
-        "pods", namespace=args.namespace, selector=ctx.selector, ignore_not_found=True
+    result = oc(
+        "get",
+        "pods",
+        "-n",
+        args.namespace,
+        "-l",
+        ctx.selector,
+        "--ignore-not-found=true",
+        "--no-headers",
+        check=False,
     )
-    if not pods or not pods.get("items"):
+
+    # Check if output is empty (no pods found)
+    if not result.stdout.strip():
         return f"Old pods gone for {ctx.inference_service_name}"
     return False  # Retry
 
@@ -152,6 +167,311 @@ def wait_pods_appear(args, ctx):
     if pods and pods.get("items"):
         return f"Pods appeared for {ctx.inference_service_name}"
     return False  # Retry
+
+
+@task
+def query_service_status(args, ctx):
+    """Query the status of the LLMInferenceService"""
+
+    service_name = ctx.inference_service_name
+
+    # Query only the Ready condition status
+    result = oc(
+        "get",
+        "llminferenceservice",
+        service_name,
+        "-n",
+        args.namespace,
+        "-o",
+        "jsonpath={.status.conditions[?(@.type=='Ready')].status}",
+        log_stdout=False,
+    )
+
+    ready_status = result.stdout.strip()
+    ctx.is_ready = ready_status == "True"
+
+    if ctx.is_ready:
+        return f"LLMInferenceService {service_name} status: Ready"
+    else:
+        return f"LLMInferenceService {service_name} status: Not Ready"
+
+
+@task
+def query_service_message(args, ctx):
+    """Query detailed message from LLMInferenceService"""
+
+    service_name = ctx.inference_service_name
+
+    # Query the Ready condition details
+    result = oc(
+        "get",
+        "llminferenceservice",
+        service_name,
+        "-n",
+        args.namespace,
+        "-o",
+        "jsonpath={.status.conditions[?(@.type=='Ready')]}",
+        log_stdout=False,
+    )
+
+    if result.stdout.strip():
+        try:
+            import json
+
+            condition = json.loads(result.stdout)
+            reason = condition.get("reason", "Unknown")
+            message = condition.get("message", "No message")
+
+            if not ctx.is_ready:
+                return f"Not ready - Reason: {reason}, Message: {message}"
+            else:
+                return "Ready - Service is operational"
+        except (json.JSONDecodeError, KeyError) as e:
+            return f"Failed to parse Ready condition: {e}"
+    else:
+        return "No Ready condition found in status"
+
+
+@retry(attempts=999999, delay=30, backoff=1.0)
+@task
+def wait_pods_scheduled(args, ctx):
+    """Wait for all pods to be scheduled (optional task)"""
+
+    # Check if this task is enabled
+    if not args.wait_pods_scheduled:
+        return "Pod scheduling wait disabled by parameter"
+
+    service_name = ctx.inference_service_name
+
+    # Get pod status using plain text output
+    result = oc(
+        "get",
+        "pods",
+        "-l",
+        ctx.selector,
+        "-n",
+        args.namespace,
+        "--no-headers",
+        check=False,
+        log_stdout=False,
+    )
+
+    if not result.stdout.strip():
+        return False, "No pods found for the service yet"
+
+    # Keep waiting if any pod is Pending or SchedulingGated
+    if "Pending" in result.stdout:
+        return False, "Waiting for pods to exit Pending state"
+
+    if "SchedulingGated" in result.stdout:
+        return False, "Waiting for pods to exit SchedulingGated state"
+
+    return f"All pods for {service_name} are scheduled successfully"
+
+
+@retry(attempts=90, delay=10, backoff=1.0)
+@task
+def wait_service_ready(args, ctx):
+    """Wait for LLMInferenceService to be ready"""
+
+    service_name = ctx.inference_service_name
+
+    # Query the current status and show diagnostic info
+    result = oc(
+        "get",
+        "llminferenceservice",
+        service_name,
+        "-n",
+        args.namespace,
+        "-o",
+        "jsonpath={.status.conditions[?(@.type=='Ready')]}",
+    )
+
+    # Also show pod status for debugging
+    oc(
+        "get",
+        "pods",
+        "-l",
+        ctx.selector,
+        "-n",
+        args.namespace,
+    )
+
+    # Check for pod restarts and abort if any pods have restarted
+    restart_result = oc(
+        "get",
+        "pods",
+        "-l",
+        ctx.selector,
+        "-n",
+        args.namespace,
+        "-o",
+        "jsonpath={range .items[*]}{.metadata.name}:{.status.containerStatuses[*].restartCount}{'\\n'}{end}",
+        log_stdout=False,
+    )
+
+    if restart_result.stdout.strip():
+        for line in restart_result.stdout.strip().split("\n"):
+            if ":" in line:
+                pod_name, restart_counts = line.split(":", 1)
+                # Check if any container has restarted
+                counts = restart_counts.split()
+                for count_str in counts:
+                    try:
+                        if int(count_str) > 0:
+                            raise RuntimeError(
+                                f"Pod {pod_name} has restarted (restart count: {count_str}). Aborting wait due to pod restart."
+                            )
+                    except ValueError:
+                        # Skip non-numeric restart counts
+                        pass
+
+    if result.stdout.strip():
+        try:
+            import json
+
+            condition = json.loads(result.stdout)
+            status = condition.get("status", "Unknown")
+            reason = condition.get("reason", "Unknown")
+            message = condition.get("message", "No message")
+
+            if status == "True":
+                return f"LLMInferenceService {service_name} is ready"
+            else:
+                return (
+                    False,
+                    f"Service not ready - Status: {status}, Reason: {reason}, Message: {message}",
+                )
+
+        except (json.JSONDecodeError, KeyError) as e:
+            return (False, f"Failed to parse Ready condition: {e}")
+    else:
+        return (False, f"No Ready condition found in status for {service_name}")
+
+
+def try_resolve_endpoint_url(
+    *, namespace: str, inference_service_name: str, gateway_status_address_name: str | None
+) -> str | None:
+    logger.info(
+        f"=== Resolving endpoint URL for {inference_service_name} in namespace {namespace} ==="
+    )
+    logger.info(f"Target gateway_status_address_name: {gateway_status_address_name}")
+
+    payload = oc_get_json("llminferenceservice", name=inference_service_name, namespace=namespace)
+
+    # Log the entire status section for debugging
+    status = payload.get("status", {})
+    logger.info(f"Status section keys found: {list(status.keys())}")
+
+    # Check status.address first
+    status_address = status.get("address")
+    logger.info(f"status.address content: {status_address}")
+
+    if status_address:
+        logger.info("✓ status.address exists")
+        if isinstance(status_address, dict):
+            logger.info("✓ status.address is a dict")
+            if status_address.get("url"):
+                url = status_address["url"]
+                logger.info(f"✓ Found URL in status.address: '{url}'")
+
+                # When gateway_status_address_name is None, append port 8000 if needed
+                if gateway_status_address_name is None:
+                    logger.info("Mode: No gateway (will append port 8000 if needed)")
+                    if ":" not in url.split("/")[-1]:  # Check if no port in the hostname part
+                        url = f"{url}:8000"
+                        logger.info(f"✓ Appended port 8000: '{url}'")
+                    else:
+                        logger.info("✓ URL already has port, using as-is")
+                else:
+                    logger.info(
+                        f"Mode: Gateway '{gateway_status_address_name}' (no port modification)"
+                    )
+
+                logger.info(f"🎯 RESOLVED from status.address: '{url}'")
+                return url
+            else:
+                logger.info("✗ status.address has no 'url' field")
+                logger.info(f"  Available fields: {list(status_address.keys())}")
+        else:
+            logger.info(f"✗ status.address is not a dict, type: {type(status_address)}")
+    else:
+        logger.info("✗ No status.address found")
+
+    # Fallback to existing status.addresses logic
+    logger.info("--- Falling back to status.addresses lookup ---")
+    status_addresses = status.get("addresses", [])
+    logger.info(f"status.addresses content: {status_addresses}")
+
+    if not status_addresses:
+        logger.info("✗ No status.addresses found - RESOLUTION FAILED")
+        return None
+
+    logger.info(f"✓ Found {len(status_addresses)} address(es) in status.addresses")
+
+    for i, address in enumerate(status_addresses):
+        logger.info(f"Checking address[{i}]: {address}")
+
+        # When gateway_status_address_name is None, return the first address with a URL and append port 8000
+        if gateway_status_address_name is None:
+            logger.info("  Mode: No gateway filter (looking for any URL)")
+            if address.get("url"):
+                url = address["url"]
+                logger.info(f"  ✓ Found URL in address[{i}]: '{url}'")
+                # Append port 8000 when not using gateway if no port is already specified
+                if ":" not in url.split("/")[-1]:  # Check if no port in the hostname part
+                    url = f"{url}:8000"
+                    logger.info(f"  ✓ Appended port 8000: '{url}'")
+                else:
+                    logger.info("  ✓ URL already has port, using as-is")
+
+                logger.info(f"🎯 RESOLVED from status.addresses[{i}]: '{url}'")
+                return url
+            else:
+                logger.info(f"  ✗ Address[{i}] has no 'url' field")
+                logger.info(f"    Available fields: {list(address.keys())}")
+        # Otherwise, match by name
+        else:
+            address_name = address.get("name")
+            logger.info(
+                f"  Mode: Gateway filter (looking for name='{gateway_status_address_name}')"
+            )
+            logger.info(f"  Address[{i}] name: '{address_name}'")
+
+            if address_name == gateway_status_address_name:
+                logger.info(f"  ✓ Name matches '{gateway_status_address_name}'")
+                if address.get("url"):
+                    url = address["url"]
+                    logger.info(f"  ✓ Found URL: '{url}'")
+                    logger.info(f"🎯 RESOLVED from status.addresses[{i}] by name: '{url}'")
+                    return url
+                else:
+                    logger.info("  ✗ Matching address has no 'url' field")
+                    logger.info(f"    Available fields: {list(address.keys())}")
+            else:
+                logger.info(
+                    f"  ✗ Name mismatch: '{address_name}' != '{gateway_status_address_name}'"
+                )
+
+    logger.info("❌ RESOLUTION FAILED - No suitable URL found in any address")
+    return None
+
+
+@retry(attempts=30, delay=10, backoff=1.0)
+@task
+def resolve_endpoint_task(args, ctx):
+    """Resolve the gateway endpoint URL"""
+
+    endpoint_url = try_resolve_endpoint_url(
+        namespace=args.namespace,
+        inference_service_name=ctx.inference_service_name,
+        gateway_status_address_name=args.gateway_status_address_name,
+    )
+    if endpoint_url:
+        ctx.endpoint_url = endpoint_url
+        write_text(args.artifact_dir / "artifacts" / "endpoint.url", f"{endpoint_url}\n")
+        return f"Endpoint resolved: {endpoint_url}"
+    return False, "No endpoint URL available"
 
 
 @always
@@ -257,148 +577,255 @@ def capture_replicaset_description(args, ctx):
         return f"Failed to capture ReplicaSet description: {e}"
 
 
+@always
 @task
-def query_service_status(args, ctx):
-    """Query the status of the LLMInferenceService"""
+def capture_final_llmisvc_yaml(args, ctx):
+    """Capture the final YAML state of the LLMInferenceService"""
 
-    service_name = ctx.inference_service_name
+    if args.dry_run:
+        return "Dry-run, nothing to do"
 
-    # Query only the Ready condition status
-    result = oc(
-        "get",
-        "llminferenceservice",
-        service_name,
-        "-n",
-        args.namespace,
-        "-o",
-        "jsonpath={.status.conditions[?(@.type=='Ready')].status}",
-        log_stdout=False,
-    )
+    try:
+        # Ensure artifacts directory exists
+        artifacts_dir = args.artifact_dir / "artifacts"
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
 
-    ready_status = result.stdout.strip()
-    ctx.is_ready = ready_status == "True"
+        # Use LLMInferenceService name from context
+        service_name = getattr(ctx, "inference_service_name", None)
+        if not service_name:
+            return "No service name available"
 
-    if ctx.is_ready:
-        return f"LLMInferenceService {service_name} status: Ready"
-    else:
-        return f"LLMInferenceService {service_name} status: Not Ready"
+        # Capture final YAML state
+        result = oc(
+            "get",
+            "llminferenceservice",
+            service_name,
+            "-n",
+            args.namespace,
+            "-o",
+            "yaml",
+            log_stdout=False,
+            check=False,
+        )
 
+        llmisvc_yaml_path = artifacts_dir / "llmisvc_final.yaml"
 
-@task
-def query_service_message(args, ctx):
-    """Query detailed message from LLMInferenceService"""
-
-    service_name = ctx.inference_service_name
-
-    # Query the Ready condition details
-    result = oc(
-        "get",
-        "llminferenceservice",
-        service_name,
-        "-n",
-        args.namespace,
-        "-o",
-        "jsonpath={.status.conditions[?(@.type=='Ready')]}",
-        log_stdout=False,
-    )
-
-    if result.stdout.strip():
-        try:
-            import json
-
-            condition = json.loads(result.stdout)
-            reason = condition.get("reason", "Unknown")
-            message = condition.get("message", "No message")
-
-            if not ctx.is_ready:
-                return f"Not ready - Reason: {reason}, Message: {message}"
+        if result.returncode != 0:
+            # Handle the case where the LLMInferenceService is not found
+            if "not found" in result.stderr.lower():
+                logger.warning(
+                    f"LLMInferenceService '{service_name}' not found in namespace '{args.namespace}'"
+                )
+                with open(llmisvc_yaml_path, "w", encoding="utf-8") as f:
+                    f.write(
+                        f"# LLMInferenceService '{service_name}' not found in namespace '{args.namespace}'\n"
+                    )
+                    f.write(f"# Error: {result.stderr.strip()}\n")
+                return f"LLMInferenceService not found, logged error to {llmisvc_yaml_path}"
             else:
-                return "Ready - Service is operational"
-        except (json.JSONDecodeError, KeyError) as e:
-            return f"Failed to parse Ready condition: {e}"
-    else:
-        return "No Ready condition found in status"
+                # Handle other error cases
+                logger.error(
+                    f"Failed to get LLMInferenceService '{service_name}': {result.stderr.strip()}"
+                )
+                with open(llmisvc_yaml_path, "w", encoding="utf-8") as f:
+                    f.write(f"# Error getting LLMInferenceService '{service_name}'\n")
+                    f.write(f"# Error: {result.stderr.strip()}\n")
+                return f"Error getting LLMInferenceService, logged error to {llmisvc_yaml_path}"
+
+        # Success case - write the YAML content
+        with open(llmisvc_yaml_path, "w", encoding="utf-8") as f:
+            f.write(result.stdout)
+
+        return f"Captured final LLMInferenceService YAML to {llmisvc_yaml_path}"
+
+    except Exception as e:
+        return f"Failed to capture final LLMInferenceService YAML: {e}"
 
 
-@retry(attempts=90, delay=10, backoff=1.0)
+@always
 @task
-def wait_service_ready(args, ctx):
-    """Wait for LLMInferenceService to be ready"""
+def capture_workload_overview(args, ctx):
+    """Capture deployment, replicaset, and pod overview for debugging"""
 
-    service_name = ctx.inference_service_name
+    if args.dry_run:
+        return "Dry-run, nothing to do"
 
-    # Query the current status and show diagnostic info
-    result = oc(
-        "get",
-        "llminferenceservice",
-        service_name,
-        "-n",
-        args.namespace,
-        "-o",
-        "jsonpath={.status.conditions[?(@.type=='Ready')]}",
-        log_stdout=True,
-    )
+    # Ensure artifacts directory exists
+    artifacts_dir = args.artifact_dir / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
 
-    # Also show pod status for debugging
+    # Use selector from context
+    selector = getattr(ctx, "selector", None)
+    if not selector:
+        return "No selector available"
+
+    workload_overview_path = artifacts_dir / "workload_overview.txt"
+
+    # Capture deployment, replicaset, and pod overview
     oc(
         "get",
-        "pods",
+        "deploy,rs,pod",
         "-l",
-        ctx.selector,
+        selector,
         "-n",
         args.namespace,
-        log_stdout=True,  # Show pod status in logs
+        "-o",
+        "wide",
+        check=False,
+        stdout_dest=workload_overview_path,
     )
 
-    if result.stdout.strip():
-        try:
-            import json
-
-            condition = json.loads(result.stdout)
-            status = condition.get("status", "Unknown")
-            reason = condition.get("reason", "Unknown")
-            message = condition.get("message", "No message")
-
-            if status == "True":
-                return f"LLMInferenceService {service_name} is ready"
-            else:
-                return (
-                    False,
-                    f"Service not ready - Status: {status}, Reason: {reason}, Message: {message}",
-                )
-
-        except (json.JSONDecodeError, KeyError) as e:
-            return (False, f"Failed to parse Ready condition: {e}")
-    else:
-        return (False, f"No Ready condition found in status for {service_name}")
+    return f"Captured workload overview to {workload_overview_path}"
 
 
-@retry(attempts=90, delay=10, backoff=1.0)
+@always
 @task
-def resolve_endpoint_task(args, ctx):
-    """Resolve the gateway endpoint URL"""
+def capture_pod_status(args, ctx):
+    """Capture pod status for debugging"""
 
-    endpoint_url = try_resolve_endpoint_url(
-        namespace=args.namespace,
-        inference_service_name=ctx.inference_service_name,
-        gateway_status_address_name=args.gateway_status_address_name,
-    )
-    if endpoint_url:
-        ctx.endpoint_url = endpoint_url
-        write_text(args.artifact_dir / "artifacts" / "endpoint.url", f"{endpoint_url}\n")
-        return f"Endpoint resolved: {endpoint_url}"
-    return False  # Retry
+    if args.dry_run:
+        return "Dry-run, nothing to do"
+
+    try:
+        # Ensure artifacts directory exists
+        artifacts_dir = args.artifact_dir / "artifacts"
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+        # Use selector from context
+        selector = getattr(ctx, "selector", None)
+        if not selector:
+            return "No selector available"
+
+        # Capture pod status with wide output
+        result = oc(
+            "get",
+            "pods",
+            "-l",
+            selector,
+            "-n",
+            args.namespace,
+            "-o",
+            "wide",
+            log_stdout=False,
+            check=False,
+        )
+
+        pod_status_path = artifacts_dir / "pod_status.txt"
+        with open(pod_status_path, "w", encoding="utf-8") as f:
+            f.write(result.stdout)
+
+        return f"Captured pod status to {pod_status_path}"
+
+    except Exception as e:
+        return f"Failed to capture pod status: {e}"
 
 
-def try_resolve_endpoint_url(
-    *, namespace: str, inference_service_name: str, gateway_status_address_name: str
-) -> str | None:
-    payload = oc_get_json("llminferenceservice", name=inference_service_name, namespace=namespace)
+@always
+@task
+def capture_pod_descriptions(args, ctx):
+    """Capture pod descriptions for debugging"""
 
-    for address in payload.get("status", {}).get("addresses", []):
-        if address.get("name") == gateway_status_address_name and address.get("url"):
-            return address["url"]
-    return None
+    if args.dry_run:
+        return "Dry-run, nothing to do"
+
+    try:
+        # Ensure artifacts directory exists
+        artifacts_dir = args.artifact_dir / "artifacts"
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+        # Use selector from context
+        selector = getattr(ctx, "selector", None)
+        if not selector:
+            return "No selector available"
+
+        # Get pod names
+        pod_result = oc(
+            "get",
+            "pods",
+            "-l",
+            selector,
+            "-n",
+            args.namespace,
+            "-o",
+            "jsonpath={.items[*].metadata.name}",
+            log_stdout=False,
+            check=False,
+        )
+
+        pod_names = pod_result.stdout.strip().split()
+        if not pod_names or not pod_result.stdout.strip():
+            pod_desc_path = artifacts_dir / "pod_descriptions.txt"
+            with open(pod_desc_path, "w", encoding="utf-8") as f:
+                f.write("No pods found for the service")
+            return f"No pods found, wrote empty file to {pod_desc_path}"
+
+        # Describe each pod
+        pod_descriptions = []
+        for pod_name in pod_names:
+            describe_result = oc(
+                "describe",
+                "pod",
+                pod_name,
+                "-n",
+                args.namespace,
+                log_stdout=False,
+                check=False,
+            )
+            pod_descriptions.append(
+                f"=== Description for pod: {pod_name} ===\n{describe_result.stdout}"
+            )
+
+        # Save all pod descriptions
+        pod_desc_path = artifacts_dir / "pod_descriptions.txt"
+        with open(pod_desc_path, "w", encoding="utf-8") as f:
+            f.write("\n\n".join(pod_descriptions))
+
+        return f"Captured descriptions for {len(pod_names)} pods to {pod_desc_path}"
+
+    except Exception as e:
+        return f"Failed to capture pod descriptions: {e}"
+
+
+@always
+@task
+def capture_pod_yaml(args, ctx):
+    """Capture pod YAML definitions for debugging"""
+
+    if args.dry_run:
+        return "Dry-run, nothing to do"
+
+    try:
+        # Ensure artifacts directory exists
+        artifacts_dir = args.artifact_dir / "artifacts"
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+        # Use selector from context
+        selector = getattr(ctx, "selector", None)
+        if not selector:
+            return "No selector available"
+
+        # Capture all pod YAMLs
+        result = oc(
+            "get",
+            "pods",
+            "-l",
+            selector,
+            "-n",
+            args.namespace,
+            "-o",
+            "yaml",
+            log_stdout=False,
+            check=False,
+        )
+
+        pod_yaml_path = artifacts_dir / "pod_definitions.yaml"
+        with open(pod_yaml_path, "w", encoding="utf-8") as f:
+            f.write(result.stdout)
+
+        return f"Captured pod YAML definitions to {pod_yaml_path}"
+
+    except Exception as e:
+        return f"Failed to capture pod YAML: {e}"
 
 
 if __name__ == "__main__":
