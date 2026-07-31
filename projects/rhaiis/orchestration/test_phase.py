@@ -304,6 +304,7 @@ def _run_test(
                 config.project.set_config(
                     "caliper.export.mlflow_experiment_id", mlflow_run_meta["experiment_id"]
                 )
+                _write_mlflow_precreated_run_marker(mlflow_run_meta)
         except Exception:
             logger.warning("MLflow run pre-creation failed; continuing", exc_info=True)
 
@@ -582,6 +583,19 @@ def _precreate_mlflow_run() -> dict[str, str]:
         "run_id": run_id,
         "experiment_id": experiment_id,
     }
+
+
+MLFLOW_PRECREATED_RUN_MARKER = "__mlflow_precreated_run__.yaml"
+
+
+def _write_mlflow_precreated_run_marker(meta: dict[str, str]) -> None:
+    """Persist the pre-created MLflow run_id to disk so the export step can resume it."""
+    import yaml
+
+    marker_path = env.ARTIFACT_DIR / MLFLOW_PRECREATED_RUN_MARKER
+    marker_path.parent.mkdir(parents=True, exist_ok=True)
+    marker_path.write_text(yaml.safe_dump(meta, sort_keys=False), encoding="utf-8")
+    logger.info("Wrote MLflow pre-created run marker: %s", marker_path)
 
 
 def _set_mlflow_metadata(

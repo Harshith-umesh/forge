@@ -206,6 +206,9 @@ def run_from_orchestration_config(
 
     run_dirs = discover_run_dirs(from_path)
 
+    # Resume a pre-created MLflow run if the test step left a marker
+    mlflow_run_id = export_cfg.mlflow_run_id or _discover_precreated_mlflow_run_id(from_path)
+
     # Resolve descriptive run names from labels + run_naming config
     naming = resolve_run_names(
         run_dirs, mlflow_config_data, fallback_run_name=export_cfg.mlflow_run_name
@@ -226,7 +229,7 @@ def run_from_orchestration_config(
                 mlflow_run_name=naming.get("parent_run_name"),
                 mlflow_secrets_path=mlflow_secrets_path,
                 mlflow_config_data=mlflow_config_data,
-                mlflow_run_id=export_cfg.mlflow_run_id,
+                mlflow_run_id=mlflow_run_id,
                 child_run_names=naming.get("child_run_names") or {},
                 verbose=export_cfg.verbose,
                 status_yaml_path=status_yaml,
@@ -239,7 +242,7 @@ def run_from_orchestration_config(
 
         mlflow_kwargs: dict[str, Any] = {
             "mlflow_experiment": export_cfg.mlflow_experiment,
-            "mlflow_run_id": export_cfg.mlflow_run_id,
+            "mlflow_run_id": mlflow_run_id,
             "mlflow_run_name": effective_name,
             "mlflow_secrets_path": mlflow_secrets_path,
         }
@@ -261,3 +264,22 @@ def run_from_orchestration_config(
 
     with open(status_yaml) as f:
         return yaml.safe_load(f.read())
+
+
+MLFLOW_PRECREATED_RUN_MARKER = "__mlflow_precreated_run__.yaml"
+
+
+def _discover_precreated_mlflow_run_id(from_path: Path) -> str | None:
+    """Find a pre-created MLflow run_id marker written by the test step."""
+    markers = sorted(from_path.rglob(MLFLOW_PRECREATED_RUN_MARKER))
+    if not markers:
+        return None
+    try:
+        data = yaml.safe_load(markers[0].read_text(encoding="utf-8"))
+        run_id = data.get("run_id") if isinstance(data, dict) else None
+        if run_id:
+            logger.info("Found pre-created MLflow run_id: %s (from %s)", run_id, markers[0])
+        return run_id
+    except (OSError, yaml.YAMLError) as e:
+        logger.warning("Failed to read MLflow pre-created run marker: %s", e)
+        return None
