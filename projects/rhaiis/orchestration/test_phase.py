@@ -295,6 +295,18 @@ def _run_test(
                 logger.exception("Profiler trace upload failed")
                 _warnings.append("Profiler trace upload failed")
 
+        # Pre-create MLflow run so its URL can be embedded in test labels / CSV
+        mlflow_run_meta: dict[str, str] = {}
+        try:
+            mlflow_run_meta = _precreate_mlflow_run()
+            if mlflow_run_meta.get("run_id"):
+                config.project.set_config("caliper.export.mlflow_run_id", mlflow_run_meta["run_id"])
+                config.project.set_config(
+                    "caliper.export.mlflow_experiment_id", mlflow_run_meta["experiment_id"]
+                )
+        except Exception:
+            logger.warning("MLflow run pre-creation failed; continuing", exc_info=True)
+
         # Phase 2: benchmark + post-processing for ALL workloads
         trtllm_cfg = runtime_config.get_trtllm_config() if engine == "trtllm" else None
         for wl_key in workload_keys:
@@ -316,6 +328,8 @@ def _run_test(
                 version=version,
                 cluster_tag=cluster_tag,
                 trtllm_config=trtllm_cfg,
+                mlflow_run_id=mlflow_run_meta.get("run_id", ""),
+                mlflow_experiment_id=mlflow_run_meta.get("experiment_id", ""),
             )
 
         try:
@@ -382,6 +396,8 @@ def _run_workload_benchmark(
     version: str,
     cluster_tag: str,
     trtllm_config: dict | None = None,
+    mlflow_run_id: str = "",
+    mlflow_experiment_id: str = "",
 ) -> None:
     """Run benchmark and post-processing for a single workload.
 
@@ -415,6 +431,8 @@ def _run_workload_benchmark(
             accelerator_chip=gpu_type.upper(),
             run_uuid=run_uuid,
             trtllm_config=trtllm_config,
+            mlflow_run_id=mlflow_run_id,
+            mlflow_experiment_id=mlflow_experiment_id,
         )
 
         if not run_benchmark:
@@ -471,6 +489,8 @@ def _create_test_labels(
     accelerator_chip: str = "",
     run_uuid: str = "",
     trtllm_config: dict | None = None,
+    mlflow_run_id: str = "",
+    mlflow_experiment_id: str = "",
 ) -> None:
     _, image_tag = runtime_config.split_image_tag(serving_image) if serving_image else ("", "")
     parts = [f"{k}: {v}" for k, v in engine_args.items()]
@@ -497,9 +517,71 @@ def _create_test_labels(
         "cluster_tag": cluster_tag,
         "runtime_args": runtime_args,
         "run_uuid": run_uuid,
+        "mlflow_run_id": mlflow_run_id,
+        "mlflow_experiment_id": mlflow_experiment_id,
     }
     write_test_labels(env.ARTIFACT_DIR, labels)
     logger.info("Created test labels: %s", labels)
+
+
+def _precreate_mlflow_run() -> dict[str, str]:
+    """Pre-create an MLflow run so its IDs can be embedded in test labels before CSV generation.
+
+    The run is created and immediately ended (status FINISHED). The export step
+    will resume it via ``mlflow.start_run(run_id=...)`` to upload artifacts.
+
+    Returns a dict with ``run_id`` and ``experiment_id`` on success,
+    or an empty dict if MLflow is unavailable.
+    """
+    from projects.core.library import config
+    from projects.core.library import vault as vault_lib
+
+    vault_name = config.project.get_config(
+        "caliper.export.backend.mlflow.secrets.vault.name", None, print=False, warn=False
+    )
+    vault_key = config.project.get_config(
+        "caliper.export.backend.mlflow.secrets.vault.mlflow_secret", None, print=False, warn=False
+    )
+    if not vault_name or not vault_key:
+        logger.info("MLflow vault not configured, skipping run pre-creation")
+        return {}
+
+    secrets_path = vault_lib.get_vault_content_path(vault_name, vault_key)
+    if not secrets_path or not secrets_path.exists():
+        logger.info("MLflow secrets file not found, skipping run pre-creation")
+        return {}
+
+    experiment = config.project.get_config(
+        "caliper.export.backend.mlflow.config.experiment", None, print=False, warn=False
+    )
+
+    import mlflow
+
+    from projects.caliper.engine.file_export.mlflow_secrets import (
+        load_mlflow_secrets_yaml,
+        mlflow_connection_env,
+    )
+
+    secrets_data = load_mlflow_secrets_yaml(secrets_path)
+    tracking_uri = secrets_data.get("tracking_uri", "")
+
+    with mlflow_connection_env(secrets_data):
+        if tracking_uri:
+            mlflow.set_tracking_uri(tracking_uri)
+        if experiment:
+            mlflow.set_experiment(experiment)
+
+        with mlflow.start_run():
+            active = mlflow.active_run()
+            run_id = active.info.run_id
+            experiment_id = str(active.info.experiment_id)
+
+    logger.info("Pre-created MLflow run %s (experiment=%s)", run_id, experiment_id)
+
+    return {
+        "run_id": run_id,
+        "experiment_id": experiment_id,
+    }
 
 
 def _set_mlflow_metadata(

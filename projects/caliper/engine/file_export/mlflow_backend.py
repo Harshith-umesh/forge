@@ -491,6 +491,7 @@ def log_multi_run_artifacts(
     parameters_file: str,
     tracking_uri: str | None,
     experiment: str | None,
+    run_id: str | None = None,
     parent_run_name: str | None = None,
     insecure_tls: bool = False,
     connection: dict[str, Any] | None = None,
@@ -552,7 +553,9 @@ def log_multi_run_artifacts(
         client = mlflow.tracking.MlflowClient()
 
         start_kw: dict[str, Any] = {}
-        if parent_run_name:
+        if run_id:
+            start_kw["run_id"] = run_id
+        elif parent_run_name:
             start_kw["run_name"] = parent_run_name
 
         with mlflow.start_run(**start_kw) as parent:

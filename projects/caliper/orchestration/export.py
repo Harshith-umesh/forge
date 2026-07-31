@@ -226,6 +226,7 @@ def run_from_orchestration_config(
                 mlflow_run_name=naming.get("parent_run_name"),
                 mlflow_secrets_path=mlflow_secrets_path,
                 mlflow_config_data=mlflow_config_data,
+                mlflow_run_id=export_cfg.mlflow_run_id,
                 child_run_names=naming.get("child_run_names") or {},
                 verbose=export_cfg.verbose,
                 status_yaml_path=status_yaml,

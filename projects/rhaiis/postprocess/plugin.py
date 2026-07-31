@@ -191,6 +191,8 @@ class RhaiisPlugin(PostProcessingPlugin):
             row["guidellm_start_time_ms"] = labels.get("guidellm_start_time_ms", "")
             row["guidellm_end_time_ms"] = labels.get("guidellm_end_time_ms", "")
             row["guidellm_version"] = labels.get("guidellm_version", "")
+            row["mlflow_run_id"] = labels.get("mlflow_run_id", "")
+            row["mlflow_experiment_id"] = labels.get("mlflow_experiment_id", "")
             rows.append(row)
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
