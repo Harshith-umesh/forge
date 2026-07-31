@@ -109,6 +109,11 @@ def _plugin_tuple(ctx: click.Context):
     help="Display parameter matrix summary after parsing (default: enabled).",
 )
 @click.option(
+    "--include-label",
+    multiple=True,
+    help="Include only test directories with matching labels (format: key=value).",
+)
+@click.option(
     "--status-file",
     type=click.Path(path_type=Path),
     default=None,
@@ -120,6 +125,7 @@ def parse_cmd(
     no_cache: bool,
     cache_dir: Path | None,
     show_matrix: bool,
+    include_label: tuple[str, ...],
     status_file: Path | None,
     artifacts_dir: Path | None,
     postprocess_config: Path | None,
@@ -135,6 +141,18 @@ def parse_cmd(
     mod, plugin = _plugin_tuple(ctx)
     artifact_root: Path = _root_obj(ctx)["base_dir"]
 
+    # Parse include-label options into filter dict
+    label_filter = None
+    if include_label:
+        label_filter = {}
+        for label_spec in include_label:
+            if "=" not in label_spec:
+                raise click.BadParameter(
+                    f"Invalid label format '{label_spec}'. Use key=value format."
+                )
+            key, value = label_spec.split("=", 1)
+            label_filter[key.strip()] = value.strip()
+
     status = {"success": False}
 
     try:
@@ -144,6 +162,7 @@ def parse_cmd(
             plugin=plugin,
             use_cache=not no_cache,
             show_parameter_matrix=show_matrix,
+            label_filter=label_filter,
         )
 
         # Extract test directories from test nodes
@@ -173,13 +192,19 @@ def parse_cmd(
             click.echo("⚠️  No test directories found")
 
     except Exception as e:  # noqa: BLE001
+        import traceback
+
+        full_traceback = traceback.format_exc()
         status.update(
             {
                 "success": False,
                 "error": str(e),
+                "traceback": full_traceback,
             }
         )
         click.echo(f"parse failed: {e}", err=True)
+        click.echo("Full traceback:", err=True)
+        click.echo(full_traceback, err=True)
     finally:
         # Write status file if requested
         if status_file:
@@ -614,9 +639,9 @@ def kpi_analyze(
     output: Path,
     plugin_module: str,
 ) -> None:
-    """Analyze KPIs for regression."""
+    """Analyze KPIs for regressions using hierarchical format."""
     try:
-        from projects.caliper.engine.kpi.analyze import find_baseline_kpis
+        from projects.caliper.engine.kpi.analyze_hierarchical import find_most_recent_baseline
         from projects.caliper.engine.load_plugin import load_plugin
 
         # Load plugin for KPI definitions and analysis rules
@@ -627,7 +652,7 @@ def kpi_analyze(
 
         click.echo(f"🔌 Using plugin: {plugin_module}")
 
-        baseline_kpis = find_baseline_kpis(baseline_dir)
+        baseline_kpis = find_most_recent_baseline(baseline_dir)
         if not baseline_kpis:
             click.echo(
                 f"❌ No kpis.json files found in baseline directory: {baseline_dir}", err=True
