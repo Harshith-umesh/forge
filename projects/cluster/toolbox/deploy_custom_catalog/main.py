@@ -77,6 +77,50 @@ def apply_catalog_source(args, ctx):
     return f"Applied CatalogSource {args.catalog_source_name}"
 
 
+@retry(attempts=24, delay=5)  # 2 minutes total (24 * 5s)
+@task
+def wait_for_catalog_source_pod_running(args, ctx):
+    """Wait for the CatalogSource pod to start running"""
+
+    # Search for pod with the catalog source label
+    result = shell.run(
+        f"oc get pods -n {args.catalog_namespace} -l olm.catalogSource={args.catalog_source_name} --no-headers",
+        check=False,
+    )
+    if not result.success:
+        return False
+
+    # Check if we have actual pods (not "No resources found")
+    if "No resources found" in result.stdout:
+        logger.info(f"No pods found yet for catalogSource {args.catalog_source_name}")
+        return False
+
+    # Count pods and check for multiple matches
+    pod_count = len(result.stdout.strip().splitlines())
+    if pod_count != 1:
+        logger.warning(
+            f"Multiple pods ({pod_count}) found for catalogSource {args.catalog_source_name}"
+        )
+
+    # Check for image issues
+    if "ErrImagePull" in result.stdout:
+        raise RuntimeError(f"CatalogSource pod image pull error: {result.stdout.strip()}")
+
+    if "ImagePullBackOff" in result.stdout:
+        raise RuntimeError(f"CatalogSource pod image pull back off: {result.stdout.strip()}")
+
+    # Check for failed pods first - any failure should cause immediate error
+    if "Failed" in result.stdout:
+        raise RuntimeError(f"CatalogSource pod failed to start: {result.stdout.strip()}")
+
+    # Look for Running status in the output
+    if "Running" in result.stdout:
+        return "CatalogSource pod is running"
+
+    # Pods exist but not running yet
+    return False
+
+
 @retry(attempts=60, delay=15)
 @task
 def wait_for_catalog_source_ready(args, ctx):

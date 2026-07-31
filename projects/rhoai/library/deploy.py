@@ -79,9 +79,10 @@ def custom_catalog_pull_secret_path(custom_catalog: dict[str, Any]) -> Path:
     )
     if secret_path is None:
         raise RuntimeError(
-            "RHOAI pull secret content "
-            f"'{catalog.pull_secret.vault.content}' was not found in vault "
-            f"'{catalog.pull_secret.vault.name}'"
+            f"RHOAI custom catalog pull secret is required but not available. "
+            f"Vault '{catalog.pull_secret.vault.name}' with content "
+            f"'{catalog.pull_secret.vault.content}' is MANDATORY when using custom catalog. "
+            f"Please ensure the vault is properly configured and accessible."
         )
     return secret_path
 
@@ -286,9 +287,10 @@ def prepare_rhoai_pull_secret(custom_catalog: RhoaiCustomCatalogConfig) -> None:
     )
     if pull_secret_path is None:
         raise RuntimeError(
-            "RHOAI pull secret content "
-            f"'{custom_catalog.pull_secret.vault.content}' was not found in vault "
-            f"'{custom_catalog.pull_secret.vault.name}'"
+            f"RHOAI custom catalog is enabled, but the required pull secret is not available. "
+            f"Vault '{custom_catalog.pull_secret.vault.name}' with content "
+            f"'{custom_catalog.pull_secret.vault.content}' is MANDATORY when using custom catalog. "
+            f"Please ensure the vault is properly configured and accessible."
         )
 
     current_secret = _current_pull_secret_json()
@@ -325,9 +327,11 @@ def prepare_rhoai_pull_secret(custom_catalog: RhoaiCustomCatalogConfig) -> None:
             )
             if staging_pull_secret_path is None:
                 raise RuntimeError(
-                    "RHOAI staging pull secret content "
-                    f"'{custom_catalog.staging_pull_secret.vault.content}' was not found in vault "
-                    f"'{custom_catalog.staging_pull_secret.vault.name}'"
+                    f"RHOAI custom catalog is enabled with staging pull secret configured, but the "
+                    f"required staging pull secret is not available. "
+                    f"Vault '{custom_catalog.staging_pull_secret.vault.name}' with content "
+                    f"'{custom_catalog.staging_pull_secret.vault.content}' is MANDATORY when staging pull secret is configured. "
+                    f"Please ensure the vault is properly configured and accessible."
                 )
 
             current_secret = _apply_vault_pull_secret(

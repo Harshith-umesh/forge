@@ -229,6 +229,62 @@ def capture_llminferenceservice_describe(args, context):
 
 
 @task
+def capture_workload_overview(args, context):
+    """Capture deployment, replicaset, and pod overview for debugging"""
+
+    workload_overview_path = args.artifact_dir / "artifacts/workload_overview.txt"
+
+    # Capture deployment, replicaset, and pod overview with wide output
+    shell.run(
+        f'oc get deploy,rs,pod -l "app.kubernetes.io/name={args.llmisvc_name}" -n {context.target_namespace} -o wide',
+        stdout_dest=workload_overview_path,
+        check=False,
+    )
+
+    return f"Captured workload overview to {workload_overview_path}"
+
+
+@task
+def capture_workload_descriptions(args, context):
+    """Capture workload descriptions for deployments, replicasets, and pods in a single file"""
+
+    descriptions_file = args.artifact_dir / "artifacts/workload_descriptions.txt"
+
+    with open(descriptions_file, "w") as handle:
+        # Capture deployments descriptions
+        handle.write("=== DEPLOYMENTS ===\n")
+        deploy_result = shell.run(
+            f'oc describe deployments -l "app.kubernetes.io/name={args.llmisvc_name}" -n {context.target_namespace}',
+            log_stdout=False,
+            check=False,
+        )
+        handle.write(deploy_result.stdout)
+        handle.write("\n\n")
+
+        # Capture replicasets descriptions
+        handle.write("=== REPLICASETS ===\n")
+        rs_result = shell.run(
+            f'oc describe replicasets -l "app.kubernetes.io/name={args.llmisvc_name}" -n {context.target_namespace}',
+            log_stdout=False,
+            check=False,
+        )
+        handle.write(rs_result.stdout)
+        handle.write("\n\n")
+
+        # Capture pods descriptions
+        handle.write("=== PODS ===\n")
+        pods_result = shell.run(
+            f'oc describe pods -l "app.kubernetes.io/name={args.llmisvc_name}" -n {context.target_namespace}',
+            log_stdout=False,
+            check=False,
+        )
+        handle.write(pods_result.stdout)
+        handle.write("\n")
+
+    return f"Captured workload descriptions to {descriptions_file}"
+
+
+@task
 def capture_pods_describe(args, context):
     """Capture describe output for related pods"""
     result = shell.run(

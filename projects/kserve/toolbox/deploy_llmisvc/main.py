@@ -16,7 +16,7 @@ from projects.core.dsl import (
     retry,
     task,
 )
-from projects.core.dsl.utils import write_text
+from projects.core.dsl.utils import slugify_identifier, write_text
 from projects.core.dsl.utils.k8s import (
     oc,
     oc_apply,
@@ -77,6 +77,17 @@ def copy_manifest_to_src(args, ctx):
     # Load manifest to extract the service name
     manifest = load_yaml(original_path)
     ctx.inference_service_name = manifest["metadata"]["name"]
+
+    # Validate that the service name is Kubernetes compliant
+    normalized_name = slugify_identifier(ctx.inference_service_name)
+    if normalized_name != ctx.inference_service_name:
+        raise ValueError(
+            f"LLMInferenceService name '{ctx.inference_service_name}' is not Kubernetes compliant. "
+            f"Expected: '{normalized_name}'. "
+            f"Names must be lowercase, contain only letters, numbers, and hyphens, "
+            f"and be 63 characters or less."
+        )
+
     ctx.selector = f"app.kubernetes.io/name={ctx.inference_service_name}"
 
     # Ensure the src directory exists
@@ -161,10 +172,17 @@ def apply_inference_service(args, ctx):
 def wait_pods_appear(args, ctx):
     """Wait for llm-d pods to appear"""
 
-    pods = oc_get_json(
-        "pods", namespace=args.namespace, selector=ctx.selector, ignore_not_found=True
+    # Use plain text output for better readability in logs
+    result = oc(
+        "get", "pods", "-n", args.namespace, "-l", ctx.selector, check=False, log_stdout=True
     )
-    if pods and pods.get("items"):
+
+    # Check if pods appeared (successful command with actual pod output)
+    if (
+        result.returncode == 0
+        and result.stdout.strip()
+        and "No resources found" not in result.stdout
+    ):
         return f"Pods appeared for {ctx.inference_service_name}"
     return False  # Retry
 
@@ -243,6 +261,19 @@ def wait_pods_scheduled(args, ctx):
 
     service_name = ctx.inference_service_name
 
+    # First, check if the LLMInferenceService exists
+    llmisvc_result = oc(
+        "get",
+        "llminferenceservice",
+        service_name,
+        "-n",
+        args.namespace,
+        check=False,
+    )
+
+    if llmisvc_result.returncode != 0:
+        return False, f"LLMInferenceService {service_name} does not exist yet"
+
     # Get pod status using plain text output
     result = oc(
         "get",
@@ -253,8 +284,15 @@ def wait_pods_scheduled(args, ctx):
         args.namespace,
         "--no-headers",
         check=False,
-        log_stdout=False,
     )
+
+    # Check for nonzero return code from pod query
+    if result.returncode != 0:
+        return False, f"Failed to query pods for service {service_name}"
+
+    # Check if pod query result indicates no resources found
+    if "No resources found" in result.stdout:
+        return False, "No pods found for the service yet"
 
     if not result.stdout.strip():
         return False, "No pods found for the service yet"
@@ -269,7 +307,7 @@ def wait_pods_scheduled(args, ctx):
     return f"All pods for {service_name} are scheduled successfully"
 
 
-@retry(attempts=90, delay=10, backoff=1.0)
+@retry(attempts=180, delay=10, backoff=1.0)
 @task
 def wait_service_ready(args, ctx):
     """Wait for LLMInferenceService to be ready"""

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import gzip
+import json
 import logging
 import subprocess
 from pathlib import Path
@@ -23,6 +25,23 @@ from projects.guidellm.toolbox.run_guidellm_benchmark.utils import (
 logger = logging.getLogger(__name__)
 
 
+def trim_benchmark_json(obj):
+    """Remove 'requests' field recursively from JSON data"""
+    if isinstance(obj, dict):
+        return {
+            k: trim_benchmark_json(v)
+            for k, v in obj.items()
+            if k
+            not in [
+                "requests",
+            ]
+        }
+    elif isinstance(obj, list):
+        return [trim_benchmark_json(item) for item in obj]
+    else:
+        return obj
+
+
 @entrypoint
 def run(
     *,
@@ -35,6 +54,7 @@ def run(
     guidellm_args: list[str] | None = None,
     hf_token_secret: str = "",
     fs_group: int | None = None,
+    keep_full_benchmark_file: bool = False,
 ) -> int:
     """
     Run the GuideLLM benchmark against a resolved endpoint.
@@ -49,6 +69,7 @@ def run(
         guidellm_args: List of additional guidellm arguments (e.g., ["--rate=10", "--max-seconds=30"])
         hf_token_secret: Name of the K8s secret containing HF_TOKEN. If empty, HF_TOKEN is not injected.
         fs_group: If set, adds securityContext.fsGroup to the GuideLLM job pod.
+        keep_full_benchmark_file: Whether to keep the full untrimmed benchmark JSON files alongside trimmed ones (default: False)
     """
 
     execute_tasks(locals())
@@ -168,7 +189,7 @@ def create_guidellm_resources_task(args, ctx):
     return f"GuideLLM benchmark {ctx.benchmark_name} created with job as PVC owner"
 
 
-@retry(attempts=1080, delay=10, backoff=1.0)
+@retry(attempts=360, delay=30, backoff=1.0)
 @task
 def wait_guidellm_benchmark_task(args, ctx):
     """Wait for the GuideLLM benchmark job to complete"""
@@ -313,7 +334,6 @@ def extract_results(args, ctx):
 
     results_dir = args.artifact_dir / "artifacts" / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
-    copy_pod = f"{ctx.benchmark_name}-copy"
     extracted_files: list[dict[str, str | None]] = []
     for run in ctx.guidellm_runs:
         if run.rate is None:
@@ -323,10 +343,57 @@ def extract_results(args, ctx):
             remote_path = f"/results/benchmarks-{run.label}.json"
             local_path = results_dir / f"benchmarks-{run.label}.json"
 
-        local_path = _copy_result_file(ctx.target_namespace, copy_pod, remote_path, local_path)
-        if local_path is None:
+        logger.info(f"Retrieving the compressed benchmark file for {run.label}...")
+
+        # Save compressed version to temp file first
+        temp_gz_path = local_path.with_suffix(".json.gz")
+
+        result = oc(
+            "exec",
+            "-n",
+            ctx.target_namespace,
+            f"{ctx.benchmark_name}-copy",
+            "--",
+            "gzip",
+            "-c",
+            remote_path,
+            check=False,
+            log_stdout=False,
+            stdout_dest=temp_gz_path,
+            text=False,
+        )
+        if result.returncode != 0:
             raise RuntimeError(f"No results found for {ctx.benchmark_name} run {run.label}")
 
+        # Extract and parse JSON from local compressed file
+        logger.info(f"Extracting compressed benchmark file for {run.label}...")
+        try:
+            with gzip.open(temp_gz_path, "rt", encoding="utf-8") as f:
+                json_content = f.read()
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to extract compressed results for run {run.label}: {e}"
+            ) from e
+
+        # Always create trimmed version
+        logger.info(f"Trimming the benchmark.json file for {run.label}...")
+        try:
+            raw_data = json.loads(json_content)
+            cleaned_data = trim_benchmark_json(raw_data)
+            with open(local_path, "w") as f:
+                json.dump(cleaned_data, f, separators=(",", ":"))
+        except json.JSONDecodeError:
+            logger.warning(f"Failed to parse JSON for {run.label}, writing raw data")
+            write_text(local_path, json_content)
+
+        # Manage full benchmark file based on flag
+        if not args.keep_full_benchmark_file:
+            # Remove the compressed full file
+            if temp_gz_path.exists():
+                temp_gz_path.unlink()
+                logger.info(f"Removed full benchmark file {temp_gz_path.name}")
+        else:
+            logger.info(f"Keeping full benchmark file {temp_gz_path.name}")
         extracted_files.append(
             {
                 "label": run.label,
@@ -347,69 +414,87 @@ def extract_results(args, ctx):
     return f"Extracted results for {ctx.benchmark_name}"
 
 
-def _copy_result_file(namespace: str, pod: str, remote_path: str, local_path) -> Path | None:
-    """Copy a result file from a pod, compressing first to handle large files.
+def _copy_result_file(
+    namespace: str,
+    pod: str,
+    remote_path: str,
+    local_path: Path,
+    *,
+    trim_json: bool = True,
+    keep_full_file: bool = False,
+) -> Path | None:
+    """Copy a result file from a pod, with optional compression and trimming.
 
-    Falls back to direct ``oc cp`` for small files.
+    Args:
+        namespace: Kubernetes namespace
+        pod: Pod name
+        remote_path: Path to file inside the pod
+        local_path: Local destination path
+        trim_json: Whether to trim large fields from JSON files (default: True)
+        keep_full_file: Whether to keep the full untrimmed file alongside trimmed one (default: False)
+
+    Returns:
+        Path to the copied file, or None if copy failed
     """
     import gzip
-    import shutil
 
-    # Try direct oc cp first
+    # Use compression approach for better handling of large files
+    logger.info(f"Retrieving compressed file from {remote_path}...")
+
+    # Save compressed version to temp file first
+    temp_gz_path = local_path.with_suffix(".json.gz")
+
+    # Compress and stream directly from pod
     result = oc(
-        "cp",
-        f"{namespace}/{pod}:{remote_path}",
-        str(local_path),
-        "-c",
-        "copy-helper",
-        check=False,
-        log_stdout=False,
-    )
-    if result.returncode == 0 and local_path.exists() and local_path.stat().st_size > 0:
-        return local_path
-
-    logging.getLogger(__name__).info(
-        "Direct oc cp failed (rc=%d), retrying with gzip compression",
-        result.returncode,
-    )
-
-    # Compress inside the pod, copy the gz, decompress locally
-    gz_remote = f"{remote_path}.gz"
-    compress = oc(
         "exec",
-        pod,
         "-n",
         namespace,
-        "-c",
-        "copy-helper",
+        pod,
         "--",
         "gzip",
-        "-kf",
+        "-c",
         remote_path,
         check=False,
-    )
-    if compress.returncode != 0:
-        logging.getLogger(__name__).warning("gzip inside pod failed (rc=%d)", compress.returncode)
-        return None
-
-    local_gz = local_path.parent / f"{local_path.name}.gz"
-    cp_result = oc(
-        "cp",
-        f"{namespace}/{pod}:{gz_remote}",
-        str(local_gz),
-        "-c",
-        "copy-helper",
-        check=False,
         log_stdout=False,
+        stdout_dest=temp_gz_path,
+        text=False,
     )
-    if cp_result.returncode != 0 or not local_gz.exists() or local_gz.stat().st_size == 0:
-        logging.getLogger(__name__).warning("oc cp of gzipped file failed")
-        local_gz.unlink(missing_ok=True)
+    if result.returncode != 0:
+        logging.getLogger(__name__).warning("gzip extraction failed (rc=%d)", result.returncode)
         return None
 
-    with gzip.open(local_gz, "rb") as f_in, open(local_path, "wb") as f_out:
-        shutil.copyfileobj(f_in, f_out)
-    local_gz.unlink(missing_ok=True)
+    # Extract and parse JSON from local compressed file
+    try:
+        with gzip.open(temp_gz_path, "rt", encoding="utf-8") as f:
+            json_content = f.read()
+    except Exception as e:
+        logging.getLogger(__name__).warning("Failed to extract compressed results: %s", e)
+        temp_gz_path.unlink(missing_ok=True)
+        return None
+
+    # Create trimmed version if requested and file is JSON
+    if trim_json and local_path.suffix.lower() == ".json":
+        logger.info(f"Trimming JSON file {local_path.name}...")
+        try:
+            raw_data = json.loads(json_content)
+            cleaned_data = trim_benchmark_json(raw_data)
+            with open(local_path, "w") as f:
+                json.dump(cleaned_data, f, separators=(",", ":"))
+        except json.JSONDecodeError:
+            logger.warning(f"Failed to parse JSON, writing raw data to {local_path}")
+            write_text(local_path, json_content)
+    else:
+        # Write raw content for non-JSON files or when trimming is disabled
+        write_text(local_path, json_content)
+
+    # Manage full file based on keep_full_file flag
+    if not keep_full_file:
+        # Remove the compressed full file
+        if temp_gz_path.exists():
+            temp_gz_path.unlink()
+            logger.info(f"Removed full file {temp_gz_path.name}")
+    else:
+        logger.info(f"Keeping full file {temp_gz_path.name}")
 
     if local_path.exists() and local_path.stat().st_size > 0:
         return local_path

@@ -34,6 +34,7 @@ def run(
     log_stderr: bool = True,
     input_text: str | None = None,
     timeout_seconds: float | None = None,
+    text: bool = True,
 ) -> CommandResult:
     """
     Execute a shell command
@@ -47,6 +48,7 @@ def run(
         log_stderr: Optional. If False, don't log the content of stderr.
         input_text: Optional text to send to command's stdin
         timeout_seconds: Optional timeout in seconds
+        text: Optional. If False, handle binary output (default True)
     Returns:
         CommandResult with execution details
     """
@@ -68,14 +70,23 @@ def run(
             shell=shell,
             check=False,  # We handle check ourselves
             capture_output=True,
-            text=True,
             input=input_text,
             timeout=timeout_seconds,
+            text=text,
         )
 
+        # Handle text vs binary output
+        if text:
+            stdout_str = result.stdout or ""
+            stderr_str = result.stderr or ""
+        else:
+            # For binary mode, convert to string representation for CommandResult
+            stdout_str = f"<binary data: {len(result.stdout)} bytes>" if result.stdout else ""
+            stderr_str = result.stderr.decode("utf-8", errors="replace") if result.stderr else ""
+
         cmd_result = CommandResult(
-            stdout=result.stdout or "",
-            stderr=result.stderr or "",
+            stdout=stdout_str,
+            stderr=stderr_str,
             returncode=result.returncode,
             command=command,
         )
@@ -84,34 +95,60 @@ def run(
         if stdout_dest:
             stdout_path = Path(stdout_dest)
             stdout_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(stdout_path, "w") as f:
-                f.write(cmd_result.stdout)
+            with open(stdout_path, "w" if text else "wb") as f:
+                f.write(stdout_str if text else result.stdout)
 
         # Print output in verbose format
-        if result.stdout and result.stdout.strip():
-            if stdout_dest:
-                logger.info(f"| <stdout saved into {stdout_dest}>")
-            elif log_stdout:
-                stdout = result.stdout.strip().splitlines()
-                if len(stdout) == 1:
-                    logger.info(f"| <stdout> {stdout[0]}")
+        if text:
+            if result.stdout:
+                if stdout_dest:
+                    logger.info(f"| <stdout saved into {stdout_dest}>")
+                elif log_stdout:
+                    stdout_lines = stdout_str.strip().splitlines()
+                    if len(stdout_lines) == 1:
+                        logger.info(f"| <stdout> {stdout_lines[0]}")
+                    else:
+                        logger.info("| <stdout>\n" + "\n|   ".join(stdout_lines) + "\n| </stdout>")
                 else:
-                    logger.info("| <stdout>\n" + "\n|   ".join(stdout) + "\n| </stdout>")
-            else:
-                logger.info("| <stdout logging skipped>")
+                    logger.info("| <stdout logging skipped>")
 
-        if result.stderr and result.stderr.strip():
-            if log_stderr:
-                stderr = result.stderr.strip().splitlines()
-                if len(stderr) == 1:
-                    logger.info(f"| <stderr> {stderr[0]}")
+            if result.stderr:
+                if log_stderr:
+                    stderr_lines = stderr_str.strip().splitlines()
+                    if len(stderr_lines) == 1:
+                        logger.info(f"| <stderr> {stderr_lines[0]}")
+                    else:
+                        logger.info("| <stderr>\n" + "\n|   ".join(stderr_lines) + "\n| </stderr>")
                 else:
-                    logger.info("| <stderr>\n" + "\n|   ".join(stderr) + "\n| </stderr")
-            else:
-                logger.info("| <stderr logging skipped>")
+                    logger.info("| <stderr logging skipped>")
 
-        if not (result.stdout.strip() or result.stderr.strip()):
-            logger.info("| <no output>")
+            if not (result.stdout or result.stderr):
+                logger.info("| <no output>")
+        else:
+            # Binary mode - always show lengths
+            if result.stdout:
+                if stdout_dest:
+                    logger.info(
+                        f"| <binary stdout saved into {stdout_dest}> ({len(result.stdout)} bytes)"
+                    )
+                else:
+                    logger.info(f"| <binary stdout> {len(result.stdout)} bytes")
+
+            if result.stderr:
+                # Try to decode stderr as text for logging (it's usually text even in binary mode)
+                try:
+                    stderr_text = result.stderr.decode("utf-8", errors="replace").strip()
+                    if stderr_text:
+                        stderr = stderr_text.splitlines()
+                        if len(stderr) == 1:
+                            logger.info(f"| <stderr> {stderr[0]}")
+                        else:
+                            logger.info("| <stderr>\n" + "\n|   ".join(stderr) + "\n| </stderr>")
+                except Exception:
+                    logger.info(f"| <binary stderr> {len(result.stderr)} bytes")
+
+            if not (result.stdout or result.stderr):
+                logger.info("| <no output>")
 
         if result.returncode != 0:
             logger.info(f"| <exit_code> {result.returncode}")
@@ -122,9 +159,9 @@ def run(
             # Create a more informative error message
             error_msg = f"Command failed with exit code {result.returncode}: {command}"
             if result.stderr:
-                error_msg += f"\nSTDERR: {result.stderr.strip()}"
+                error_msg += f"\nSTDERR: {stderr_str.strip()}"
             if result.stdout:
-                error_msg += f"\nSTDOUT: {result.stdout.strip()}"
+                error_msg += f"\nSTDOUT: {stdout_str.strip()}"
 
             # Create exception with enhanced message
             error = subprocess.CalledProcessError(
