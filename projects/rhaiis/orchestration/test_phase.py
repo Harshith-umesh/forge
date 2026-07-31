@@ -555,6 +555,11 @@ def _precreate_mlflow_run() -> dict[str, str]:
     experiment = config.project.get_config(
         "caliper.export.backend.mlflow.config.experiment", None, print=False, warn=False
     )
+    workspace = config.project.get_config(
+        "caliper.export.backend.mlflow.config.workspace", None, print=False, warn=False
+    )
+
+    import os
 
     import mlflow
 
@@ -566,9 +571,12 @@ def _precreate_mlflow_run() -> dict[str, str]:
     secrets_data = load_mlflow_secrets_yaml(secrets_path)
     tracking_uri = secrets_data.get("tracking_uri", "")
 
+    prev_workspace = os.environ.get("MLFLOW_WORKSPACE")
     with mlflow_connection_env(secrets_data):
         if tracking_uri:
             mlflow.set_tracking_uri(tracking_uri)
+        if workspace:
+            os.environ["MLFLOW_WORKSPACE"] = workspace
         if experiment:
             mlflow.set_experiment(experiment)
 
@@ -576,6 +584,11 @@ def _precreate_mlflow_run() -> dict[str, str]:
             active = mlflow.active_run()
             run_id = active.info.run_id
             experiment_id = str(active.info.experiment_id)
+
+    if prev_workspace is not None:
+        os.environ["MLFLOW_WORKSPACE"] = prev_workspace
+    else:
+        os.environ.pop("MLFLOW_WORKSPACE", None)
 
     logger.info("Pre-created MLflow run %s (experiment=%s)", run_id, experiment_id)
 
