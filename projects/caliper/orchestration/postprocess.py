@@ -495,8 +495,13 @@ def _run_artifacts_to_kpis(
         }
 
     try:
-        # Prepare paths
-        output_file = output_dir / postprocess_config.kpi.artifacts_to_kpis.output
+        # Prepare paths — reject absolute or parent-traversal output names
+        configured_output = postprocess_config.kpi.artifacts_to_kpis.output
+        if Path(configured_output).is_absolute() or ".." in Path(configured_output).parts:
+            raise ValueError(
+                f"kpi.artifacts_to_kpis.output must be a relative path without '..': {configured_output}"
+            )
+        output_file = output_dir / configured_output
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
         # Create temporary status file for subprocess communication
@@ -533,7 +538,7 @@ def _run_artifacts_to_kpis(
 
                 # Read the generated JSONL file
                 kpis = []
-                with open(output_file) as f:
+                with open(output_file, encoding="utf-8") as f:
                     for line in f:
                         line = line.strip()
                         if line:
@@ -542,18 +547,20 @@ def _run_artifacts_to_kpis(
                             kpis.append(json.loads(line))
 
                 if kpis:
-                    # Transform to hierarchical format and write to a separate file
-                    # so the original JSONL is preserved for csv-export
+                    # Save the JSONL to a separate file for csv-export,
+                    # then write the hierarchical JSON to the configured output name
+                    jsonl_file = output_file.with_suffix(".jsonl")
+                    output_file.rename(jsonl_file)
+
                     hierarchical_data = _transform_kpis_to_hierarchical_format(kpis, model)
 
                     import json
 
-                    hierarchical_file = output_file.with_suffix(".hierarchical.json")
-                    with open(hierarchical_file, "w") as f:
+                    with open(output_file, "w", encoding="utf-8") as f:
                         json.dump(hierarchical_data, f, indent=2, ensure_ascii=False)
 
                     logger.info(
-                        f"Successfully transformed {len(kpis)} KPI records to hierarchical format: {hierarchical_file}"
+                        f"Successfully transformed {len(kpis)} KPI records to hierarchical format: {output_file}"
                     )
                 else:
                     logger.warning("No KPI records found in output file")
@@ -807,8 +814,12 @@ def _run_kpis_to_csv(
         }
 
     try:
-        # Create output file path
-        output_file = output_dir / postprocess_config.kpi.kpis_to_csv.output
+        csv_output = postprocess_config.kpi.kpis_to_csv.output
+        if Path(csv_output).is_absolute() or ".." in Path(csv_output).parts:
+            raise ValueError(
+                f"kpi.kpis_to_csv.output must be a relative path without '..': {csv_output}"
+            )
+        output_file = output_dir / csv_output
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
         # Create temporary status file for subprocess communication
@@ -1526,8 +1537,11 @@ class CaliperPostprocessOrchestrator:
             )
             return
 
-        # Path to the JSON file for reference in command logging
-        kpi_json_path = output_dir / self.config.kpi.artifacts_to_kpis.output
+        # csv-export reads the JSONL file (not the hierarchical JSON)
+        configured_output = Path(self.config.kpi.artifacts_to_kpis.output)
+        kpi_json_path = output_dir / configured_output.with_suffix(".jsonl")
+        if not kpi_json_path.exists():
+            kpi_json_path = output_dir / configured_output
         result = _run_kpis_to_csv(
             self.config,
             plugin,

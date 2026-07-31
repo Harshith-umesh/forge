@@ -4,6 +4,9 @@ import json
 import logging
 import os
 import uuid as _uuid_mod
+from pathlib import Path
+
+import yaml
 
 from projects.core.library import env
 from projects.core.library.postprocess import run_and_postprocess, write_test_labels
@@ -13,6 +16,12 @@ logger = logging.getLogger(__name__)
 
 _K8S_NAME_MAX = 63
 _warnings: list[str] = []
+
+
+def _write_manifest(manifest: dict, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.dump(manifest, f, default_flow_style=False, sort_keys=False)
 
 
 def _guidellm_job_name(prefix: str, workload_key: str, deployment_name: str) -> str:
@@ -225,10 +234,15 @@ def _run_test(
             service_account_name=deploy_cfg.get("service_account_name", ""),
             labels=isvc_labels,
         )
+        sr_file = env.ARTIFACT_DIR / "src" / "servingruntime.yaml"
+        isvc_file = env.ARTIFACT_DIR / "src" / "inferenceservice.yaml"
+        _write_manifest(sr_manifest, sr_file)
+        _write_manifest(isvc_manifest, isvc_file)
+
         deploy_kserve_isvc(
             namespace=namespace,
-            servingruntime_manifest=sr_manifest,
-            inferenceservice_manifest=isvc_manifest,
+            servingruntime_file=str(sr_file),
+            inferenceservice_file=str(isvc_file),
         )
 
         logger.info("Waiting for InferenceService to be ready")

@@ -139,7 +139,7 @@ spec:
       args: [nvidia]
       configOverrides:
         tests.rhaiis.model_key: nemotron3super-120b-fp8
-        rhaiis.images.nvidia: vllm/vllm-openai:v0.24.0
+        rhaiis.engines.vllm.images.nvidia: vllm/vllm-openai:v0.24.0
         tests.rhaiis.version: "vLLM-0.24.0"
         tests.rhaiis.workload_keys: ["profile1","profile2","profile4"]
         rhaiis.engines.vllm.args.tensor-parallel-size: 2
@@ -148,7 +148,7 @@ spec:
         caliper.postprocess.csv_dashboard.enabled: true
         benchmarks.guidellm.fs_group: 0  # opt-in for IBM Cloud clusters
   env:
-    PULL_PULL_SHA: "<commit-sha>"
+    PULL_PULL_SHA: "<commit-sha-or-release-tag>"  # e.g. forge-rhaiis-v0.0.2
 ```
 
 ### FournosJob YAML (SGLang)
@@ -187,7 +187,7 @@ spec:
         caliper.postprocess.csv_dashboard.enabled: true
         benchmarks.guidellm.fs_group: 0
   env:
-    PULL_PULL_SHA: "<commit-sha>"
+    PULL_PULL_SHA: "<commit-sha-or-release-tag>"  # e.g. forge-rhaiis-v0.0.2
 ```
 
 ### FournosJob YAML (TRT-LLM)
@@ -237,7 +237,7 @@ spec:
         caliper.postprocess.csv_dashboard.enabled: true
         benchmarks.guidellm.fs_group: 0
   env:
-    PULL_PULL_SHA: "<commit-sha>"
+    PULL_PULL_SHA: "<commit-sha-or-release-tag>"  # e.g. forge-rhaiis-v0.0.2
 ```
 
 ### GitHub PR workflow
