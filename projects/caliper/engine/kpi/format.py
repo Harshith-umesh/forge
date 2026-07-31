@@ -290,12 +290,14 @@ def read_kpis_from_file(file_path: Path) -> list[dict]:
                         "higher_is_better": kpi_record.get("higher_is_better", True),
                     }
 
+                    run_id = test_metadata.get("run_id")
                     flat_kpi = {
                         "schema_version": "1",
                         "kpi_id": kpi_record.get("id"),
                         "value": converted_value,
                         "unit": kpi_record.get("unit"),
-                        "run_id": test_metadata.get("run_id"),
+                        "run_id": run_id,
+                        "run_path": run_id,
                         "timestamp": test_metadata.get("timestamp"),
                         "labels": merged_labels,
                         "source": test_metadata.get("source", {}),
