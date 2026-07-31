@@ -10,6 +10,10 @@ janus:
   platform.gateway.status_address_name: null
   platform.gateway.status_address_name: gateway-internal
 
+  cpt.kpi.labels.platform_name: OCP
+  cpt.kpi.labels.gpu_type: H200
+  cpt.kpi.labels.test_harness: xks
+
 janus-intelligent:
   extends:
   - janus

@@ -17,6 +17,10 @@ cks:
   platform.inference_service.scheduler.node_selector:
     gpu.nvidia.com/class: H200
 
+  cpt.kpi.labels.platform_name: CKS
+  cpt.kpi.labels.gpu_type: H200
+  cpt.kpi.labels.test_harness: xks
+
 cks-intelligent:
   extends:
   - cks
