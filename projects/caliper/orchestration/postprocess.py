@@ -1736,35 +1736,25 @@ class CaliperPostprocessOrchestrator:
             )
             return
 
-        # Get KPI file path from artifacts_to_kpis step
-        artifacts_to_kpis_step = self._get_step("artifacts_to_kpis")
-        if not artifacts_to_kpis_step or artifacts_to_kpis_step.get("status") != "success":
+        # Get current KPI file path from config
+        current_kpis_file = Path(self.config.analyze.current_kpis)
+        if not current_kpis_file.is_absolute():
+            current_kpis_path = output_dir / current_kpis_file
+        else:
+            current_kpis_path = current_kpis_file
+
+        # Check if current KPI file exists
+        if not current_kpis_path.exists():
             self._add_step(
                 "analyse_kpis",
                 {
                     "status": "failed",
-                    "error": "artifacts_to_kpis step did not complete successfully",
+                    "error": f"Current KPI file not found: {current_kpis_path}",
                     "completed_at": time.time(),
                 },
             )
             self.analyze_failed = True
             return
-
-        current_kpis_file = artifacts_to_kpis_step.get("output_file")
-        if not current_kpis_file:
-            self._add_step(
-                "analyse_kpis",
-                {
-                    "status": "failed",
-                    "error": "No output file found in artifacts_to_kpis step",
-                    "completed_at": time.time(),
-                },
-            )
-            self.analyze_failed = True
-            return
-
-        # Convert relative path back to absolute path
-        current_kpis_path = env.ARTIFACT_DIR / current_kpis_file
 
         result = _run_analyse_kpis(
             postprocess_config=self.config,
