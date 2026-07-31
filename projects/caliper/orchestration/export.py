@@ -206,8 +206,10 @@ def run_from_orchestration_config(
 
     run_dirs = discover_run_dirs(from_path)
 
-    # Resume a pre-created MLflow run if the test step left a marker
-    mlflow_run_id = export_cfg.mlflow_run_id or _discover_precreated_mlflow_run_id(from_path)
+    # Resume a pre-created MLflow run if the test step left a marker or test labels
+    mlflow_run_id = export_cfg.mlflow_run_id or _discover_precreated_mlflow_run_id(
+        from_path, run_dirs
+    )
 
     # Resolve descriptive run names from labels + run_naming config
     naming = resolve_run_names(
@@ -269,17 +271,45 @@ def run_from_orchestration_config(
 MLFLOW_PRECREATED_RUN_MARKER = "__mlflow_precreated_run__.yaml"
 
 
-def _discover_precreated_mlflow_run_id(from_path: Path) -> str | None:
-    """Find a pre-created MLflow run_id marker written by the test step."""
+def _discover_precreated_mlflow_run_id(
+    from_path: Path, run_dirs: list[Path] | None = None
+) -> str | None:
+    """Find a pre-created MLflow run_id from the marker file or test labels.
+
+    Strategy:
+    1. Look for the dedicated ``__mlflow_precreated_run__.yaml`` marker.
+    2. If not found, fall back to reading ``mlflow_run_id`` from the first
+       ``__test_labels__.yaml`` that contains it (same files that
+       ``_discover_run_dirs`` already found).
+    """
+    # --- attempt 1: dedicated marker file ---
     markers = sorted(from_path.rglob(MLFLOW_PRECREATED_RUN_MARKER))
-    if not markers:
-        return None
-    try:
-        data = yaml.safe_load(markers[0].read_text(encoding="utf-8"))
-        run_id = data.get("run_id") if isinstance(data, dict) else None
-        if run_id:
-            logger.info("Found pre-created MLflow run_id: %s (from %s)", run_id, markers[0])
-        return run_id
-    except (OSError, yaml.YAMLError) as e:
-        logger.warning("Failed to read MLflow pre-created run marker: %s", e)
-        return None
+    for marker in markers:
+        try:
+            data = yaml.safe_load(marker.read_text(encoding="utf-8"))
+            run_id = data.get("run_id") if isinstance(data, dict) else None
+            if run_id:
+                logger.info("Found pre-created MLflow run_id: %s (from marker %s)", run_id, marker)
+                return run_id
+        except (OSError, yaml.YAMLError) as e:
+            logger.warning("Failed to read MLflow pre-created run marker %s: %s", marker, e)
+
+    # --- attempt 2: read from test labels ---
+    TEST_LABELS_MARKER = "__test_labels__.yaml"
+    dirs_to_scan = run_dirs if run_dirs else []
+    for run_dir in dirs_to_scan:
+        labels_path = run_dir / TEST_LABELS_MARKER
+        if not labels_path.is_file():
+            continue
+        try:
+            labels = yaml.safe_load(labels_path.read_text(encoding="utf-8"))
+            run_id = labels.get("mlflow_run_id") if isinstance(labels, dict) else None
+            if run_id:
+                logger.info(
+                    "Found pre-created MLflow run_id: %s (from test labels %s)", run_id, labels_path
+                )
+                return run_id
+        except (OSError, yaml.YAMLError) as e:
+            logger.warning("Failed to read test labels %s: %s", labels_path, e)
+
+    return None
