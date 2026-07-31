@@ -1009,13 +1009,14 @@ class CaliperPostprocessOrchestrator:
 
         # State tracking
         self.steps: list[dict[str, Any]] = []
-        self.parse_failed = False
-        self.visualize_failed = False
-        self.artifacts_to_kpis_failed = False
-        self.ai_data_failed = False
-        self.s3_import_failed = False
-        self.analyze_failed = False
-        self.s3_export_failed = False
+        # Initialize failure flags to None (skipped), will be set to False (success) or True (failure)
+        self.parse_failed = None
+        self.visualize_failed = None
+        self.artifacts_to_kpis_failed = None
+        self.ai_data_failed = None
+        self.s3_import_failed = None
+        self.analyze_failed = None
+        self.s3_export_failed = None
 
         # Configuration
         try:
@@ -1147,7 +1148,7 @@ class CaliperPostprocessOrchestrator:
         self.steps.append({step_name: step_data})
 
     def _check_step_result_and_set_failure(self, step_name: str, result: dict[str, Any]) -> bool:
-        """Check step result status and set appropriate failure flag if needed.
+        """Check step result status and set appropriate failure flag.
 
         Args:
             step_name: Name of the step
@@ -1157,31 +1158,40 @@ class CaliperPostprocessOrchestrator:
             True if step failed or warned, False if successful
         """
         status = result.get("status")
+
+        # Map step names to their failure flags
+        step_failure_map = {
+            "artifacts_to_kpis": "artifacts_to_kpis_failed",
+            "artifacts_to_ai_data": "ai_data_failed",
+            "s3_import": "s3_import_failed",
+            "analyse_kpis": "analyze_failed",
+            "s3_export": "s3_export_failed",
+        }
+
+        failure_attr = step_failure_map.get(step_name)
+        if not failure_attr:
+            return False
+
         if status in ("failed", "warning"):
-            # Map step names to their failure flags
-            step_failure_map = {
-                "artifacts_to_kpis": "artifacts_to_kpis_failed",
-                "artifacts_to_ai_data": "ai_data_failed",
-                "s3_import": "s3_import_failed",
-                "analyse_kpis": "analyze_failed",
-                "s3_export": "s3_export_failed",
-            }
+            setattr(self, failure_attr, True)
 
-            failure_attr = step_failure_map.get(step_name)
-            if failure_attr:
-                setattr(self, failure_attr, True)
-
-                if status == "warning":
-                    warning_msg = result.get("message", "unknown warning")
-                    logger.warning(f"Step '{step_name}' completed with warning: {warning_msg}")
-                elif status == "failed":
-                    error_msg = result.get("error", "unknown error")
-                    traceback_msg = result.get("traceback")
-                    logger.error(f"Step '{step_name}' failed: {error_msg}")
-                    if traceback_msg:
-                        logger.error("Full traceback:\n%s", traceback_msg)
+            if status == "warning":
+                warning_msg = result.get("message", "unknown warning")
+                logger.warning(f"Step '{step_name}' completed with warning: {warning_msg}")
+            elif status == "failed":
+                error_msg = result.get("error", "unknown error")
+                traceback_msg = result.get("traceback")
+                logger.error(f"Step '{step_name}' failed: {error_msg}")
+                if traceback_msg:
+                    logger.error("Full traceback:\n%s", traceback_msg)
 
             return True
+        elif status == "success":
+            # Set flag to False for successful steps
+            setattr(self, failure_attr, False)
+            return False
+
+        # For other statuses (disabled, etc.), leave flag as None
         return False
 
     def _get_step(self, step_name: str) -> dict[str, Any]:
@@ -1263,6 +1273,7 @@ class CaliperPostprocessOrchestrator:
             )
 
             if result.returncode == 0 and status_data and status_data.get("success", False):
+                self.parse_failed = False
                 self._add_step(
                     "parse",
                     {
@@ -1381,6 +1392,7 @@ class CaliperPostprocessOrchestrator:
                     # If output_dir is not under ARTIFACT_DIR, use absolute path
                     relative_output_dir = str(output_dir)
 
+                self.visualize_failed = False
                 self._add_step(
                     "visualize",
                     {
@@ -1927,7 +1939,6 @@ class CaliperPostprocessOrchestrator:
         logger.info(f"  s3_import_failed: {self.s3_import_failed}")
         logger.info(f"  analyze_failed: {self.analyze_failed}")
         logger.info(f"  s3_export_failed: {self.s3_export_failed}")
-        logger.info(f"  analyze_failed: {self.analyze_failed}")
 
         final_status = compute_final_postprocess_status(
             test_outcome=self.test_outcome,
