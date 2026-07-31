@@ -546,11 +546,6 @@ def _run_artifacts_to_kpis(
                             kpis.append(json.loads(line))
 
                 if kpis:
-                    # Save the JSONL to a separate file for csv-export,
-                    # then write the hierarchical JSON to the configured output name
-                    jsonl_file = output_file.with_suffix(".jsonl")
-                    output_file.rename(jsonl_file)
-
                     hierarchical_data = _transform_kpis_to_hierarchical_format(kpis, model)
 
                     import json
@@ -559,7 +554,7 @@ def _run_artifacts_to_kpis(
                         json.dump(hierarchical_data, f, indent=2, ensure_ascii=False)
 
                     logger.info(
-                        f"Successfully transformed {len(kpis)} KPI records to hierarchical format: {output_file}"
+                        f"Successfully transformed {len(kpis)} KPI records to hierarchical format"
                     )
                 else:
                     logger.warning("No KPI records found in output file")
@@ -1563,11 +1558,7 @@ class CaliperPostprocessOrchestrator:
             )
             return
 
-        # csv-export reads the JSONL file (not the hierarchical JSON)
-        configured_output = Path(self.config.kpi.artifacts_to_kpis.output)
-        kpi_json_path = output_dir / configured_output.with_suffix(".jsonl")
-        if not kpi_json_path.exists():
-            kpi_json_path = output_dir / configured_output
+        kpi_json_path = output_dir / self.config.kpi.artifacts_to_kpis.output
         result = _run_kpis_to_csv(
             self.config,
             plugin,

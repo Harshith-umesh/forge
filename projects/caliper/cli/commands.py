@@ -544,16 +544,10 @@ def kpi_csv_export(
     status_data = {"success": False}
 
     try:
-        # Read KPI JSON Lines file (one JSON object per line)
-        import json
+        # Read KPI file (supports both hierarchical JSON and JSONL formats)
+        from projects.caliper.engine.kpi.format import read_kpis_from_file
 
-        kpi_records = []
-        with open(input_file, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:  # Skip empty lines
-                    kpi_record = json.loads(line)
-                    kpi_records.append(kpi_record)
+        kpi_records = read_kpis_from_file(input_file)
 
         # Export to CSV
         from projects.caliper.engine.kpi.csv_export import export_kpis_to_csv
