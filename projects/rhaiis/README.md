@@ -3,10 +3,11 @@
 `rhaiis` is the Forge project for benchmarking AI inference engines on OpenShift
 using KServe InferenceService.
 
-The current implementation focuses on single-replica vLLM deployments benchmarked
-with GuideLLM. The workflow deploys an InferenceService, runs warmup and/or
-profiler passes, executes multi-profile benchmarks, generates a dashboard CSV via
-the Caliper postprocessing pipeline, syncs results to S3, and cleans up.
+Supports **vLLM**, **SGLang**, and **TRT-LLM** engines via a generic abstraction.
+The workflow deploys an InferenceService with the selected engine, runs warmup
+and/or profiler passes, executes multi-profile GuideLLM benchmarks, generates a
+dashboard CSV via the Caliper postprocessing pipeline, syncs results to S3, and
+cleans up.
 
 ## Workflow sequence
 
@@ -54,7 +55,7 @@ to the canonical runner.
 Config is split into `config.yaml` (base) and `config.d/` (per-domain):
 
 - [`orchestration/config.yaml`](./orchestration/config.yaml) — vaults, benchmarks, tests, caliper postprocessing
-- [`orchestration/config.d/rhaiis.yaml`](./orchestration/config.d/rhaiis.yaml) — deploy defaults, vLLM args, images, gpu_types, S3 settings, profiler
+- [`orchestration/config.d/rhaiis.yaml`](./orchestration/config.d/rhaiis.yaml) — deploy defaults, engine config (vLLM/SGLang/TRT-LLM), images, gpu_types, S3 settings, profiler
 - [`orchestration/config.d/models.yaml`](./orchestration/config.d/models.yaml) — 52 model definitions
 - [`orchestration/config.d/workloads.yaml`](./orchestration/config.d/workloads.yaml) — workload profiles
 
@@ -62,14 +63,43 @@ Key sections:
 
 | Section | Purpose |
 |---------|---------|
-| `rhaiis` | Namespace, accelerator, vLLM images, deploy settings, vLLM args, S3 config |
+| `rhaiis` | Namespace, accelerator, deploy settings, S3 config |
+| `rhaiis.engine` | Active engine: `vllm` (default), `sglang`, or `trtllm` |
+| `rhaiis.engines.{vllm,sglang,trtllm}` | Per-engine images, port, and default args |
+| `rhaiis.engines.trtllm.trtllm_config` | TRT-LLM server config (KV cache, CUDA graphs, MoE) |
+| `rhaiis.deploy` | Deploy settings (replicas, CPU/memory, image_pull_secrets list, storage) |
 | `rhaiis.s3` | S3 bucket, vault, and credentials for dashboard CSV and profiler trace uploads |
 | `rhaiis.profiler` | PyTorch profiler settings (enable, S3 prefix, rates, labels) |
-| `models` | Model definitions (hf_model_id, per-model vLLM overrides) |
+| `models` | Model definitions (hf_model_id, per-model `engine_args` overrides) |
 | `workloads` | Benchmark profiles (data shape, rates, max_seconds) |
-| `benchmarks.guidellm` | GuideLLM image, backend, timeout, PVC size, HF token secret |
+| `benchmarks.guidellm` | GuideLLM image, backend, timeout, PVC size, HF token secret, fs_group |
 | `tests` | CI test mapping (model_key, workload_keys, version) |
 | `caliper.postprocess` | Caliper postprocessing pipeline (parse, KPI, CSV export) |
+
+## Engine support
+
+rhaiis supports three inference engines via a generic abstraction:
+
+| Engine | Config key | Image source | TP arg | Notes |
+|--------|-----------|-------------|--------|-------|
+| vLLM | `rhaiis.engine: vllm` (default) | `rhaiis.engines.vllm.images` | `tensor-parallel-size` | No root required |
+| SGLang | `rhaiis.engine: sglang` | `rhaiis.engines.sglang.images` | `tp-size` | No root required, uses `sglang serve` entrypoint |
+| TRT-LLM | `rhaiis.engine: trtllm` | `rhaiis.engines.trtllm.images` | `tp_size` | Requires root (`anyuid` SCC), NGC pull secret |
+
+Models define `engine_args` with vLLM-style keys (e.g. `tensor-parallel-size`).
+When running with SGLang or TRT-LLM, arguments are automatically translated
+(e.g. `tensor-parallel-size` → `tp-size` for SGLang, `tp_size` for TRT-LLM).
+
+Engine-specific args can also be set directly via `rhaiis.engines.<engine>.args.*`
+in FournosJob `configOverrides`, which take precedence over model-level `engine_args`.
+
+TRT-LLM additionally supports a `trtllm_config` block for server-side configuration
+(KV cache, CUDA graphs, MoE backend, etc.) that is serialized as a JSON config file
+inside the container.
+
+KServe manifests (ServingRuntime + InferenceService) are built as Python dicts in
+`orchestration/manifests.py` with engine-specific container construction, then
+passed to the generic `deploy_kserve_isvc` tool for application.
 
 ## Fournos integration
 
@@ -85,7 +115,7 @@ bin/run_ci rhaiis ci post-cleanup             # Detect pipeline failures, cleanu
 bin/run_ci rhaiis ci export-artifacts         # Caliper export to MLflow
 ```
 
-### FournosJob YAML
+### FournosJob YAML (vLLM)
 
 ```yaml
 apiVersion: fournos.dev/v1
@@ -97,6 +127,12 @@ spec:
   displayName: rhaiis-benchmark
   pipeline: forge-full
   cluster: zeus
+  hardware:
+    gpuType: h200
+    gpuCount: 2
+  secretRefs:
+  - psap-forge-dashboard-s3
+  - psap-forge-notifications
   executionEngine:
     forge:
       project: rhaiis
@@ -106,10 +142,100 @@ spec:
         rhaiis.images.nvidia: vllm/vllm-openai:v0.24.0
         tests.rhaiis.version: "vLLM-0.24.0"
         tests.rhaiis.workload_keys: ["profile1","profile2","profile4"]
-        rhaiis.vllm_args.tensor-parallel-size: 2
+        rhaiis.engines.vllm.args.tensor-parallel-size: 2
         rhaiis.cluster_tag: "zeus2"
-        rhaiis.deploy.image_pull_secret: npalaska-image-pull
+        rhaiis.deploy.image_pull_secrets: ["npalaska-image-pull"]
         caliper.postprocess.csv_dashboard.enabled: true
+        benchmarks.guidellm.fs_group: 0  # opt-in for IBM Cloud clusters
+  env:
+    PULL_PULL_SHA: "<commit-sha>"
+```
+
+### FournosJob YAML (SGLang)
+
+```yaml
+apiVersion: fournos.dev/v1
+kind: FournosJob
+metadata:
+  generateName: sglang-benchmark-
+spec:
+  owner: haumesh
+  displayName: sglang-benchmark
+  pipeline: forge-full
+  cluster: zeus
+  hardware:
+    gpuType: h200
+    gpuCount: 2
+  secretRefs:
+  - psap-forge-dashboard-s3
+  - psap-forge-notifications
+  executionEngine:
+    forge:
+      project: rhaiis
+      args: [nvidia]
+      configOverrides:
+        tests.rhaiis.model_key: nemotron3super-120b-fp8
+        tests.rhaiis.version: "SGLang-0.5.11"
+        tests.rhaiis.workload_keys: ["profile1"]
+        rhaiis.engine: sglang
+        rhaiis.engines.sglang.args.tp-size: 2
+        rhaiis.engines.sglang.args.disable-radix-cache: true
+        rhaiis.engines.sglang.args.mem-fraction-static: 0.90
+        rhaiis.engines.sglang.args.context-length: 8192
+        rhaiis.engines.sglang.args.trust-remote-code: true
+        rhaiis.deploy.image_pull_secrets: ["npalaska-image-pull"]
+        caliper.postprocess.csv_dashboard.enabled: true
+        benchmarks.guidellm.fs_group: 0
+  env:
+    PULL_PULL_SHA: "<commit-sha>"
+```
+
+### FournosJob YAML (TRT-LLM)
+
+TRT-LLM requires the `anyuid` SCC on the target cluster (`oc adm policy add-scc-to-user anyuid -z default -n <namespace>`).
+
+```yaml
+apiVersion: fournos.dev/v1
+kind: FournosJob
+metadata:
+  generateName: trtllm-benchmark-
+spec:
+  owner: haumesh
+  displayName: trtllm-benchmark
+  pipeline: forge-full
+  cluster: zeus
+  hardware:
+    gpuType: h200
+    gpuCount: 2
+  secretRefs:
+  - psap-forge-dashboard-s3
+  - psap-forge-notifications
+  executionEngine:
+    forge:
+      project: rhaiis
+      args: [nvidia]
+      configOverrides:
+        tests.rhaiis.model_key: nemotron3super-120b-fp8
+        tests.rhaiis.version: "TRT-LLM-1.3.0rc13"
+        tests.rhaiis.workload_keys: ["profile1"]
+        rhaiis.engine: trtllm
+        rhaiis.deploy.image_pull_secrets: ["npalaska-image-pull", "ngc-secret"]
+        rhaiis.deploy.memory_request: "256Gi"
+        # Engine args
+        rhaiis.engines.trtllm.args.tp_size: 2
+        rhaiis.engines.trtllm.args.ep_size: 2
+        rhaiis.engines.trtllm.args.max_batch_size: 256
+        rhaiis.engines.trtllm.args.max_num_tokens: 8192
+        rhaiis.engines.trtllm.args.trust_remote_code: true
+        # TRT-LLM server config
+        rhaiis.engines.trtllm.trtllm_config.kv_cache_config.dtype: fp8
+        rhaiis.engines.trtllm.trtllm_config.kv_cache_config.free_gpu_memory_fraction: 0.8
+        rhaiis.engines.trtllm.trtllm_config.cuda_graph_config.enable_padding: true
+        rhaiis.engines.trtllm.trtllm_config.cuda_graph_config.max_batch_size: 256
+        rhaiis.engines.trtllm.trtllm_config.enable_attention_dp: true
+        rhaiis.engines.trtllm.trtllm_config.moe_config.backend: TRTLLM
+        caliper.postprocess.csv_dashboard.enabled: true
+        benchmarks.guidellm.fs_group: 0
   env:
     PULL_PULL_SHA: "<commit-sha>"
 ```
@@ -125,7 +251,7 @@ Jobs can also be triggered via PR comments on `openshift-psap/forge`:
 /var tests.rhaiis.model_key: nemotron3super-120b-fp8
 /var tests.rhaiis.version: vLLM-0.24.0
 /var tests.rhaiis.workload_keys: ["profile1"]
-/var rhaiis.vllm_args.tensor-parallel-size: 2
+/var rhaiis.engines.vllm.args.tensor-parallel-size: 2
 ```
 
 Note: `/var` directives use `key: value` format (colon required).
@@ -144,18 +270,23 @@ Available configOverrides:
 | `tests.rhaiis.warmup` | Enable warmup pass before benchmarks |
 | `tests.rhaiis.slack_user` | Slack user ID for failure notifications |
 | `tests.rhaiis.compare_version` | Baseline version for regression comparison |
+| `rhaiis.engine` | Inference engine: `vllm` (default), `sglang`, `trtllm` |
 | `rhaiis.namespace` | Kubernetes namespace |
 | `rhaiis.cluster_tag` | Cluster identifier for dashboard grouping |
-| `rhaiis.deploy.image_pull_secret` | Image pull secret name |
+| `rhaiis.deploy.image_pull_secrets` | List of image pull secret names |
 | `rhaiis.deploy.storage_pvc` | PVC name for model storage |
 | `rhaiis.deploy.replicas` | Number of predictor replicas |
-| `rhaiis.images.nvidia` | vLLM container image override |
-| `rhaiis.vllm_args.tensor-parallel-size` | Tensor parallel size |
+| `rhaiis.deploy.memory_request` | Memory request for predictor (e.g. `256Gi` for TRT-LLM) |
+| `rhaiis.engines.vllm.args.*` | vLLM CLI args (e.g. `tensor-parallel-size`, `gpu-memory-utilization`) |
+| `rhaiis.engines.sglang.args.*` | SGLang CLI args (e.g. `tp-size`, `mem-fraction-static`, `context-length`) |
+| `rhaiis.engines.trtllm.args.*` | TRT-LLM CLI args (e.g. `tp_size`, `ep_size`, `max_batch_size`) |
+| `rhaiis.engines.trtllm.trtllm_config.*` | TRT-LLM server config (kv_cache, cuda_graph, moe) |
 | `rhaiis.profiler.enabled` | Enable PyTorch profiler |
 | `rhaiis.agent_analysis.enabled` | Enable AI agent regression analysis |
 | `caliper.postprocess.csv_dashboard.enabled` | Enable dashboard CSV S3 sync |
 | `benchmarks.guidellm.timeout` | Benchmark timeout in seconds |
 | `benchmarks.guidellm.hf_token_secret` | K8s secret name for HF_TOKEN (omit to skip) |
+| `benchmarks.guidellm.fs_group` | Pod-level fsGroup for PVC permissions (disabled by default) |
 
 Monitoring Fournos jobs:
 ```bash
@@ -174,6 +305,8 @@ oc patch fournosjob <name> -n psap-automation \
 - CI: [`orchestration/ci.py`](./orchestration/ci.py) (Fournos pipeline)
 - CI test: [`orchestration/test_rhaiis.py`](./orchestration/test_rhaiis.py)
 - Test phase: [`orchestration/test_phase.py`](./orchestration/test_phase.py)
+- Manifests: [`orchestration/manifests.py`](./orchestration/manifests.py) (KServe ServingRuntime + InferenceService builders)
+- Runtime config: [`orchestration/runtime_config.py`](./orchestration/runtime_config.py) (engine-aware config helpers)
 - Analysis: [`orchestration/analysis.py`](./orchestration/analysis.py)
 - Notifications: [`orchestration/notifications.py`](./orchestration/notifications.py)
 
@@ -181,7 +314,7 @@ oc patch fournosjob <name> -n psap-automation \
 
 | Command | Source | Purpose |
 |---------|--------|---------|
-| `deploy_kserve_isvc` | [rhaiis](./toolbox/deploy_kserve_isvc/) | Render and apply KServe InferenceService + ServingRuntime with configurable labels |
+| `deploy_kserve_isvc` | [rhaiis](./toolbox/deploy_kserve_isvc/) | Apply pre-built KServe InferenceService + ServingRuntime manifests |
 | `wait_isvc_ready` | [rhaiis](./toolbox/wait_isvc_ready/) | Poll InferenceService readiness with health check |
 | `run_guidellm_benchmark` | [canonical](../guidellm/toolbox/run_guidellm_benchmark/) | Run GuideLLM benchmark (shared with llm_d) |
 | `capture_isvc_state` | [rhaiis](./toolbox/capture_isvc_state/) | Capture InferenceService YAML, pod logs, events, describe output |
@@ -253,13 +386,13 @@ Available overrides:
 |------|---------------|-------------|
 | `--rates` | `workloads.<key>.rates` | Comma-separated concurrency levels (e.g. `1,5,50`) |
 | `--max-seconds` | `workloads.<key>.max_seconds` | Max benchmark duration per rate |
-| `--tensor-parallel` | `rhaiis.vllm_args.tensor-parallel-size` | Tensor parallel size |
-| `--vllm-image` | `rhaiis.images.<accelerator>` | vLLM container image |
+| `--tensor-parallel` | engine args | Tensor parallel size (translated per engine) |
+| `--vllm-image` | `rhaiis.engines.<engine>.images.<accelerator>` | Serving container image |
 | `--accelerator` | `rhaiis.accelerator` | `nvidia` or `amd` |
 | `--replicas` | `rhaiis.deploy.replicas` | Number of predictor replicas |
 | `--storage-source` | `rhaiis.deploy.storage_source` | `hf` (HuggingFace download) or `pvc` |
 | `--storage-pvc` | `rhaiis.deploy.storage_pvc` | PVC name for model storage |
-| `--image-pull-secret` | `rhaiis.deploy.image_pull_secret` | Image pull secret name |
+| `--image-pull-secret` | `rhaiis.deploy.image_pull_secrets` | Image pull secret name |
 | `--service-account-name` | `rhaiis.deploy.service_account_name` | Service account for predictor |
 | `--deployment-name` | derived from model HF ID | InferenceService name |
 
