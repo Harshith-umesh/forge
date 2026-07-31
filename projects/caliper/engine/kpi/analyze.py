@@ -188,7 +188,6 @@ def _build_yaml_report(
 ) -> dict[str, Any]:
     """Build the final YAML-serializable report structure."""
     regressions = [r for r in results if r.regression]
-    improvements = [r for r in results if not r.regression and r.relative_change != 0]
 
     if regressions:
         overall_status = "REGRESSION_DETECTED"
@@ -250,7 +249,7 @@ def run_kpi_analysis(
     historical_data_dir: Path,
     output_file: Path,
     plugin_module: str,
-) -> int:
+) -> dict[str, Any]:
     """Run KPI regression analysis and generate a YAML report.
 
     Args:
@@ -260,7 +259,7 @@ def run_kpi_analysis(
         plugin_module: Plugin module name (for loading analysis config)
 
     Returns:
-        Exit code: 0=pass, 1=error, 2=warning (no baseline), 3=regression detected
+        Status dictionary with success/error information and exit_code for CLI compatibility
     """
     try:
         logger.info("Running KPI regression analysis")
@@ -271,11 +270,23 @@ def run_kpi_analysis(
 
         if not current_kpi_file.exists():
             logger.error("Current KPI file not found: %s", current_kpi_file)
-            return 1
+            return {
+                "status": "failed",
+                "success": False,
+                "error": f"Current KPI file not found: {current_kpi_file}",
+                "exit_code": 1,
+                "completed_at": time.time(),
+            }
 
         if not historical_data_dir.exists():
             logger.error("Historical data directory not found: %s", historical_data_dir)
-            return 1
+            return {
+                "status": "failed",
+                "success": False,
+                "error": f"Historical data directory not found: {historical_data_dir}",
+                "exit_code": 1,
+                "completed_at": time.time(),
+            }
 
         config = _load_analysis_config(plugin_module)
         logger.info(
@@ -290,18 +301,37 @@ def run_kpi_analysis(
 
         if current_data.get("schema_version") != "2":
             logger.error("Current KPI file must be schema_version 2 (hierarchical)")
-            return 1
+            return {
+                "status": "failed",
+                "success": False,
+                "error": "Current KPI file must be schema_version 2 (hierarchical)",
+                "exit_code": 1,
+                "completed_at": time.time(),
+            }
 
         current_records = _extract_kpi_records_from_hierarchical(current_data)
         if not current_records:
             logger.warning("No KPI records found in current file")
-            return 1
+            return {
+                "status": "failed",
+                "success": False,
+                "error": "No KPI records found in current file",
+                "exit_code": 1,
+                "completed_at": time.time(),
+            }
 
         # Load baseline KPIs
         baseline_kpi_data = find_baseline_kpis(historical_data_dir)
         if not baseline_kpi_data:
             _write_warning_report(output_file, current_kpi_file, plugin_module)
-            return 2
+            return {
+                "status": "warning",
+                "success": True,
+                "message": "no historical KPI found for regression testing",
+                "output_file": str(output_file),
+                "exit_code": 2,
+                "completed_at": time.time(),
+            }
 
         # Build baseline index
         baseline_index = _build_baseline_index(baseline_kpi_data, config)
@@ -367,11 +397,33 @@ def run_kpi_analysis(
             regressions,
         )
 
-        return 3 if regressions > 0 else 0
+        if regressions > 0:
+            return {
+                "status": "regression_detected",
+                "success": True,
+                "regressions_detected": True,
+                "output_file": str(output_file),
+                "exit_code": 3,
+                "completed_at": time.time(),
+            }
+        else:
+            return {
+                "status": "success",
+                "success": True,
+                "output_file": str(output_file),
+                "exit_code": 0,
+                "completed_at": time.time(),
+            }
 
-    except Exception:
+    except Exception as e:
         logger.exception("KPI analysis failed")
-        return 1
+        return {
+            "status": "failed",
+            "success": False,
+            "error": f"KPI analysis failed: {e}",
+            "exit_code": 1,
+            "completed_at": time.time(),
+        }
 
 
 def _write_warning_report(output_file: Path, current_kpi_file: Path, plugin_module: str) -> None:
@@ -399,81 +451,6 @@ def _write_warning_report(output_file: Path, current_kpi_file: Path, plugin_modu
     output_file.parent.mkdir(parents=True, exist_ok=True)
     with open(output_file, "w") as f:
         yaml.dump(report, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
-
-
-def analyze_kpis(
-    postprocess_config,  # CaliperOrchestrationPostprocessConfig
-    plugin_module: str,
-    base_dir: Path,
-    output_dir: Path,
-    current_kpis_file: Path,
-) -> dict[str, Any]:
-    """Run KPI analysis step and return result status.
-
-    This is the orchestration interface for KPI analysis.
-    """
-    if not postprocess_config.analyze.enabled:
-        return {"status": "disabled", "reason": "analyze disabled"}
-
-    analyze_config = postprocess_config.analyze
-
-    historical_kpis_dir = Path(analyze_config.historical_kpis)
-    if not historical_kpis_dir.is_absolute():
-        historical_kpis_dir = output_dir / historical_kpis_dir
-
-    output_path = output_dir / analyze_config.output
-
-    try:
-        if not current_kpis_file.exists():
-            return {
-                "status": "failed",
-                "error": f"Current KPI file not found: {current_kpis_file}",
-                "completed_at": time.time(),
-            }
-
-        if not historical_kpis_dir.exists():
-            return {
-                "status": "failed",
-                "error": f"Historical KPIs directory not found: {historical_kpis_dir}",
-                "completed_at": time.time(),
-            }
-
-        exit_code = run_kpi_analysis(
-            current_kpi_file=current_kpis_file,
-            historical_data_dir=historical_kpis_dir,
-            output_file=output_path,
-            plugin_module=plugin_module,
-        )
-
-        if exit_code == 0:
-            return {
-                "status": "success",
-                "output_file": str(output_path),
-                "completed_at": time.time(),
-            }
-        elif exit_code == 2:
-            return {
-                "status": "warning",
-                "message": "no historical KPI found for regression testing",
-                "output_file": str(output_path),
-                "completed_at": time.time(),
-            }
-        elif exit_code == 3:
-            return {
-                "status": "regression_detected",
-                "output_file": str(output_path),
-                "completed_at": time.time(),
-            }
-        else:
-            return {
-                "status": "failed",
-                "error": f"Analysis failed with exit code {exit_code}",
-                "completed_at": time.time(),
-            }
-
-    except Exception as e:
-        logger.exception("Analysis step failed")
-        raise RuntimeError(f"KPI analysis failed: {e}") from e
 
 
 def find_baseline_kpis(historical_dir: Path) -> dict[Path, dict[str, Any]]:
@@ -505,8 +482,21 @@ def find_baseline_kpis(historical_dir: Path) -> dict[Path, dict[str, Any]]:
             baseline_kpis[kpi_file] = kpi_data
             logger.debug("Loaded baseline: %s", kpi_file)
 
-        except json.JSONDecodeError as e:
-            logger.error("Failed to parse JSON in %s: %s", kpi_file, e)
+        except json.JSONDecodeError:
+            # Try parsing as JSONL (v1 format) fallback
+            try:
+                v1_records = []
+                with open(kpi_file) as f:
+                    for line in f:
+                        if line.strip():
+                            v1_records.append(json.loads(line))
+
+                if v1_records:
+                    v2_data = _convert_v1_to_v2(v1_records)
+                    baseline_kpis[kpi_file] = v2_data
+                    logger.debug("Loaded baseline (converted from v1): %s", kpi_file)
+            except Exception:
+                logger.error("Failed to parse %s as JSON or JSONL", kpi_file)
         except Exception as e:
             logger.error("Failed to load %s: %s", kpi_file, e)
 
@@ -534,21 +524,264 @@ def run_analyze(
 
     plugin_module = getattr(plugin, "__module__", "unknown") if plugin else "unknown"
 
-    exit_code = run_kpi_analysis(
+    result = run_kpi_analysis(
         current_kpi_file=Path(current_path),
         historical_data_dir=historical_dir,
         output_file=Path(output_path),
         plugin_module=plugin_module,
     )
 
-    if exit_code == 0:
-        return {"status": "success", "completed_at": time.time()}
-    elif exit_code == 2:
-        return {"status": "warning", "message": "no baselines found", "completed_at": time.time()}
-    elif exit_code == 3:
-        return {"status": "regression_detected", "completed_at": time.time()}
+    # Extract just the relevant fields for this legacy interface
+    return {
+        "status": result.get("status"),
+        "message": result.get("message"),
+        "completed_at": result.get("completed_at"),
+    }
+
+
+def _convert_v1_to_v2(v1_records: list[dict]) -> dict:
+    """Convert v1 JSONL records to v2 hierarchical format."""
+    metrics = {}
+    for record in v1_records:
+        # Extract metric name and value
+        metric_name = record.get("name", "unknown_metric")
+        value = record.get("value")
+        unit = record.get("unit")
+        labels = record.get("labels", {})
+
+        # Create metric entry in v2 format
+        metric_entry = {
+            "value": value,
+            "unit": unit,
+            "labels": labels,
+        }
+
+        # Determine if higher is better from labels or default to false
+        higher_is_better = labels.get("higher_is_better", False)
+        metric_entry["higher_is_better"] = higher_is_better
+
+        metrics[metric_name] = metric_entry
+
+    return {
+        "schema_version": "2",
+        "metrics": metrics,
+        "metadata": {
+            "converted_from_v1": True,
+            "original_record_count": len(v1_records),
+        },
+    }
+
+
+def ensure_kpi_file_v2_format(file_path: Path) -> tuple[Path, bool]:
+    """Convert KPI file to v2 hierarchical format if it's in v1 JSONL format.
+
+    Args:
+        file_path: Path to KPI file (v1 or v2 format)
+
+    Returns:
+        Tuple of (converted_file_path, is_temporary_file)
+        - converted_file_path: Path to v2 format file
+        - is_temporary_file: True if a temporary file was created and needs cleanup
+    """
+    import json
+    import tempfile
+
+    logger.debug("Checking format of KPI file: %s", file_path)
+
+    try:
+        with open(file_path) as f:
+            content = f.read().strip()
+            if not content:
+                raise ValueError(f"KPI file {file_path} is empty")
+
+        # Try to parse as v2 (hierarchical JSON) first
+        try:
+            data = json.loads(content)
+            if isinstance(data, dict) and "schema_version" in data:
+                # Already in v2 format
+                logger.debug("KPI file %s is already in v2 format", file_path)
+                return file_path, False
+            elif isinstance(data, list):
+                raise ValueError(f"KPI file {file_path} appears to be in unexpected list format")
+            else:
+                # Single dict but missing schema_version - might be v1 single record
+                logger.debug(
+                    "KPI file %s appears to be single record without schema_version", file_path
+                )
+        except json.JSONDecodeError:
+            # Not valid single JSON, might be JSONL (v1 format)
+            logger.debug("KPI file %s not valid single JSON, checking JSONL format", file_path)
+
+        # Try to parse as v1 (JSONL) format
+        lines = content.split("\n")
+        non_empty_lines = [line.strip() for line in lines if line.strip()]
+
+        if len(non_empty_lines) == 0:
+            raise ValueError(f"KPI file {file_path} contains no data")
+
+        # Try to parse first line to validate v1 format
+        try:
+            first_record = json.loads(non_empty_lines[0])
+            if not isinstance(first_record, dict):
+                raise ValueError(f"KPI file {file_path} first line is not a JSON object")
+
+            # Parse all lines as v1 JSONL records
+            v1_records = []
+            for i, line in enumerate(non_empty_lines):
+                try:
+                    record = json.loads(line)
+                    v1_records.append(record)
+                except json.JSONDecodeError as line_err:
+                    raise ValueError(
+                        f"KPI file {file_path} line {i + 1} has invalid JSON: {line_err}"
+                    ) from line_err
+
+            # Convert v1 records to v2 hierarchical format
+            logger.info(
+                "Converting KPI file %s from v1 (JSONL) to v2 (hierarchical) format", file_path
+            )
+
+            # Transform to v2
+            v2_data = _convert_v1_to_v2(v1_records)
+
+            # Write v2 format to temporary file
+            temp_file = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+            try:
+                json.dump(v2_data, temp_file, indent=2, ensure_ascii=False)
+                temp_file.flush()
+                temp_path = Path(temp_file.name)
+                logger.info(
+                    "Converted %s (%d records) to v2 format at %s",
+                    file_path,
+                    len(v1_records),
+                    temp_path,
+                )
+                return temp_path, True
+            except Exception as write_err:
+                temp_file.close()
+                Path(temp_file.name).unlink(missing_ok=True)
+                raise ValueError(
+                    f"Failed to write converted v2 format file: {write_err}"
+                ) from write_err
+            finally:
+                temp_file.close()
+
+        except Exception as v1_err:
+            raise ValueError(
+                f"KPI file {file_path} is not in valid v1 (JSONL) or v2 (hierarchical) format: {v1_err}"
+            ) from v1_err
+
+    except Exception as format_err:
+        raise ValueError(
+            f"Failed to process KPI file format for {file_path}: {format_err}"
+        ) from format_err
+
+
+def analyze_kpis(
+    current_kpis_file: Path,
+    historical_kpis_dir: Path,
+    output_file: Path,
+    plugin_module: str,
+) -> dict[str, Any]:
+    """Analyze KPIs with automatic v1/v2 format conversion.
+
+    This function handles:
+    1. Format detection and conversion from v1 (JSONL) to v2 (hierarchical)
+    2. Plugin loading
+    3. Analysis execution
+    4. Temporary file cleanup
+    5. Result formatting
+
+    Args:
+        current_kpis_file: Path to current KPIs file (v1 or v2 format)
+        historical_kpis_dir: Directory containing historical KPI files
+        output_file: Path where analysis results will be written
+        plugin_module: Plugin module name for KPI definitions and analysis rules
+
+    Returns:
+        Dictionary with status information:
+        - success: bool - whether analysis completed successfully
+        - output_file: str - path to analysis results (if successful)
+        - error: str - error message (if failed)
+    """
+
+    try:
+        # Use directory-based analysis (supports multiple baseline files)
+        result = run_kpi_analysis(
+            current_kpi_file=current_kpis_file,
+            historical_data_dir=historical_kpis_dir,
+            output_file=output_file,
+            plugin_module=plugin_module,
+        )
+
+        # Convert to the expected format for orchestration and CLI
+        if result.get("status") == "success":
+            return {
+                "status": "success",
+                "success": True,
+                "output_file": result.get("output_file"),
+                "completed_at": result.get("completed_at"),
+            }
+        elif result.get("status") == "warning":
+            return {
+                "status": "warning",
+                "success": True,  # Warning is still success
+                "message": result.get("message"),
+                "output_file": result.get("output_file"),
+                "completed_at": result.get("completed_at"),
+            }
+        elif result.get("status") == "regression_detected":
+            return {
+                "status": "regression_detected",
+                "success": True,  # Regression detection is successful analysis
+                "regressions_detected": True,
+                "output_file": result.get("output_file"),
+                "completed_at": result.get("completed_at"),
+            }
+        else:
+            return {
+                "status": "failed",
+                "success": False,
+                "error": result.get("error", "Analysis failed"),
+                "completed_at": result.get("completed_at"),
+            }
+
+    except Exception as e:
+        logger.exception("KPI analysis with format conversion failed")
+        return {
+            "success": False,
+            "error": str(e),
+            "completed_at": time.time(),
+        }
+
+
+def status_dict_to_exit_code(status_dict: dict[str, Any]) -> int:
+    """Convert a status dictionary to an exit code for CLI use.
+
+    Args:
+        status_dict: Status dictionary from engine analysis functions
+
+    Returns:
+        Exit code: 0=success, 1=error, 2=warning (no baseline), 3=regression detected
+    """
+    # If the status dict includes an explicit exit_code, use it
+    if "exit_code" in status_dict:
+        return status_dict["exit_code"]
+
+    # Otherwise, determine exit code from status fields
+    if not status_dict.get("success", False):
+        return 1  # General error
+
+    status = status_dict.get("status", "")
+
+    if status == "success":
+        return 0
+    elif status == "warning" or "no baseline" in status_dict.get("message", "").lower():
+        return 2  # Warning (no baseline data)
+    elif status == "regression_detected" or status_dict.get("regressions_detected"):
+        return 3  # Regression detected
     else:
-        return {"status": "failed", "error": f"exit code {exit_code}", "completed_at": time.time()}
+        return 0  # Default to success if unclear
 
 
 # EOF

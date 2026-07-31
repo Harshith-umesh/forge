@@ -13,7 +13,6 @@ from projects.caliper.engine.ai_eval import run_ai_eval_export
 from projects.caliper.engine.file_export.artifacts_export_run import run_artifacts_export
 from projects.caliper.engine.file_export.artifacts_import_run import run_artifacts_import
 from projects.caliper.engine.file_export.mlflow_config import load_mlflow_config_yaml
-from projects.caliper.engine.kpi.analyze import run_analyze
 from projects.caliper.engine.kpi.generate import run_kpi_generate
 from projects.caliper.engine.kpi.import_export import (
     import_kpis_snapshot,
@@ -448,12 +447,20 @@ def ai_eval_export(
 @_workspace_cli_options
 @click.option("--output", type=click.Path(path_type=Path), required=True)
 @click.option(
+    "--format",
+    "format_type",
+    type=click.Choice(["hierarchical", "jsonl"], case_sensitive=False),
+    default="hierarchical",
+    help="Output format: hierarchical JSON (default) or JSONL",
+)
+@click.option(
     "--status-file", type=click.Path(path_type=Path), help="YAML file to write operation status"
 )
 @click.pass_context
 def kpi_generate(
     ctx: click.Context,
     output: Path,
+    format_type: str,
     artifacts_dir: Path | None,
     postprocess_config: Path | None,
     plugin_module_override: str | None,
@@ -478,6 +485,7 @@ def kpi_generate(
             output=output,
             use_cache=True,
             cache_path=None,
+            format_type=format_type,
         )
         status_data = {"success": True, "output_file": str(output)}
         click.echo(f"Generated {output}")
@@ -602,97 +610,6 @@ def kpi_import(ctx: click.Context, snapshot: Path) -> None:
     click.echo(f"Imported {snapshot}")
 
 
-@click.command("analyze")
-@click.option(
-    "--current", type=click.Path(path_type=Path), required=True, help="Current KPI file to analyze"
-)
-@click.option(
-    "--baseline-dir",
-    type=click.Path(path_type=Path),
-    required=True,
-    help="Directory containing historical KPI files (will use most recent)",
-)
-@click.option(
-    "--output",
-    type=click.Path(path_type=Path),
-    required=True,
-    help="Output file for analysis results",
-)
-@click.option(
-    "--plugin",
-    "plugin_module",
-    metavar="MODULE",
-    required=True,
-    help="Plugin module for KPI definitions and analysis rules",
-)
-@click.pass_context
-def kpi_analyze(
-    ctx: click.Context,
-    current: Path,
-    baseline_dir: Path,
-    output: Path,
-    plugin_module: str,
-) -> None:
-    """Analyze KPIs for regressions using hierarchical format."""
-    try:
-        from projects.caliper.engine.kpi.analyze_hierarchical import find_most_recent_baseline
-        from projects.caliper.engine.load_plugin import load_plugin
-
-        # Load plugin for KPI definitions and analysis rules
-        plugin = load_plugin(plugin_module)
-        if not plugin:
-            click.echo(f"❌ Failed to load plugin: {plugin_module}", err=True)
-            sys.exit(1)
-
-        click.echo(f"🔌 Using plugin: {plugin_module}")
-
-        baseline_kpis = find_most_recent_baseline(baseline_dir)
-        if not baseline_kpis:
-            click.echo(
-                f"❌ No kpis.json files found in baseline directory: {baseline_dir}", err=True
-            )
-            sys.exit(1)
-
-        click.echo(f"📊 Found {len(baseline_kpis)} baseline files to process")
-
-        # Run analysis with ALL baseline files (not just the most recent)
-        result = run_analyze(
-            current_path=current, baseline_kpis=baseline_kpis, output_path=output, plugin=plugin
-        )
-
-        # Check result status at CLI level
-        if result["status"] == "success":
-            click.echo(f"✅ Analysis complete. Results written to: {output}")
-        elif result["status"] == "skipped":
-            click.echo(f"⚠️  Analysis skipped: {result.get('reason', 'Unknown reason')}")
-            click.echo(f"📝 Output written to: {output}")
-        else:
-            click.echo(f"❌ Analysis failed: {result.get('error', 'Unknown error')}", err=True)
-            sys.exit(1)
-
-        # Show the analysis results on screen
-        if output.exists():
-            try:
-                import json
-
-                with open(output) as f:
-                    result_data = json.load(f)
-
-                # Convert to YAML for better readability
-                yaml_output = yaml.dump(result_data, default_flow_style=False, indent=2)
-                click.echo("\n📊 Analysis Results:")
-                click.echo("=" * 50)
-                click.echo(yaml_output)
-            except Exception as e:
-                click.echo(f"⚠️  Could not display results: {e}")
-        else:
-            click.echo("⚠️  Output file not found")
-    except Exception as e:  # noqa: BLE001
-        raise e
-        click.echo(f"❌ kpi analyze failed: {e}", err=True)
-        sys.exit(3)
-
-
 @click.command("analyse-kpis")
 @click.option(
     "--output",
@@ -702,13 +619,13 @@ def kpi_analyze(
 )
 @click.option(
     "--current-kpis-file",
-    type=click.Path(path_type=Path, exists=True),
+    type=click.Path(path_type=Path),
     required=True,
     help="Path to current KPIs JSON file",
 )
 @click.option(
     "--historical-kpis-dir",
-    type=click.Path(path_type=Path, exists=True),
+    type=click.Path(path_type=Path),
     required=True,
     help="Directory containing historical KPI files",
 )
@@ -730,85 +647,19 @@ def analyse_kpis_cmd(
     status_file: Path | None,
 ) -> None:
     """Analyze KPIs for orchestration (fork/exec)."""
+    import time
+
     import yaml
 
-    status_data = {"success": False}
-
-    try:
-        # Create a minimal postprocess config for analysis
-        from projects.caliper.orchestration.postprocess_config import (
-            CaliperOrchestrationPostprocessConfig,
-        )
-
-        # Create config with analyze enabled and using provided directories
-        postprocess_config_dict = {
-            "analyze": {
-                "enabled": True,
-                "output": output.name,  # Use the provided output filename
-                "historical_kpis": str(historical_kpis_dir),  # Use provided historical dir
-            }
-        }
-
-        postprocess_config_obj = CaliperOrchestrationPostprocessConfig.model_validate(
-            postprocess_config_dict
-        )
-
-        output_dir = output.parent
-
-        # Run analysis
-        from projects.caliper.engine.kpi.analyze import analyze_kpis
-
-        try:
-            result = analyze_kpis(
-                postprocess_config=postprocess_config_obj,
-                plugin_module=plugin_module,
-                base_dir=output_dir,  # Use output dir as base since we have absolute paths
-                output_dir=output_dir,
-                current_kpis_file=current_kpis_file,
-            )
-        except Exception as e:
-            # Don't suppress the exception - let it bubble up with full traceback
-            import sys
-            import traceback
-
-            print(f"❌ Exception in analyze_kpis: {e}", file=sys.stderr)
-            print(f"Full traceback:\n{traceback.format_exc()}", file=sys.stderr)
-            raise
-
-        # Check if the analysis function returned a proper result
-        if not isinstance(result, dict) or "status" not in result:
-            raise ValueError(f"Invalid result from analyze_kpis: {result}")
-
+    # Validate paths exist before proceeding
+    if not current_kpis_file.exists():
         status_data = {
-            "success": result.get("status") == "success",
-            "output_file": result.get("output_file"),
+            "success": False,
+            "error": f"Current KPI file not found: {current_kpis_file}",
+            "completed_at": time.time(),
         }
+        click.echo(f"❌ Current KPI file not found: {current_kpis_file}", err=True)
 
-        if result.get("status") == "success":
-            click.echo(f"✅ KPI analysis completed: {result.get('output_file')}")
-        else:
-            # Show the full result for debugging if no clear error message
-            if "error" in result:
-                error_msg = result["error"]
-            else:
-                error_msg = f"Analysis failed with result: {result}"
-
-            status_data["error"] = error_msg
-            status_data.update(result)  # Include all result data for debugging
-            click.echo(f"❌ KPI analysis failed: {error_msg}", err=True)
-            if not status_file:
-                sys.exit(1)
-
-    except Exception as e:  # noqa: BLE001
-        import traceback
-
-        full_traceback = traceback.format_exc()
-        status_data = {"success": False, "error": str(e), "traceback": full_traceback}
-        click.echo(f"❌ analyse-kpis failed: {e}", err=True)
-        click.echo(f"Full traceback:\n{full_traceback}", err=True)
-        if not status_file:
-            sys.exit(2)
-    finally:
         # Write status file if requested
         if status_file:
             try:
@@ -817,6 +668,103 @@ def analyse_kpis_cmd(
             except Exception as status_err:
                 click.echo(f"Failed to write status file {status_file}: {status_err}", err=True)
                 sys.exit(4)
+        sys.exit(1)
+
+    if not historical_kpis_dir.exists():
+        status_data = {
+            "success": False,
+            "error": f"Historical KPI directory not found: {historical_kpis_dir}",
+            "completed_at": time.time(),
+        }
+        click.echo(f"❌ Historical KPI directory not found: {historical_kpis_dir}", err=True)
+
+        # Write status file if requested
+        if status_file:
+            try:
+                with open(status_file, "w", encoding="utf-8") as f:
+                    yaml.dump(status_data, f, default_flow_style=False)
+            except Exception as status_err:
+                click.echo(f"Failed to write status file {status_file}: {status_err}", err=True)
+                sys.exit(4)
+        sys.exit(2)
+
+    # Delegate to engine layer
+    from projects.caliper.engine.kpi.analyze import analyze_kpis
+
+    result = analyze_kpis(
+        current_kpis_file=current_kpis_file,
+        historical_kpis_dir=historical_kpis_dir,
+        output_file=output,
+        plugin_module=plugin_module,
+    )
+
+    # Format status data for CLI
+    status_data = {
+        "success": result.get("success", False),
+        "completed_at": result.get("completed_at"),
+    }
+
+    if result.get("output_file"):
+        status_data["output_file"] = result["output_file"]
+
+    if result.get("error"):
+        status_data["error"] = result["error"]
+
+    # Extract detailed analysis results for status file
+    if result.get("success") and result.get("output_file"):
+        try:
+            import yaml
+
+            with open(result["output_file"]) as f:
+                analysis_report = yaml.safe_load(f)
+
+            # Extract key fields from the analysis report
+            if analysis_report:
+                processed = analysis_report.get("processed", {})
+                tested = analysis_report.get("tested", {})
+                overall = analysis_report.get("overall", {})
+                results = analysis_report.get("results", [])
+
+                status_data.update(
+                    {
+                        "baseline_source_count": processed.get("baseline_source_count", 0),
+                        "tested": {
+                            "total_kpis": tested.get("total_kpis", 0),
+                            "regressions": tested.get("regressions", 0),
+                            "passes": tested.get("passes", 0),
+                            "skipped": tested.get("skipped", 0),
+                        },
+                        "results": results,
+                        "overall": {
+                            "verdict": overall.get("verdict", "UNKNOWN"),
+                            "regression_count": overall.get("regression_count", 0),
+                            "total_tested": overall.get("total_tested", 0),
+                            "total_skipped": overall.get("total_skipped", 0),
+                        },
+                    }
+                )
+        except Exception as e:
+            # If we can't read the analysis report, just include basic info
+            status_data["analysis_report_error"] = f"Could not read analysis report: {e}"
+
+    if result.get("result"):
+        status_data.update(result["result"])  # Include analysis result for debugging
+
+    # Display result
+    if result.get("success"):
+        click.echo(f"✅ KPI analysis completed: {result.get('output_file')}")
+    else:
+        error_msg = result.get("error", "Unknown error")
+        click.echo(f"❌ KPI analysis failed: {error_msg}", err=True)
+
+    # Write status file if requested
+    if status_file:
+        try:
+            with open(status_file, "w", encoding="utf-8") as f:
+                yaml.dump(status_data, f, default_flow_style=False)
+        except Exception as status_err:
+            click.echo(f"Failed to write status file {status_file}: {status_err}", err=True)
+            sys.exit(4)
 
     # Exit with error code if operation failed
     if not status_data.get("success", False):

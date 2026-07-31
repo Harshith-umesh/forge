@@ -11,6 +11,59 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _load_kpis_any_format(kpi_file_path: Path) -> dict[str, Any]:
+    """Load KPIs from file, handling both v1 (JSONL) and v2 (hierarchical) formats.
+
+    Returns:
+        Dictionary in hierarchical format with schema_version and metrics
+    """
+    with open(kpi_file_path) as f:
+        content = f.read().strip()
+
+    try:
+        # Try to parse as JSON (hierarchical format)
+        data = json.loads(content)
+
+        if isinstance(data, dict) and data.get("schema_version") == "2":
+            # Already hierarchical format
+            return data
+        else:
+            # Unknown JSON format, convert list to v1 JSONL handling
+            raise ValueError("Unknown JSON format")
+
+    except (json.JSONDecodeError, ValueError):
+        # Try to parse as JSONL (v1 format)
+        kpis = []
+        for line in content.splitlines():
+            line = line.strip()
+            if line:
+                try:
+                    kpi = json.loads(line)
+                    kpis.append(kpi)
+                except json.JSONDecodeError:
+                    continue  # Skip invalid lines
+
+        # Convert v1 format to hierarchical format
+        metrics = {}
+        for kpi in kpis:
+            kpi_id = kpi.get("kpi_id")
+            if kpi_id:
+                value = kpi.get("value")
+                labels = kpi.get("labels", {})
+                higher_is_better = labels.get("higher_is_better", False)
+
+                metrics[kpi_id] = {
+                    "value": value,
+                    "higher_is_better": higher_is_better,
+                    "labels": labels,
+                    "unit": kpi.get("unit"),
+                    "run_id": kpi.get("run_id"),
+                    "timestamp": kpi.get("timestamp"),
+                }
+
+        return {"schema_version": "2", "metrics": metrics, "converted_from": "v1_jsonl"}
+
+
 def analyze_hierarchical_kpis(
     current_kpis_path: Path,
     baseline_kpis_path: Path,
@@ -30,31 +83,15 @@ def analyze_hierarchical_kpis(
         Analysis result dictionary with status, findings, etc.
     """
     try:
-        # Load KPI files
-        with open(current_kpis_path) as f:
-            current_data = json.load(f)
+        # Load KPI files (supports both v1 JSONL and v2 hierarchical formats)
+        current_data = _load_kpis_any_format(current_kpis_path)
+        baseline_data = _load_kpis_any_format(baseline_kpis_path)
 
-        with open(baseline_kpis_path) as f:
-            baseline_data = json.load(f)
-
-        # Validate format
-        if not isinstance(current_data, dict) or not isinstance(baseline_data, dict):
-            return {
-                "status": "failed",
-                "error": "KPI files must be in hierarchical format (dict), not list format",
-                "completed_at": time.time(),
-            }
-
-        # Extract schema version and validate
-        current_schema = current_data.get("schema_version", "unknown")
-        baseline_schema = baseline_data.get("schema_version", "unknown")
-
-        if current_schema != "2" or baseline_schema != "2":
-            return {
-                "status": "failed",
-                "error": f"Only schema_version 2 supported (current: {current_schema}, baseline: {baseline_schema})",
-                "completed_at": time.time(),
-            }
+        # Both files are now guaranteed to be in hierarchical format with schema_version 2
+        logger.info(f"Loaded current KPIs: {current_data.get('converted_from', 'v2_hierarchical')}")
+        logger.info(
+            f"Loaded baseline KPIs: {baseline_data.get('converted_from', 'v2_hierarchical')}"
+        )
 
         # Analyze metrics using plugin-aware logic
         current_metrics = current_data.get("metrics", {})
@@ -172,8 +209,12 @@ def analyze_hierarchical_kpis(
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "w") as f:
             json.dump(analysis_result, f, indent=2)
+            f.write("\n")
 
-        logger.info(f"Analysis completed: {regressions} regressions, {improvements} improvements")
+        metrics_tested = len([m for m in current_metrics if m in baseline_metrics])
+        logger.info(
+            f"Analysis completed: {metrics_tested} verifications, {regressions} regressions, {improvements} improvements"
+        )
 
         return {
             "status": "success",
@@ -210,5 +251,63 @@ def find_most_recent_baseline(historical_dir: Path) -> Path | None:
     """Find the most recently modified kpis.json file in historical directory."""
     kpi_files = list(historical_dir.rglob("kpis.json"))
     if not kpi_files:
+        logger.warning(f"No kpis.json files found in: {historical_dir}")
         return None
-    return max(kpi_files, key=lambda p: p.stat().st_mtime)
+
+    logger.info(f"Discovered {len(kpi_files)} baseline candidate files:")
+
+    # Check format of each file and log results
+    v1_files = []
+    v2_files = []
+    failed_files = []
+
+    for kpi_file in kpi_files:
+        try:
+            with open(kpi_file) as f:
+                content = f.read().strip()
+
+            try:
+                data = json.loads(content)
+                if isinstance(data, dict) and data.get("schema_version") == "2":
+                    v2_files.append(kpi_file)
+                    logger.info(f"  {kpi_file.relative_to(historical_dir)} → v2_hierarchical")
+                else:
+                    # Try parsing as JSONL (v1)
+                    lines = [line.strip() for line in content.splitlines() if line.strip()]
+                    if lines and all(json.loads(line) for line in lines):
+                        v1_files.append(kpi_file)
+                        logger.info(f"  {kpi_file.relative_to(historical_dir)} → v1_jsonl")
+                    else:
+                        failed_files.append(kpi_file)
+                        logger.warning(
+                            f"  {kpi_file.relative_to(historical_dir)} → FAILED (unknown format)"
+                        )
+            except (json.JSONDecodeError, ValueError):
+                # Try as JSONL
+                try:
+                    lines = [line.strip() for line in content.splitlines() if line.strip()]
+                    if lines and all(json.loads(line) for line in lines):
+                        v1_files.append(kpi_file)
+                        logger.info(f"  {kpi_file.relative_to(historical_dir)} → v1_jsonl")
+                    else:
+                        failed_files.append(kpi_file)
+                        logger.warning(
+                            f"  {kpi_file.relative_to(historical_dir)} → FAILED (invalid JSONL)"
+                        )
+                except Exception:
+                    failed_files.append(kpi_file)
+                    logger.warning(
+                        f"  {kpi_file.relative_to(historical_dir)} → FAILED (parse error)"
+                    )
+        except Exception as e:
+            failed_files.append(kpi_file)
+            logger.error(f"  {kpi_file.relative_to(historical_dir)} → FAILED ({e})")
+
+    logger.info(
+        f"Summary: {len(v2_files)} v2_hierarchical, {len(v1_files)} v1_jsonl, {len(failed_files)} failed"
+    )
+
+    most_recent = max(kpi_files, key=lambda p: p.stat().st_mtime)
+    logger.info(f"Selected most recent: {most_recent.relative_to(historical_dir)}")
+
+    return most_recent

@@ -291,6 +291,7 @@ def read_kpis_from_file(file_path: Path) -> list[dict]:
                     }
 
                     run_id = test_metadata.get("run_id")
+
                     flat_kpi = {
                         "schema_version": "1",
                         "kpi_id": kpi_record.get("id"),
