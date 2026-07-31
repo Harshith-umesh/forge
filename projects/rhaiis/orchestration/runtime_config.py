@@ -39,12 +39,30 @@ def get_benchmark_config() -> dict:
     return dict(config.project.get_config("benchmarks.guidellm"))
 
 
-def get_vllm_image(accelerator: str) -> str:
-    return config.project.get_config(f"rhaiis.images.{accelerator}")
+def get_engine() -> str:
+    return config.project.get_config("rhaiis.engine", "vllm")
 
 
-def get_vllm_defaults() -> dict:
-    return dict(config.project.get_config("rhaiis.vllm_args"))
+def get_serving_image(accelerator: str, engine: str | None = None) -> str:
+    engine = engine or get_engine()
+    try:
+        return config.project.get_config(f"rhaiis.engines.{engine}.images.{accelerator}")
+    except Exception:
+        return config.project.get_config(f"rhaiis.images.{accelerator}")
+
+
+def get_engine_args(engine: str | None = None) -> dict:
+    engine = engine or get_engine()
+    return dict(config.project.get_config(f"rhaiis.engines.{engine}.args", {}))
+
+
+def get_engine_port(engine: str | None = None) -> int:
+    engine = engine or get_engine()
+    return int(config.project.get_config(f"rhaiis.engines.{engine}.port", 8080))
+
+
+def get_trtllm_config() -> dict:
+    return dict(config.project.get_config("rhaiis.engines.trtllm.trtllm_config", {}))
 
 
 def get_model(model_key: str) -> dict:
@@ -71,15 +89,62 @@ def get_profiler_config() -> dict:
     return dict(config.project.get_config("rhaiis.profiler", {}) or {})
 
 
-def merge_vllm_args(
+_COMMON_ARG_TRANSLATIONS: dict[str, dict[str, str]] = {
+    "sglang": {
+        "tensor-parallel-size": "tp-size",
+        "data-parallel-size": "dp-size",
+    },
+    "trtllm": {
+        "tensor-parallel-size": "tp_size",
+        "data-parallel-size": "dp_size",
+    },
+}
+
+
+def _translate_args(args: dict, engine: str) -> dict:
+    """Translate vLLM-style engine_args to another engine's arg naming.
+
+    Only shared args (TP, DP) are translated; vLLM-specific args are dropped.
+    """
+    mapping = _COMMON_ARG_TRANSLATIONS.get(engine, {})
+    translated = {}
+    for key, val in args.items():
+        if key in mapping:
+            translated[mapping[key]] = val
+        # Drop vLLM-only args that have no equivalent
+    return translated
+
+
+def merge_engine_args(
     overrides: dict,
     model: dict,
     workload: dict,
+    engine: str | None = None,
 ) -> dict:
-    merged = dict(model.get("vllm_args", {}))
-    merged.update(workload.get("vllm_args", {}))
-    merged.update(overrides)
-    return merged
+    engine = engine or get_engine()
+    engine_key = f"{engine}_args"
+
+    # Use engine-specific block if present, otherwise fall back to engine_args
+    # and auto-translate common args when the engine isn't vLLM
+    model_args = model.get(engine_key) if engine != "vllm" else None
+    if model_args is None:
+        base = dict(model.get("engine_args", {}))
+        if engine != "vllm":
+            base = _translate_args(base, engine)
+    else:
+        base = dict(model_args)
+
+    wl_args = workload.get(engine_key) if engine != "vllm" else None
+    if wl_args is None:
+        wl = dict(workload.get("engine_args", {}))
+        if engine != "vllm":
+            wl = _translate_args(wl, engine)
+    else:
+        wl = dict(wl_args)
+
+    base.update(wl)
+    base.update(overrides)
+    return base
 
 
 def merge_env_vars(accelerator: str, model: dict) -> dict:

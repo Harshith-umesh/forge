@@ -354,17 +354,33 @@ def _transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
     except (ImportError, AttributeError):
         kpi_functions = {}
 
+    # First pass: determine which labels are common (same value for all KPIs in a run)
+    # vs per-KPI (vary across KPIs, e.g. rate_index, intended_concurrency)
+    run_label_values: dict[str, dict[str, set]] = defaultdict(lambda: defaultdict(set))
+    for kpi in kpis:
+        run_id = kpi.get("run_id", "unknown")
+        for k, v in kpi.get("labels", {}).items():
+            if k == "higher_is_better":
+                continue
+            run_label_values[run_id][k].add(str(v))
+
+    # Labels with more than one distinct value per run are per-KPI
+    per_kpi_label_keys: dict[str, set[str]] = {}
+    for run_id, label_vals in run_label_values.items():
+        per_kpi_label_keys[run_id] = {k for k, vals in label_vals.items() if len(vals) > 1}
+
     for kpi in kpis:
         run_id = kpi.get("run_id", "unknown")
         test_data = tests_data[run_id]
+        varying_keys = per_kpi_label_keys.get(run_id, set())
 
-        # Extract common labels (excluding KPI-specific ones)
         kpi_labels = kpi.get("labels", {})
         test_labels = {
-            k: v for k, v in kpi_labels.items() if k not in ["higher_is_better"]
-        }  # Exclude KPI-specific labels
+            k: v
+            for k, v in kpi_labels.items()
+            if k not in ("higher_is_better",) and k not in varying_keys
+        }
 
-        # Merge test labels (they should be the same for all KPIs in a test)
         if not test_data["labels"]:
             test_data["labels"] = test_labels
 
@@ -375,6 +391,9 @@ def _transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
                 "source": kpi.get("source", {}),
                 "run_id": run_id,
             }
+
+        # Per-KPI labels that vary across rate points
+        kpi_specific_labels = {k: kpi_labels[k] for k in varying_keys if k in kpi_labels}
 
         # Create KPI record with metadata
         kpi_id = kpi.get("kpi_id")
@@ -400,12 +419,14 @@ def _transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
         else:
             final_value = raw_value
 
-        kpi_record = {
+        kpi_record: dict[str, Any] = {
             "id": kpi_id,
             "value": final_value,
             "unit": kpi.get("unit"),
             "higher_is_better": kpi_labels.get("higher_is_better", True),
         }
+        if kpi_specific_labels:
+            kpi_record["labels"] = kpi_specific_labels
 
         # Add KPI metadata from function decorator if available
         if kpi_id in kpi_functions:
@@ -494,8 +515,13 @@ def _run_artifacts_to_kpis(
         }
 
     try:
-        # Prepare paths
-        output_file = output_dir / postprocess_config.kpi.artifacts_to_kpis.output
+        # Prepare paths — reject absolute or parent-traversal output names
+        configured_output = postprocess_config.kpi.artifacts_to_kpis.output
+        if Path(configured_output).is_absolute() or ".." in Path(configured_output).parts:
+            raise ValueError(
+                f"kpi.artifacts_to_kpis.output must be a relative path without '..': {configured_output}"
+            )
+        output_file = output_dir / configured_output
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
         # Create temporary status file for subprocess communication
@@ -532,7 +558,7 @@ def _run_artifacts_to_kpis(
 
                 # Read the generated JSONL file
                 kpis = []
-                with open(output_file) as f:
+                with open(output_file, encoding="utf-8") as f:
                     for line in f:
                         line = line.strip()
                         if line:
@@ -541,13 +567,11 @@ def _run_artifacts_to_kpis(
                             kpis.append(json.loads(line))
 
                 if kpis:
-                    # Transform to hierarchical format
                     hierarchical_data = _transform_kpis_to_hierarchical_format(kpis, model)
 
-                    # Write back as JSON (schema v2)
                     import json
 
-                    with open(output_file, "w") as f:
+                    with open(output_file, "w", encoding="utf-8") as f:
                         json.dump(hierarchical_data, f, indent=2, ensure_ascii=False)
 
                     logger.info(
@@ -805,8 +829,12 @@ def _run_kpis_to_csv(
         }
 
     try:
-        # Create output file path
-        output_file = output_dir / postprocess_config.kpi.kpis_to_csv.output
+        csv_output = postprocess_config.kpi.kpis_to_csv.output
+        if Path(csv_output).is_absolute() or ".." in Path(csv_output).parts:
+            raise ValueError(
+                f"kpi.kpis_to_csv.output must be a relative path without '..': {csv_output}"
+            )
+        output_file = output_dir / csv_output
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
         # Create temporary status file for subprocess communication
@@ -1551,7 +1579,6 @@ class CaliperPostprocessOrchestrator:
             )
             return
 
-        # Path to the JSON file for reference in command logging
         kpi_json_path = output_dir / self.config.kpi.artifacts_to_kpis.output
         result = _run_kpis_to_csv(
             self.config,

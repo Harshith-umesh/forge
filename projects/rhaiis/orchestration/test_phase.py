@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import uuid as _uuid_mod
+from pathlib import Path
+
+import yaml
 
 from projects.core.library import env
 from projects.core.library.postprocess import run_and_postprocess, write_test_labels
@@ -12,6 +16,12 @@ logger = logging.getLogger(__name__)
 
 _K8S_NAME_MAX = 63
 _warnings: list[str] = []
+
+
+def _write_manifest(manifest: dict, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.dump(manifest, f, default_flow_style=False, sort_keys=False)
 
 
 def _guidellm_job_name(prefix: str, workload_key: str, deployment_name: str) -> str:
@@ -100,10 +110,14 @@ def _run_test(
         else:
             deployment_name = base_name
 
-    vllm_image = runtime_config.get_vllm_image(accelerator)
-    vllm_defaults = runtime_config.get_vllm_defaults()
+    engine = runtime_config.get_engine()
+    serving_image = runtime_config.get_serving_image(accelerator, engine)
+    engine_defaults = runtime_config.get_engine_args(engine)
+    engine_port = runtime_config.get_engine_port(engine)
     first_workload = runtime_config.get_workload(workload_keys[0])
-    vllm_args = runtime_config.merge_vllm_args(vllm_defaults, model_cfg, first_workload)
+    engine_args = runtime_config.merge_engine_args(
+        engine_defaults, model_cfg, first_workload, engine
+    )
     env_vars = runtime_config.merge_env_vars(accelerator, model_cfg)
 
     from projects.core.library import config as _cfg
@@ -116,6 +130,10 @@ def _run_test(
 
     from projects.guidellm.toolbox.run_guidellm_benchmark.main import (
         wait_guidellm_benchmark_task,
+    )
+    from projects.rhaiis.orchestration.manifests import (
+        build_inferenceservice,
+        build_servingruntime,
     )
     from projects.rhaiis.toolbox.deploy_kserve_isvc.main import run as deploy_kserve_isvc
     from projects.rhaiis.toolbox.wait_isvc_ready.main import run as wait_isvc_ready
@@ -160,7 +178,7 @@ def _run_test(
             run_standalone_analysis(
                 model_cfg,
                 accelerator_key,
-                vllm_args,
+                engine_args,
                 run_uuid=run_uuid,
                 restrict_profiles=workload_keys or None,
             )
@@ -174,26 +192,57 @@ def _run_test(
 
     try:
         isvc_labels = {"opendatahub.io/dashboard": "true"}
-        if profiler_enabled:
+        if profiler_enabled and engine == "vllm":
             isvc_labels["vllm-profiler/enabled"] = "true"
+        elif profiler_enabled and engine != "vllm":
+            logger.warning("Profiler is only supported with vLLM engine, skipping profiler")
+            profiler_enabled = False
 
         logger.info("Deploying %s to %s/%s", model_cfg["hf_model_id"], namespace, deployment_name)
-        deploy_kserve_isvc(
+        ea = engine_args or {}
+        gpu_count = int(
+            ea.get("tensor-parallel-size") or ea.get("tp-size") or ea.get("tp_size") or 1
+        )
+
+        sr_manifest = build_servingruntime(
             deployment_name=deployment_name,
             namespace=namespace,
             model_id=model_cfg["hf_model_id"],
-            vllm_image=vllm_image,
-            accelerator=accelerator,
-            vllm_args=vllm_args,
+            serving_image=serving_image,
+            engine=engine,
+            engine_args=engine_args,
+            engine_port=engine_port,
+            storage_source=deploy_cfg.get("storage_source", "hf"),
+            gpu_count=gpu_count,
+            image_pull_secrets=deploy_cfg.get("image_pull_secrets") or [],
             env_vars=env_vars,
+            trtllm_config=runtime_config.get_trtllm_config() if engine == "trtllm" else None,
+        )
+        isvc_manifest = build_inferenceservice(
+            deployment_name=deployment_name,
+            namespace=namespace,
+            engine=engine,
+            engine_port=engine_port,
+            accelerator=accelerator,
+            gpu_count=gpu_count,
             replicas=deploy_cfg.get("replicas", 1),
             cpu_request=deploy_cfg.get("cpu_request", "4"),
             memory_request=deploy_cfg.get("memory_request", "16Gi"),
             storage_source=deploy_cfg.get("storage_source", "hf"),
             storage_pvc=deploy_cfg.get("storage_pvc", ""),
-            image_pull_secret=deploy_cfg.get("image_pull_secret", ""),
+            model_id=model_cfg["hf_model_id"],
             service_account_name=deploy_cfg.get("service_account_name", ""),
             labels=isvc_labels,
+        )
+        sr_file = env.ARTIFACT_DIR / "src" / "servingruntime.yaml"
+        isvc_file = env.ARTIFACT_DIR / "src" / "inferenceservice.yaml"
+        _write_manifest(sr_manifest, sr_file)
+        _write_manifest(isvc_manifest, isvc_file)
+
+        deploy_kserve_isvc(
+            namespace=namespace,
+            servingruntime_file=str(sr_file),
+            inferenceservice_file=str(isvc_file),
         )
 
         logger.info("Waiting for InferenceService to be ready")
@@ -204,7 +253,9 @@ def _run_test(
             health_check_timeout=deploy_cfg.get("health_check_timeout", 120),
         )
 
-        endpoint_url = f"http://{deployment_name}-predictor.{namespace}.svc.cluster.local:8080"
+        endpoint_url = (
+            f"http://{deployment_name}-predictor.{namespace}.svc.cluster.local:{engine_port}"
+        )
 
         warmup_enabled = (
             config.project.get_config("tests.rhaiis.warmup", True)
@@ -239,12 +290,13 @@ def _run_test(
 
         if profiler_enabled:
             try:
-                _upload_profiler_traces(model_cfg, gpu_type, vllm_args, profiler_cfg)
+                _upload_profiler_traces(model_cfg, gpu_type, engine_args, profiler_cfg)
             except Exception:
                 logger.exception("Profiler trace upload failed")
                 _warnings.append("Profiler trace upload failed")
 
         # Phase 2: benchmark + post-processing for ALL workloads
+        trtllm_cfg = runtime_config.get_trtllm_config() if engine == "trtllm" else None
         for wl_key in workload_keys:
             _run_workload_benchmark(
                 model_key=model_key,
@@ -253,8 +305,8 @@ def _run_test(
                 accelerator=accelerator,
                 accelerator_key=accelerator_key,
                 gpu_type=gpu_type,
-                vllm_image=vllm_image,
-                vllm_args=vllm_args,
+                serving_image=serving_image,
+                engine_args=engine_args,
                 benchmark_cfg=benchmark_cfg,
                 deployment_name=deployment_name,
                 namespace=namespace,
@@ -263,6 +315,7 @@ def _run_test(
                 run_uuid=run_uuid,
                 version=version,
                 cluster_tag=cluster_tag,
+                trtllm_config=trtllm_cfg,
             )
 
         try:
@@ -274,8 +327,8 @@ def _run_test(
                 ",".join(workload_keys),
                 model_cfg,
                 accelerator,
-                vllm_image,
-                vllm_args,
+                serving_image,
+                engine_args,
                 benchmark_cfg,
                 first_rates,
                 first_max_seconds,
@@ -318,8 +371,8 @@ def _run_workload_benchmark(
     accelerator: str,
     accelerator_key: str,
     gpu_type: str,
-    vllm_image: str,
-    vllm_args: dict,
+    serving_image: str,
+    engine_args: dict,
     benchmark_cfg: dict,
     deployment_name: str,
     namespace: str,
@@ -328,6 +381,7 @@ def _run_workload_benchmark(
     run_uuid: str,
     version: str,
     cluster_tag: str,
+    trtllm_config: dict | None = None,
 ) -> None:
     """Run benchmark and post-processing for a single workload.
 
@@ -353,13 +407,14 @@ def _run_workload_benchmark(
             model_key,
             workload_key,
             accelerator,
-            vllm_args,
+            engine_args,
             hf_model_id=model_cfg["hf_model_id"],
             version=version,
-            vllm_image=vllm_image,
+            serving_image=serving_image,
             cluster_tag=cluster_tag,
             accelerator_chip=gpu_type.upper(),
             run_uuid=run_uuid,
+            trtllm_config=trtllm_config,
         )
 
         if not run_benchmark:
@@ -370,7 +425,7 @@ def _run_workload_benchmark(
                 run_standalone_analysis(
                     model_cfg,
                     accelerator_key,
-                    vllm_args,
+                    engine_args,
                     run_uuid=run_uuid,
                     restrict_profiles=[workload_key],
                 )
@@ -399,6 +454,7 @@ def _run_workload_benchmark(
                 pvc_size=benchmark_cfg.get("pvc_size", "5Gi"),
                 guidellm_args=guidellm_args,
                 hf_token_secret=benchmark_cfg.get("hf_token_secret", ""),
+                fs_group=benchmark_cfg.get("fs_group"),
             )
 
 
@@ -406,22 +462,35 @@ def _create_test_labels(
     model_key: str,
     workload_key: str,
     accelerator: str,
-    vllm_args: dict,
+    engine_args: dict,
     *,
     hf_model_id: str = "",
     version: str = "",
-    vllm_image: str = "",
+    serving_image: str = "",
     cluster_tag: str = "",
     accelerator_chip: str = "",
     run_uuid: str = "",
+    trtllm_config: dict | None = None,
 ) -> None:
-    _, image_tag = runtime_config.split_image_tag(vllm_image) if vllm_image else ("", "")
-    runtime_args = "; ".join(f"{k}: {v}" for k, v in vllm_args.items())
+    _, image_tag = runtime_config.split_image_tag(serving_image) if serving_image else ("", "")
+    parts = [f"{k}: {v}" for k, v in engine_args.items()]
+    for key, value in (trtllm_config or {}).items():
+        formatted_value = (
+            json.dumps(value, separators=(",", ":")) if isinstance(value, (dict, list)) else value
+        )
+        parts.append(f"trtllm.{key}: {formatted_value}")
+    runtime_args = "; ".join(parts)
+    tp = (
+        engine_args.get("tensor-parallel-size")
+        or engine_args.get("tp-size")
+        or engine_args.get("tp_size")
+        or 1
+    )
     labels = {
         "model_key": model_key,
         "workload_key": workload_key,
         "accelerator": accelerator_chip or accelerator,
-        "tensor_parallel_size": str(vllm_args.get("tensor-parallel-size", 1)),
+        "tensor_parallel_size": str(tp),
         "hf_model_id": hf_model_id,
         "version": version,
         "image_tag": image_tag,
@@ -438,8 +507,8 @@ def _set_mlflow_metadata(
     workload_key: str,
     model_cfg: dict,
     accelerator: str,
-    vllm_image: str,
-    vllm_args: dict,
+    serving_image: str,
+    engine_args: dict,
     benchmark_cfg: dict,
     rates: list[int],
     max_seconds: int,
@@ -448,18 +517,24 @@ def _set_mlflow_metadata(
 ) -> None:
     from projects.core.library import config
 
-    image_name, image_tag = runtime_config.split_image_tag(vllm_image)
+    image_name, image_tag = runtime_config.split_image_tag(serving_image)
     guidellm_image = benchmark_cfg.get("image", "ghcr.io/vllm-project/guidellm:v0.6.0")
     benchmark_args = benchmark_cfg.get("args", {})
+    tp = (
+        engine_args.get("tensor-parallel-size")
+        or engine_args.get("tp-size")
+        or engine_args.get("tp_size")
+        or 1
+    )
 
     tags = {
         "project": "rhaiis",
         "model_key": model_key,
         "hf_model_id": model_cfg["hf_model_id"],
         "accelerator": accelerator,
-        "tensor_parallel_size": str(vllm_args.get("tensor-parallel-size", 1)),
-        "vllm_image": vllm_image,
-        "vllm_version": image_tag,
+        "tensor_parallel_size": str(tp),
+        "serving_image": serving_image,
+        "serving_version": image_tag,
         "workload_key": workload_key,
         "rates": ",".join(str(r) for r in rates),
         "max_seconds": str(max_seconds),
@@ -521,9 +596,10 @@ def _sync_postprocessed_dashboard_csv(model_key: str, workload_keys: list[str]) 
 
     model_cfg = runtime_config.get_model(model_key)
     accelerator = runtime_config.get_accelerator()
-    vllm_defaults = runtime_config.get_vllm_defaults()
+    engine = runtime_config.get_engine()
+    engine_defaults = runtime_config.get_engine_args(engine)
     first_workload = runtime_config.get_workload(workload_keys[0])
-    vllm_args = runtime_config.merge_vllm_args(vllm_defaults, model_cfg, first_workload)
+    ea = runtime_config.merge_engine_args(engine_defaults, model_cfg, first_workload, engine)
 
     from projects.rhaiis.orchestration.analysis import run_regression_check
 
@@ -534,7 +610,7 @@ def _sync_postprocessed_dashboard_csv(model_key: str, workload_keys: list[str]) 
         model_cfg,
         accelerator,
         run_uuid="",
-        vllm_args=vllm_args,
+        engine_args=ea,
     )
 
 
@@ -606,6 +682,7 @@ def _run_warmup_step(
             pvc_size=benchmark_cfg.get("pvc_size", "5Gi"),
             guidellm_args=guidellm_args,
             hf_token_secret=benchmark_cfg.get("hf_token_secret", ""),
+            fs_group=benchmark_cfg.get("fs_group"),
         )
         logger.info("Warmup completed")
     except Exception:
@@ -671,6 +748,7 @@ def _run_profiler_step(
                 pvc_size=benchmark_cfg.get("pvc_size", "5Gi"),
                 guidellm_args=guidellm_args,
                 hf_token_secret=benchmark_cfg.get("hf_token_secret", ""),
+                fs_group=benchmark_cfg.get("fs_group"),
             )
         finally:
             enable_profiler_gate(
@@ -717,7 +795,7 @@ def _infer_profile_labels_from_traces(trace_files: list) -> list[str]:
 def _upload_profiler_traces(
     model_cfg: dict,
     accelerator: str,
-    vllm_args: dict,
+    engine_args: dict,
     profiler_cfg: dict,
 ) -> None:
     from pathlib import Path
@@ -757,7 +835,12 @@ def _upload_profiler_traces(
         traces_dir,
         model_name=model_cfg.get("hf_model_id", ""),
         accelerator=accelerator,
-        tp_size=int(vllm_args.get("tensor-parallel-size", 1)),
+        tp_size=int(
+            engine_args.get("tensor-parallel-size")
+            or engine_args.get("tp-size")
+            or engine_args.get("tp_size")
+            or 1
+        ),
         version=version,
         profile_labels=profile_labels,
         s3_bucket=s3_cfg.get("bucket", ""),
