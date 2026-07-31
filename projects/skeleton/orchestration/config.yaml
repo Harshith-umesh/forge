@@ -77,11 +77,6 @@ caliper:
         enabled: true
         output_dir: ai_data
 
-    analyze:
-      enabled: true
-      historical_kpis: historical_data
-      output: regression_analyze/kpi_analyze.json
-
     s3:
       bucket: psap-dashboard-data
       instance: smoke
@@ -103,6 +98,13 @@ caliper:
         include_csv: false
         include_kpis_json: true
         include_ai_data: true
+
+    analyze:
+      enabled: true
+      current_kpis: kpis/kpis.json
+      historical_kpis: historical_data
+      output: regression_analyze/kpi_analyze.json
+
 
 agentic:
   enabled: false
