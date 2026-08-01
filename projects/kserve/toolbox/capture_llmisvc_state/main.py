@@ -312,5 +312,126 @@ def capture_pods_describe(args, context):
     return f"Pod describe output captured for {len(pod_names)} pods"
 
 
+@task
+def determine_used_nodes(args, context):
+    """Determine which nodes are used by LLMInferenceService pods"""
+    result = shell.run(
+        f'oc get pods -l "app.kubernetes.io/name={args.llmisvc_name}" -n {context.target_namespace} -o jsonpath="{{.items[*].spec.nodeName}}"',
+        check=False,
+        log_stdout=False,
+    )
+
+    node_names = list(set(result.stdout.strip().split()))  # Remove duplicates
+    if not node_names or not result.stdout.strip():
+        context.used_nodes = []
+        return "No nodes found for LLMInferenceService pods"
+
+    context.used_nodes = [node for node in node_names if node]  # Filter out empty strings
+    return f"Found {len(context.used_nodes)} nodes used by LLMInferenceService pods: {', '.join(context.used_nodes)}"
+
+
+@task
+def capture_pod_node_mapping(args, context):
+    """Capture pod->node mapping as YAML"""
+    result = shell.run(
+        f'oc get pods -l "app.kubernetes.io/name={args.llmisvc_name}" -n {context.target_namespace} -o custom-columns=POD:.metadata.name,NODE:.spec.nodeName --no-headers',
+        check=False,
+        log_stdout=False,
+    )
+
+    if not result.stdout.strip():
+        return "No pod->node mapping found"
+
+    mapping_file = args.artifact_dir / "artifacts/pod_node_mapping.yaml"
+    pod_node_mapping = {}
+
+    for line in result.stdout.strip().split("\n"):
+        if line.strip():
+            parts = line.split()
+            if len(parts) >= 2:
+                pod_name = parts[0]
+                node_name = parts[1] if parts[1] != "<none>" else None
+                pod_node_mapping[pod_name] = node_name
+
+    import yaml
+
+    with open(mapping_file, "w") as f:
+        yaml.safe_dump(
+            {"pod_node_mapping": pod_node_mapping, "capture_timestamp": context.capture_timestamp},
+            f,
+            default_flow_style=False,
+        )
+
+    return f"Pod->node mapping captured to {mapping_file} ({len(pod_node_mapping)} pods)"
+
+
+@task
+def capture_node_gpu_mapping(args, context):
+    """Capture node->GPU type mapping as YAML"""
+    if not context.used_nodes:
+        return "No nodes to capture GPU mapping for"
+
+    node_gpu_mapping = {}
+
+    for node_name in context.used_nodes:
+        # Try nvidia.com/gpu.product first
+        result = shell.run(
+            f'oc get node {node_name} -o jsonpath="{{.metadata.labels.nvidia\\.com/gpu\\.product}}"',
+            check=False,
+            log_stdout=False,
+        )
+        gpu_type = result.stdout.strip()
+
+        # If not found, try gpu.nvidia.com/class as fallback
+        if not gpu_type:
+            result = shell.run(
+                f'oc get node {node_name} -o jsonpath="{{.metadata.labels.gpu\\.nvidia\\.com/class}}"',
+                check=False,
+                log_stdout=False,
+            )
+            gpu_class = result.stdout.strip()
+            if gpu_class:
+                gpu_type = f"NVIDIA-{gpu_class}"
+            else:
+                gpu_type = "unknown"
+
+        node_gpu_mapping[node_name] = gpu_type
+
+    mapping_file = args.artifact_dir / "artifacts/node_gpu_mapping.yaml"
+
+    import yaml
+
+    with open(mapping_file, "w") as f:
+        yaml.safe_dump(
+            {"node_gpu_mapping": node_gpu_mapping, "capture_timestamp": context.capture_timestamp},
+            f,
+            default_flow_style=False,
+        )
+
+    return f"Node->GPU mapping captured to {mapping_file} ({len(node_gpu_mapping)} nodes)"
+
+
+@task
+def capture_used_nodes_yaml(args, context):
+    """Capture YAML definitions for nodes used by LLMInferenceService pods"""
+    if not context.used_nodes:
+        return "No nodes to capture YAML for"
+
+    nodes_dir = args.artifact_dir / "artifacts/nodes"
+    shell.mkdir("artifacts/nodes")
+
+    captured_count = 0
+    for node_name in context.used_nodes:
+        node_file = nodes_dir / f"{node_name}.yaml"
+        shell.run(
+            f"oc get node {node_name} -oyaml",
+            stdout_dest=node_file,
+            check=False,
+        )
+        captured_count += 1
+
+    return f"Captured YAML for {captured_count} nodes in {nodes_dir}"
+
+
 if __name__ == "__main__":
     run.main()
