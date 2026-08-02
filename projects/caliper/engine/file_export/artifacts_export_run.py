@@ -252,3 +252,164 @@ def run_artifacts_export(
     if any(r.status == "failure" for r in results):
         return 4
     return 0
+
+
+METRICS_FILE = "metrics.json"
+PARAMETERS_FILE = "parameters.json"
+TEST_LABELS_MARKER = "__test_labels__.yaml"
+
+
+def discover_run_dirs(from_path: Path) -> list[Path]:
+    """Auto-detect test run directories via ``__test_labels__.yaml`` markers."""
+    run_dirs: list[Path] = []
+    for marker in sorted(from_path.rglob(TEST_LABELS_MARKER)):
+        if marker.is_file():
+            run_dirs.append(marker.parent)
+    return run_dirs
+
+
+def run_multi_run_artifacts_export(
+    *,
+    from_path: Path,
+    run_dirs: list[Path],
+    backend: tuple[str, ...] | list[str],
+    mlflow_experiment: str | None = None,
+    mlflow_run_name: str | None = None,
+    mlflow_secrets_path: Path | None = None,
+    mlflow_config_data: dict[str, Any] | None = None,
+    child_run_names: dict[Path, str] | None = None,
+    verbose: bool = False,
+    status_yaml_path: Path | None = None,
+    upload_workers: int = 10,
+) -> int:
+    """Run multi-run file export (parent + nested child MLflow runs).
+
+    Mirrors :func:`run_artifacts_export` for the multi-run case.
+    Returns a process exit code (0 = success, 1 = config error, 4 = export failure).
+    """
+    from projects.caliper.engine.file_export import mlflow_backend
+
+    backends = [b.strip().lower() for b in backend if b.strip()]
+    if not backends:
+        click.echo("Specify at least one --backend.", err=True)
+        return 1
+
+    if "mlflow" not in backends:
+        click.echo(
+            f"only 'mlflow' backend export is supported for multi-run "
+            f"(got '{' '.join(backends)}').",
+            err=True,
+        )
+        return 1
+
+    secrets_data: dict[str, Any] | None = None
+    config_data: dict[str, Any] | None = None
+    if mlflow_secrets_path is not None:
+        try:
+            secrets_data = load_mlflow_secrets_yaml(mlflow_secrets_path)
+            validate_mlflow_secrets(secrets_data)
+        except (OSError, ValueError, TypeError, yaml.YAMLError) as e:
+            click.echo(f"Invalid MLflow secrets file: {e}", err=True)
+            return 1
+    if mlflow_config_data is not None:
+        try:
+            config_data = dict(mlflow_config_data)
+            validate_mlflow_config(config_data)
+        except (ValueError, TypeError) as e:
+            click.echo(f"Invalid MLflow settings dict: {e}", err=True)
+            return 1
+
+    merged_ml = merge_mlflow_files_with_cli(
+        None,
+        secrets_data=secrets_data,
+        config_data=config_data,
+        cli_tracking_uri=None,
+        cli_experiment=mlflow_experiment,
+        cli_run_id=None,
+        cli_run_name=mlflow_run_name,
+    )
+
+    secret_part = project_secrets_fields(merged_ml)
+    mlflow_connection = secret_part if secret_part else None
+
+    tracking_uri = merged_ml.get("tracking_uri")
+    experiment = merged_ml.get("experiment")
+    run_name = mlflow_run_name or merged_ml.get("run_name")
+    workspace = merged_ml.get("workspace")
+    if not workspace:
+        click.echo("The export workspace must be specified", err=True)
+        return 1
+
+    meta = project_metadata_fields(merged_ml)
+    run_metadata = meta if meta else None
+
+    insecure_tls = bool(mlflow_connection and mlflow_connection.get("insecure_tls"))
+
+    if not tracking_uri:
+        tracking_uri = os.environ.get("MLFLOW_TRACKING_URI")
+    if not tracking_uri:
+        click.echo("MLflow backend requires a tracking URI.", err=True)
+        return 1
+    try:
+        assert_tracking_uri_has_no_userinfo(tracking_uri)
+    except ValueError as e:
+        click.echo(f"Invalid MLflow tracking URI: {e}", err=True)
+        return 1
+
+    all_artifact_paths = [p for p in from_path.rglob("*") if p.is_file()]
+
+    if verbose:
+        click.echo("caliper multi-run export (verbose)", err=True)
+        click.echo(f"  Source: {from_path}", err=True)
+        click.echo(f"  Total artifact files: {len(all_artifact_paths)}", err=True)
+        click.echo(f"  Run directories: {len(run_dirs)}", err=True)
+        click.echo(f"  Workspace: {workspace}", err=True)
+        for rd in run_dirs:
+            click.echo(f"    - {rd.name}", err=True)
+        click.echo("", err=True)
+
+    try:
+        detail, ml_meta = mlflow_backend.log_multi_run_artifacts(
+            all_artifact_paths=all_artifact_paths,
+            artifact_root=from_path,
+            run_dirs=run_dirs,
+            metrics_file=METRICS_FILE,
+            parameters_file=PARAMETERS_FILE,
+            tracking_uri=tracking_uri,
+            experiment=experiment,
+            parent_run_name=run_name,
+            insecure_tls=insecure_tls,
+            connection=mlflow_connection,
+            verbose=verbose,
+            upload_workers=upload_workers,
+            run_metadata=run_metadata,
+            workspace=workspace,
+            child_run_names=child_run_names or None,
+        )
+        results = [
+            FileExportBackendResult(
+                backend="mlflow",
+                status="success",
+                detail=detail,
+                metadata=ml_meta,
+            )
+        ]
+    except Exception as e:
+        traceback.print_exception(e, file=sys.stderr)
+        click.echo(f"multi-run export failed: {e}", err=True)
+        results = [FileExportBackendResult(backend="mlflow", status="failure", detail=str(e))]
+
+    for r in results:
+        click.echo(f"{r.backend}: {r.status} {r.detail}")
+
+    if status_yaml_path is not None:
+        try:
+            write_artifacts_status_yaml(status_yaml_path, results)
+            click.echo(f"Wrote status YAML to {status_yaml_path}")
+        except OSError as e:
+            click.echo(f"Failed to write status YAML ({status_yaml_path}): {e}", err=True)
+            return 4
+
+    if any(r.status == "failure" for r in results):
+        return 4
+    return 0
