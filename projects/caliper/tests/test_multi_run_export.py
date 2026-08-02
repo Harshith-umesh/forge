@@ -20,12 +20,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
-from projects.caliper.engine.file_export.artifacts_export_run import (
-    METRICS_FILE,
-    PARAMETERS_FILE,
-    TEST_LABELS_MARKER,
-    discover_run_dirs,
-)
+from projects.caliper.engine.file_export.artifacts_export_run import discover_run_dirs
+
+METRICS_FILE = "metrics.json"
+PARAMETERS_FILE = "parameters.json"
+TEST_LABELS_MARKER = "__test_labels__.yaml"
 
 
 def _write_test_labels(directory: Path, labels: dict) -> None:

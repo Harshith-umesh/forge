@@ -254,15 +254,10 @@ def run_artifacts_export(
     return 0
 
 
-METRICS_FILE = "metrics.json"
-PARAMETERS_FILE = "parameters.json"
-TEST_LABELS_MARKER = "__test_labels__.yaml"
-
-
 def discover_run_dirs(from_path: Path) -> list[Path]:
     """Auto-detect test run directories via ``__test_labels__.yaml`` markers."""
     run_dirs: list[Path] = []
-    for marker in sorted(from_path.rglob(TEST_LABELS_MARKER)):
+    for marker in sorted(from_path.rglob("__test_labels__.yaml")):
         if marker.is_file():
             run_dirs.append(marker.parent)
     return run_dirs
@@ -373,8 +368,8 @@ def run_multi_run_artifacts_export(
             all_artifact_paths=all_artifact_paths,
             artifact_root=from_path,
             run_dirs=run_dirs,
-            metrics_file=METRICS_FILE,
-            parameters_file=PARAMETERS_FILE,
+            metrics_file="metrics.json",
+            parameters_file="parameters.json",
             tracking_uri=tracking_uri,
             experiment=experiment,
             parent_run_name=run_name,
