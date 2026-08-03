@@ -233,10 +233,10 @@ def test_prepare_phase_adds_rhoai_custom_catalog_vaults_only_for_custom_catalog_
     core_config.project.set_config("platform.rhoai.custom_catalog.enabled", True)
     llmd_ci.init_vaults_for_phase("prepare")
 
-    assert "psap-rhoai-rc" not in calls[0]["optional_vaults"]
-    assert "psap-forge-staging-image-pull" not in calls[0]["optional_vaults"]
-    assert "psap-rhoai-rc" in calls[1]["optional_vaults"]
-    assert "psap-forge-staging-image-pull" in calls[1]["optional_vaults"]
+    assert "psap-rhoai-rc" not in calls[0]["mandatory_vaults"]
+    assert "psap-forge-staging-image-pull" not in calls[0]["mandatory_vaults"]
+    assert "psap-rhoai-rc" in calls[1]["mandatory_vaults"]
+    assert "psap-forge-staging-image-pull" in calls[1]["mandatory_vaults"]
 
 
 def test_prepare_rhoai_operator_runs_registry_setup_before_custom_catalog_deployment(
@@ -600,7 +600,7 @@ def test_single_benchmark_key_backward_compatible() -> None:
     assert len(run_specs) == 1
     assert run_specs[0].benchmark_key == "short"
     assert run_specs[0].benchmark_slug == "short"
-    assert run_specs[0].artifact_dirname == "llmd__short"
+    assert run_specs[0].artifact_dirname == "llmd__short__approximate-prefix-cache"
 
 
 def test_activate_run_spec_sets_benchmark_key() -> None:
@@ -648,14 +648,6 @@ def test_benchmark_deployment_overrides_empty_when_no_benchmark() -> None:
 
     overrides = runtime_config.get_benchmark_deployment_overrides()
     assert overrides == {}
-
-
-def test_runtime_rejects_legacy_model_key_path() -> None:
-    _init_project_config()
-
-    core_config.project.config.setdefault("runtime", {})["model_key"] = "qwen3-0-6b"
-    with pytest.raises(ValueError, match="runtime.model_key"):
-        runtime_config.get_run_specs()
 
 
 def test_render_uses_sanitized_model_name_and_profile_resources() -> None:

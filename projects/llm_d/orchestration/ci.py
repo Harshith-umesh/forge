@@ -10,6 +10,7 @@ from pathlib import Path
 
 import click
 
+from projects.caliper.orchestration.postprocess_outcome import TestPhaseOutcome
 from projects.core.agentic.config_review import trigger_config_review_for_ci
 from projects.core.agentic.on_failure import agent_review_on_failure
 from projects.core.ci_entrypoint.fournos_resolve import create_fournos_resolve_entrypoint
@@ -21,11 +22,11 @@ from projects.core.library.export import (
     caliper_export_list_optional_vaults,
     caliper_export_list_vaults,
 )
+from projects.core.library.postprocess import run_postprocess_after_test
 from projects.core.library.replot import caliper_replot_entrypoint
 from projects.llm_d.orchestration.cleanup_phase import run as cleanup_toolbox_run
 from projects.llm_d.orchestration.preflight_phase import run as preflight_toolbox_run
 from projects.llm_d.orchestration.prepare_sequence import run_prepare_sequence
-from projects.llm_d.orchestration.test_phase import run as test_toolbox_run
 
 logger = logging.getLogger(__name__)
 RHOAI_CUSTOM_CATALOG_VAULTS = [
@@ -68,7 +69,7 @@ def init_vaults_for_phase(phase: str) -> None:
     if phase == "prepare" and config.project.get_config(
         "platform.rhoai.custom_catalog.enabled", False
     ):
-        optional_vaults = [*optional_vaults, *RHOAI_CUSTOM_CATALOG_VAULTS]
+        mandatory_vaults = [*mandatory_vaults, *RHOAI_CUSTOM_CATALOG_VAULTS]
 
     vault.init(mandatory_vaults=mandatory_vaults, optional_vaults=optional_vaults)
 
@@ -121,17 +122,38 @@ def preflight(ctx) -> int:
 @agent_review_on_failure
 def test(ctx) -> int:
     """Test phase - Execute the main testing logic."""
-    from projects.llm_d.orchestration import runtime_config
 
     # Trigger config review analysis asynchronously (don't block test execution)
     trigger_config_review_for_ci(env.BASE_ARTIFACT_DIR, async_mode=True)
 
-    exit_code = 0
-    for run_spec in runtime_config.get_run_specs():
-        with runtime_config.activate_run_spec(run_spec):
-            with env.NextArtifactDir(run_spec.artifact_dirname):
-                exit_code = max(exit_code, test_toolbox_run())
-    return exit_code
+    # Run all tests first
+    from projects.llm_d.orchestration.test_phase import run_all_tests
+
+    max_exit_code = run_all_tests(stop_on_error=False)
+
+    test_failed = max_exit_code != 0
+    failure_message = f"Tests completed with exit code {max_exit_code}" if test_failed else None
+
+    # Run post-processing once after all tests
+    try:
+        if test_failed and failure_message:
+            outcome = TestPhaseOutcome("FAILED", failure_message)
+        elif max_exit_code == 0:
+            outcome = TestPhaseOutcome("SUCCESS")
+        else:
+            outcome = TestPhaseOutcome("FAILED", f"exit_code={max_exit_code}")
+
+        status = run_postprocess_after_test(env.BASE_ARTIFACT_DIR, test_outcome=outcome)
+
+        if status is None or not status.get("success", False):
+            if max_exit_code == 0:
+                max_exit_code = 1  # Set exit code to 1 if post-processing failed but tests passed
+
+    except Exception:
+        if max_exit_code == 0:
+            max_exit_code = 1  # Set exit code to 1 if post-processing failed but tests passed
+
+    return max_exit_code
 
 
 @main.command()

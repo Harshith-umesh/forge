@@ -53,16 +53,7 @@ def ensure_artifact_directories(artifact_dir: Path) -> None:
 
 
 def _get_runtime_value(key: str) -> Any:
-    return config.project.get_config(f"runtime.{key}", None)
-
-
-def _assert_no_legacy_model_key() -> None:
-    legacy_model_key = _get_runtime_value("model_key")
-    if legacy_model_key not in (None, ""):
-        raise ValueError(
-            "llm_d no longer supports runtime.model_key. "
-            "Use runtime.model_name with a literal Hugging Face model name instead."
-        )
+    return config.project.get_config(f"runtime.{key}", None, warn=False)
 
 
 def _normalize_string_or_list(value: Any, field_name: str) -> list[str]:
@@ -161,6 +152,11 @@ def _extract_value_from_profile_name(profile_name: str, field_name: str) -> int:
             match = re.search(r"p\.tp(\d+)", profile_name)
             if match:
                 return int(match.group(1))
+        elif field_name == "decode_tensor_parallelism":
+            # Look for d.tp4 pattern (decode tensor_parallelism)
+            match = re.search(r"d\.tp(\d+)", profile_name)
+            if match:
+                return int(match.group(1))
     else:
         # Standard patterns: simple-tp4-x4, intelligentrouting-tp4-x4
         if field_name == "tensor_parallelism":
@@ -200,7 +196,17 @@ def _resolve_from_name_values(profile_name: str, profile_data: dict[str, Any]) -
             return [resolve_value(item, path) for item in obj]
         elif obj == "FROM_NAME":
             # Determine which field to extract based on the path
-            field_name = path.split(".")[-1]  # Get the last part of the path
+            path_parts = path.split(".")
+            field_name = path_parts[-1]  # Get the last part of the path
+
+            # Map field names for P/D deployments
+            if len(path_parts) >= 2 and path_parts[-2] in ("prefill", "decode"):
+                container_type = path_parts[-2]  # prefill or decode
+                if field_name == "replicas":
+                    field_name = f"{container_type}_pods"
+                elif field_name == "tensor_parallelism":
+                    field_name = f"{container_type}_tensor_parallelism"
+
             try:
                 return _extract_value_from_profile_name(profile_name, field_name)
             except ValueError as e:
@@ -241,7 +247,6 @@ def _load_scheduler_with_epp_config(
     # Load the router template
     router_template_path = config_dir / router_template_file
     if not router_template_path.exists():
-        # Fallback to legacy behavior if template doesn't exist
         raise FileNotFoundError(f"Router template not found at {router_template_path}")
 
     # Load the EPP config content
@@ -293,7 +298,9 @@ def get_job_name() -> str:
 
 def get_platform_config() -> dict[str, Any]:
     """Get the normalized platform configuration"""
-    return normalize_platform_config(copy.deepcopy(config.project.get_config("platform")))
+    return normalize_platform_config(
+        copy.deepcopy(config.project.get_config("platform", print=False))
+    )
 
 
 def get_namespace() -> str:
@@ -303,7 +310,7 @@ def get_namespace() -> str:
 
 def get_model_name() -> str:
     """Get the selected Hugging Face model name"""
-    _assert_no_legacy_model_key()
+
     model_names = _normalize_string_or_list(_get_runtime_value("model_name"), "runtime.model_name")
     if len(model_names) != 1:
         raise ValueError(
@@ -335,7 +342,7 @@ def get_served_model_name(model_name: str | None = None) -> str:
 
 def get_model_cache_config() -> dict[str, Any]:
     """Get the model cache configuration"""
-    return copy.deepcopy(config.project.get_config("model_cache"))
+    return copy.deepcopy(config.project.get_config("model_cache", print=False))
 
 
 def get_benchmark_keys() -> list[str]:
@@ -344,14 +351,20 @@ def get_benchmark_keys() -> list[str]:
 
 def _resolve_benchmark_config(benchmark_name: str) -> dict[str, Any]:
     benchmark = copy.deepcopy(
-        config.project.get_config(f"workloads.benchmarks['{benchmark_name}']")
+        config.project.get_config(f"workloads.benchmarks['{benchmark_name}']", print=False)
     )
-    workload_defaults = copy.deepcopy(config.project.get_config("workloads"))
+    workload_defaults = copy.deepcopy(config.project.get_config("workloads", print=False))
 
     default_keys = ("job_name", "image", "pvc_size", "timeout_seconds")
     for key in default_keys:
         if key in workload_defaults and key not in benchmark:
             benchmark[key] = workload_defaults[key]
+
+    # Merge vllm_args from default benchmark if not present in specific benchmark
+    if "vllm_args" not in benchmark:
+        default_benchmark = workload_defaults.get("benchmarks", {}).get("default", {})
+        if "vllm_args" in default_benchmark:
+            benchmark["vllm_args"] = copy.deepcopy(default_benchmark["vllm_args"])
 
     benchmark_args = benchmark.get("args", {})
     workload_args = workload_defaults.get("args", {})
@@ -372,6 +385,34 @@ def get_benchmark_config() -> dict[str, Any] | None:
             f"got {benchmark_keys}"
         )
     return _resolve_benchmark_config(benchmark_keys[0])
+
+
+def get_workload_config() -> dict[str, Any] | None:
+    """Get workload configuration, falling back to default if no benchmark is specified."""
+    benchmark_config = get_benchmark_config()
+    if benchmark_config:
+        return benchmark_config
+
+    # No benchmark specified, return default workload configuration
+    workload_defaults = copy.deepcopy(config.project.get_config("workloads", print=False))
+    default_benchmark = workload_defaults.get("benchmarks", {}).get("default", {})
+
+    if not default_benchmark:
+        return None
+
+    # Apply same merging logic as _resolve_benchmark_config
+    default_keys = ("job_name", "image", "pvc_size", "timeout_seconds")
+    for key in default_keys:
+        if key in workload_defaults and key not in default_benchmark:
+            default_benchmark[key] = workload_defaults[key]
+
+    # Merge args from workloads.args to default benchmark args
+    benchmark_args = default_benchmark.get("args", {})
+    workload_args = workload_defaults.get("args", {})
+    if workload_args:
+        default_benchmark["args"] = deep_merge(workload_args, benchmark_args)
+
+    return default_benchmark
 
 
 def get_benchmark_deployment_overrides() -> dict[str, Any]:
@@ -433,7 +474,7 @@ def _resolve_template_profile(
 
 def get_deployment_profile() -> dict[str, Any]:
     profile_name = get_deployment_profile_name()
-    deployment_config = copy.deepcopy(config.project.get_config("deployments"))
+    deployment_config = copy.deepcopy(config.project.get_config("deployments", print=False))
 
     # First try direct profile lookup in profiles section
     profiles = deployment_config.get("profiles", {})
@@ -475,17 +516,19 @@ def get_deployment_profile() -> dict[str, Any]:
 
     resolved_profile = deep_merge(resolved_profile, scheduler_content)
 
-    # force the scheduler to run on a GPU node.
-    # 'gpu.present: true' doesn't work on AKS/CKS
-    scheduler_node_selector = {
-        "scheduler": {
-            "template": {
-                "nodeSelector": {"nvidia.com/gpu.deploy.container-toolkit": "true"},
+    # Configure scheduler node selector from platform config
+    platform_node_selector = config.project.get_config(
+        "platform.inference_service.scheduler.node_selector"
+    )
+    if platform_node_selector:
+        scheduler_node_selector = {
+            "scheduler": {
+                "template": {
+                    "nodeSelector": platform_node_selector,
+                }
             }
         }
-    }
-
-    resolved_profile = deep_merge(resolved_profile, scheduler_node_selector)
+        resolved_profile = deep_merge(resolved_profile, scheduler_node_selector)
 
     return resolved_profile
 
@@ -498,12 +541,28 @@ def get_pd_config() -> dict[str, Any]:
 
 def get_prefill_pod_count() -> int:
     """Get number of prefill pods for current deployment profile."""
+    profile_name = get_deployment_profile_name()
+    if profile_name:
+        try:
+            return _extract_value_from_profile_name(profile_name, "prefill_pods")
+        except ValueError:
+            pass
+
+    # Fallback to pd_config if profile name extraction fails
     pd_config = get_pd_config()
     return pd_config.get("prefill_pods", 1)
 
 
 def get_decode_pod_count() -> int:
     """Get number of decode pods for current deployment profile."""
+    profile_name = get_deployment_profile_name()
+    if profile_name:
+        try:
+            return _extract_value_from_profile_name(profile_name, "decode_pods")
+        except ValueError:
+            pass
+
+    # Fallback to pd_config if profile name extraction fails
     pd_config = get_pd_config()
     return pd_config.get("decode_pods", 1)
 
@@ -527,7 +586,6 @@ def get_smoke_request() -> dict[str, Any]:
 
 
 def get_run_specs() -> list[RunSpec]:
-    _assert_no_legacy_model_key()
     model_names = _normalize_string_or_list(_get_runtime_value("model_name"), "runtime.model_name")
     profile_names = _normalize_string_or_list(
         _get_runtime_value("deployment_profile"),
@@ -570,7 +628,7 @@ def get_run_specs() -> list[RunSpec]:
                 benchmark_key=bench_key,
                 benchmark_slug=bench_slug,
                 namespace=namespace,
-                artifact_dirname=f"llmd__{bench_key or 'default'}",
+                artifact_dirname=f"llmd__{bench_key or 'default'}__{profile_slug}",
             )
         )
 

@@ -1,0 +1,7 @@
+rhoai-rc:
+  platform.rhoai.custom_catalog.enabled: true
+  platform.operators.rhods-operator.channel: beta
+
+rhoai-3.5-ea.2:
+  extends: [rhoai-rc]
+  platform.rhoai.custom_catalog.image: quay.io/rhoai/rhoai-fbc-fragment@sha256:e213152dc5bdaaf5724d269484914f3e1d7b4a4959d4405cb3eca9dd6297b310

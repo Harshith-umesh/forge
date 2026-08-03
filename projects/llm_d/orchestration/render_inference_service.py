@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,8 @@ import yaml
 
 from projects.core.dsl.utils import slugify_identifier, truncate_k8s_name
 from projects.core.library import config
+
+logger = logging.getLogger(__name__)
 
 
 def _load_yaml(path: Path) -> Any:
@@ -64,13 +67,14 @@ def render_inference_service_from_parts(
     deployment_profile: dict[str, Any],
     model_cache: dict[str, Any],
     deployment_profile_name: str | None = None,
+    workload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Render an llm_d-owned LLMInferenceService manifest from concrete runtime inputs."""
     template_path = Path(config_dir) / inference_service["template"]
     manifest = _load_yaml(template_path)
 
     # Check if this is a P/D deployment
-    is_pd_deployment = "pd_config" in deployment_profile
+    is_pd_deployment = "prefill" in deployment_profile
 
     name = inference_service["name"]
     if deployment_profile_name:
@@ -115,17 +119,61 @@ def render_inference_service_from_parts(
 
     if is_pd_deployment:
         rendered_manifest = _render_pd_deployment(
-            manifest, deployment_profile, deployment_profile_name
+            manifest, deployment_profile, deployment_profile_name, workload
         )
     else:
         rendered_manifest = _render_standard_deployment(
-            manifest, deployment_profile, deployment_profile_name
+            manifest, deployment_profile, deployment_profile_name, workload
         )
 
     # Apply Kueue configuration if enabled
-    _apply_kueue_configuration(rendered_manifest)
+    _apply_kueue_configuration(rendered_manifest, deployment_profile)
 
     return rendered_manifest
+
+
+def handle_pd_resources(
+    base_resources: dict[str, Any],
+    deployment_profile: dict[str, Any],
+    is_prefill: bool = False,
+) -> None:
+    """Handle P/D resource configuration, including DRA support.
+
+    Args:
+        base_resources: Base resources dict to modify in-place
+        deployment_profile: Deployment profile configuration
+        is_prefill: Whether this is for a prefill container
+    """
+    pd_resources = config.project.get_config("deployments.pd.resources")
+
+    if pd_resources == "composite.dra.io/gpu-nic-pair":
+        # Handle DRA (Dynamic Resource Allocation) case
+        if is_prefill:
+            # For prefill pods, use prefill tensor parallelism
+            tensor_parallelism = deployment_profile["prefill"]["tensor_parallelism"]
+        else:
+            # For decode pods, use decode tensor parallelism
+            tensor_parallelism = deployment_profile["decode"]["tensor_parallelism"]
+
+        # Override GPU resources for DRA
+        for bound in ("requests", "limits"):
+            if bound not in base_resources:
+                base_resources[bound] = {}
+            # Set nvidia.com/gpu to 0 and add composite DRA resource
+            base_resources[bound]["nvidia.com/gpu"] = "0"
+            base_resources[bound][pd_resources] = str(tensor_parallelism)
+    elif isinstance(pd_resources, dict):
+        # Normal case: pd_resources is a dictionary to merge
+        for bound in ("requests", "limits"):
+            if bound not in base_resources:
+                base_resources[bound] = {}
+            base_resources[bound].update(pd_resources)
+    elif pd_resources is not None:
+        # Handle unexpected pd_resources type
+        raise ValueError(
+            f"Unexpected type for deployments.pd.resources: {type(pd_resources)}, value: {pd_resources}"
+        )
+    # If pd_resources is None, do nothing
 
 
 def _build_serving_resources(deployment_profile: dict[str, Any]) -> dict[str, Any]:
@@ -168,17 +216,25 @@ def _has_cli_arg(args: list[str], option_name: str) -> bool:
 
 def _build_vllm_additional_args(
     deployment_profile: dict[str, Any],
+    workload: dict[str, Any] | None = None,
 ) -> str:
     """Build VLLM_ADDITIONAL_ARGS string based on deployment profile configuration.
 
     Args:
         deployment_profile: The deployment profile configuration
+        workload: The workload configuration (merged benchmark config)
 
     Returns:
         String suitable for VLLM_ADDITIONAL_ARGS environment variable
     """
 
-    vllm_deploy_args = _build_vllm_args(deployment_profile.get("vllm_extra", {}).get("args"))
+    vllm_extra = deployment_profile.get("vllm_extra", {})
+    vllm_deploy_args = _build_vllm_args(vllm_extra.get("args", {}))
+
+    # Add workload vllm_args if available
+    if workload and "vllm_args" in workload:
+        workload_vllm_args = _build_vllm_args(workload["vllm_args"])
+        vllm_deploy_args.extend(workload_vllm_args)
 
     return " ".join(vllm_deploy_args)
 
@@ -187,6 +243,7 @@ def _render_standard_deployment(
     manifest: dict[str, Any],
     deployment_profile: dict[str, Any],
     deployment_profile_name: str | None = None,
+    workload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Render standard (non-P/D) deployment configuration."""
     # Check if this is intelligent routing (scheduler_manifest exists)
@@ -197,15 +254,15 @@ def _render_standard_deployment(
     name = slugify_identifier(name)
     name = truncate_k8s_name(name, max_length=25)
     manifest["metadata"]["name"] = name
-
     manifest["spec"]["replicas"] = deployment_profile["replicas"]
+    manifest["spec"]["parallelism"] = {"tensor": deployment_profile["tensor_parallelism"]}
 
     serving_container = manifest["spec"]["template"]["containers"][0]
     serving_container["resources"] = _build_serving_resources(deployment_profile)
     if deployment_profile.get("serving_image"):
         serving_container["image"] = deployment_profile["serving_image"]
 
-    vllm_additional_args = _build_vllm_additional_args(deployment_profile)
+    vllm_additional_args = _build_vllm_additional_args(deployment_profile, workload)
 
     # Add environment variable (don't set generic env vars or args)
     if "env" not in serving_container:
@@ -238,6 +295,7 @@ def _render_pd_deployment(
     manifest: dict[str, Any],
     deployment_profile: dict[str, Any],
     deployment_profile_name: str | None = None,
+    workload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Render P/D (Prefill/Decode) deployment configuration."""
     from .runtime_config import get_decode_pod_count, get_prefill_pod_count
@@ -251,15 +309,17 @@ def _render_pd_deployment(
     # Configure prefill section
     manifest["spec"]["prefill"] = {
         "replicas": get_prefill_pod_count(),
+        "parallelism": {"tensor": deployment_profile["prefill"]["tensor_parallelism"]},
         "template": _build_pd_pod_template(
-            deployment_profile, deployment_profile_name, is_prefill=True
+            deployment_profile, deployment_profile_name, is_prefill=True, workload=workload
         ),
     }
 
     # Configure main template (decode)
     manifest["spec"]["replicas"] = get_decode_pod_count()
+    manifest["spec"]["parallelism"] = {"tensor": deployment_profile["decode"]["tensor_parallelism"]}
     manifest["spec"]["template"] = _build_pd_pod_template(
-        deployment_profile, deployment_profile_name, is_prefill=False
+        deployment_profile, deployment_profile_name, is_prefill=False, workload=workload
     )
 
     return manifest
@@ -269,6 +329,7 @@ def _build_pd_pod_template(
     deployment_profile: dict[str, Any],
     deployment_profile_name: str | None = None,
     is_prefill: bool = False,
+    workload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build pod template for P/D deployment."""
 
@@ -282,21 +343,26 @@ def _build_pd_pod_template(
         # For prefill pods, use prefill tensor parallelism
         from .runtime_config import _extract_value_from_profile_name
 
-        prefill_tp = _extract_value_from_profile_name(
-            deployment_profile_name, "prefill_tensor_parallelism"
-        )
-        # Create modified profile with prefill tensor parallelism
-        prefill_profile = copy.deepcopy(deployment_profile)
-        prefill_profile["tensor_parallelism"] = prefill_tp
-        base_vllm_args = _build_vllm_additional_args(prefill_profile)
+        try:
+            prefill_tp = _extract_value_from_profile_name(
+                deployment_profile_name, "prefill_tensor_parallelism"
+            )
+            # Create modified profile with prefill tensor parallelism
+            prefill_profile = copy.deepcopy(deployment_profile)
+            prefill_profile["tensor_parallelism"] = prefill_tp
+            base_vllm_args = _build_vllm_additional_args(prefill_profile, workload)
+        except ValueError:
+            # Fallback to main tensor parallelism if extraction fails
+            base_vllm_args = _build_vllm_additional_args(deployment_profile, workload)
     else:
         # For decode pods, use main tensor parallelism
-        base_vllm_args = _build_vllm_additional_args(deployment_profile)
+        base_vllm_args = _build_vllm_additional_args(deployment_profile, workload)
 
     # Add P/D extra args
 
     pd_extra_args = pd_vllm_extra.get("args", [])
     all_vllm_args = base_vllm_args.split() + pd_extra_args
+
     vllm_additional_args = " ".join(all_vllm_args)
 
     # Build base environment variables
@@ -328,13 +394,8 @@ def _build_pd_pod_template(
         # For decode pods, use main tensor parallelism
         base_resources = _build_serving_resources(deployment_profile)
 
-    # Add P/D extra resources to both requests and limits
-    pd_resources = config.project.get_config("deployments.pd.resources")
-
-    for bound in ("requests", "limits"):
-        if bound not in base_resources:
-            base_resources[bound] = {}
-        base_resources[bound].update(pd_resources)
+    # Handle P/D extra resources
+    handle_pd_resources(base_resources, deployment_profile, is_prefill)
 
     # Build container configuration
     container = {
@@ -347,19 +408,93 @@ def _build_pd_pod_template(
     if deployment_profile.get("serving_image"):
         container["image"] = deployment_profile["serving_image"]
 
-    return {"containers": [container]}
+    # Build pod template with anti-affinity for P/D deployments
+    component_type = "prefill" if is_prefill else "decode"
+    opposite_component = "decode" if is_prefill else "prefill"
+
+    pod_template = {
+        "containers": [container],
+        "metadata": {"labels": {"app.kubernetes.io/component": component_type}},
+    }
+
+    # Add anti-affinity to prevent prefill and decode pods from landing on the same node
+    affinity = {
+        "podAntiAffinity": {
+            "preferredDuringSchedulingIgnoredDuringExecution": [
+                {
+                    "weight": 100,
+                    "podAffinityTerm": {
+                        "labelSelector": {
+                            "matchLabels": {
+                                # Anti-affinity between prefill and decode pods
+                                "app.kubernetes.io/component": opposite_component
+                            }
+                        },
+                        "topologyKey": "kubernetes.io/hostname",
+                    },
+                }
+            ]
+        }
+    }
+
+    pod_template["affinity"] = affinity
+
+    return pod_template
 
 
-def _apply_kueue_configuration(manifest: dict[str, Any]) -> None:
+def _calculate_total_gpu_usage(deployment_profile: dict[str, Any]) -> int:
+    """Calculate the total GPU usage for a deployment profile.
+
+    Args:
+        deployment_profile: The deployment profile configuration
+
+    Returns:
+        Total number of GPUs required for this deployment
+    """
+    # Check if this is a P/D deployment (has prefill/decode sections)
+    if "prefill" in deployment_profile and "decode" in deployment_profile:
+        # P/D deployment: sum up prefill and decode GPU usage
+        prefill_gpus = (
+            deployment_profile["prefill"]["tensor_parallelism"]
+            * deployment_profile["prefill"]["replicas"]
+        )
+        decode_gpus = (
+            deployment_profile["decode"]["tensor_parallelism"]
+            * deployment_profile["decode"]["replicas"]
+        )
+        return prefill_gpus + decode_gpus
+    else:
+        # Standard deployment: tensor_parallelism * replicas
+        tensor_parallelism = deployment_profile.get("tensor_parallelism", 1)
+        replicas = deployment_profile.get("replicas", 1)
+        return tensor_parallelism * replicas
+
+
+def _apply_kueue_configuration(
+    manifest: dict[str, Any], deployment_profile: dict[str, Any]
+) -> None:
     """Apply Kueue annotations and labels to the ISVC manifest.
 
     Based on the implementation from topsail's test_llmd.py.
     Can be enabled by setting runtime.kserve_use_kueue config.
+
+    Args:
+        manifest: The Kubernetes manifest to modify
+        deployment_profile: The deployment profile configuration used to calculate GPU usage
     """
     # Check if kueue annotations should be enabled
     enable_kueue = config.project.get_config("runtime.kueue.enabled")
 
     if not enable_kueue:
+        return
+
+    # Calculate total GPU usage from deployment profile
+    total_gpus = _calculate_total_gpu_usage(deployment_profile)
+
+    # Check if we should skip Kueue due to high GPU usage
+    disable_above_n_gpus = config.project.get_config("runtime.kueue.disable_above_n_gpus")
+    if disable_above_n_gpus is not None and total_gpus > disable_above_n_gpus:
+        logger.info(f"Skipping Kueue labels: {total_gpus} GPUs > {disable_above_n_gpus} threshold")
         return
 
     # Configure kueue settings
@@ -394,27 +529,29 @@ def _apply_kueue_configuration(manifest: dict[str, Any]) -> None:
         full_annotation_key = f"{kueue_prefix}{annotation_key}"
         manifest["metadata"]["annotations"][full_annotation_key] = annotation_value
 
-    # Apply Kueue annotations to router scheduler pod template if it exists
+    # Apply Kueue annotations to router scheduler if it exists
     if (
         "spec" in manifest
         and "router" in manifest["spec"]
         and "scheduler" in manifest["spec"]["router"]
     ):
-        scheduler_template = manifest["spec"]["router"]["scheduler"].get("template", {})
+        scheduler = manifest["spec"]["router"]["scheduler"]
 
-        # Ensure metadata exists in scheduler template
-        if "metadata" not in scheduler_template:
-            scheduler_template["metadata"] = {}
-        if "annotations" not in scheduler_template["metadata"]:
-            scheduler_template["metadata"]["annotations"] = {}
+        # Ensure annotations and labels exist on scheduler
+        if "annotations" not in scheduler:
+            scheduler["annotations"] = {}
+        if "labels" not in scheduler:
+            scheduler["labels"] = {}
 
-        # Apply the same Kueue annotations to the scheduler pod template
+        # Apply the same Kueue annotations to the scheduler
         for annotation_key, annotation_value in kueue_annotations.items():
             full_annotation_key = f"{kueue_prefix}{annotation_key}"
-            scheduler_template["metadata"]["annotations"][full_annotation_key] = annotation_value
+            scheduler["annotations"][full_annotation_key] = annotation_value
 
-        # Update the scheduler template back to the data structure
-        manifest["spec"]["router"]["scheduler"]["template"] = scheduler_template
+        # Apply the same Kueue labels to the scheduler
+        for label_key, label_value in kueue_labels.items():
+            full_label_key = f"{kueue_prefix}{label_key}"
+            scheduler["labels"][full_label_key] = label_value
 
     # Calculate pod group total count: 1 scheduler + number of replicas
     replicas = manifest.get("spec", {}).get("replicas", 1)
@@ -437,3 +574,23 @@ def _apply_kueue_configuration(manifest: dict[str, Any]) -> None:
     manifest["metadata"]["annotations"][f"{kueue_prefix}pod-group-total-count"] = str(
         pod_group_total_count
     )
+
+    # Add required pod-group-name label using the ISVC name
+    pod_group_name = manifest["metadata"]["name"]
+    manifest["metadata"]["labels"][f"{kueue_prefix}pod-group-name"] = pod_group_name
+
+    # Also add required Kueue annotations/labels to scheduler if it exists
+    if has_scheduler:
+        scheduler = manifest["spec"]["router"]["scheduler"]
+
+        # Ensure annotations and labels exist on scheduler
+        if "annotations" not in scheduler:
+            scheduler["annotations"] = {}
+        if "labels" not in scheduler:
+            scheduler["labels"] = {}
+
+        # Add the same pod-group annotations and labels to scheduler
+        scheduler["annotations"][f"{kueue_prefix}pod-group-total-count"] = str(
+            pod_group_total_count
+        )
+        scheduler["labels"][f"{kueue_prefix}pod-group-name"] = pod_group_name

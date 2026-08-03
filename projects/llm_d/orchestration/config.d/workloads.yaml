@@ -11,6 +11,10 @@ smoke_requests:
     temperature: 0.7
 
 benchmarks:
+  default:
+    vllm_args:
+      max_model_len: 4096
+
   short:
     timeout_seconds: 900
     outputs: json
@@ -31,6 +35,8 @@ benchmarks:
       max_seconds: 600
 
   heavy-heterogeneous:
+    vllm_args:
+      max_model_len: 40960
     args:
       backend_type: openai_http
       rate_type: concurrent
@@ -39,6 +45,8 @@ benchmarks:
       max_seconds: 600
 
   multi-turn:
+    vllm_args:
+      max_model_len: 40960
     args:
       backend_type: openai_http
       rate_type: concurrent

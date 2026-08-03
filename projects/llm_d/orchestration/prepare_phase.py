@@ -287,7 +287,7 @@ def prepare_model_cache() -> None:
         "model_uri": model_uri,
         "pvc_size": model_cache["pvc"]["size"],
         "access_mode": model_cache["pvc"]["access_mode"],
-        "storage_class_name": model_cache["pvc"].get("storage_class_name"),
+        "storage_class_name": model_cache["pvc"]["storage_class_name"],
         "pvc_name_prefix": pvc_name_prefix,
         "model_directory_name": model_cache["pvc"]["model_directory_name"],
     }

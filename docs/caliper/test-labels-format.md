@@ -1,0 +1,130 @@
+# Test Labels Format (`__test_labels__.yaml`)
+
+## Purpose
+
+The `__test_labels__.yaml` file marks directories as Caliper test bases and provides metadata for test identification, grouping, and status tracking.
+
+## File Format
+
+```yaml
+version: "1"
+labels:
+  # Test distinguishing characteristics  
+  key1: value1
+  key2: value2
+kpi_labels:
+  # System/environment context for KPI labeling
+  platform: "CKS"
+  gpu_type: "H100"
+  test_harness: "guidellm"
+completion:
+  # Test execution status (added at completion)
+  success: true|false
+  message: "Status description"
+```
+
+### Required Fields
+- **`version`**: Schema version (currently `"1"`)
+- **`labels`**: Key-value pairs describing test characteristics
+
+### Optional Fields
+- **`kpi_labels`**: System/environment context labels for KPI records
+  - **`platform`**: Platform name (e.g., `"CKS"`, `"RHOAI"`)
+  - **`gpu_type`**: GPU type (e.g., `"H100"`, `"A100"`)
+  - **`test_harness`**: Test framework (e.g., `"guidellm"`, `"vllm"`)
+- **`completion`**: Test execution status
+  - **`success`**: `true` if succeeded, `false` if failed
+  - **`message`**: Human-readable status description
+
+## Labels vs KPI Labels
+
+### Labels (Test Configuration)
+- **Purpose**: Distinguish different test configurations and variations
+- **Usage**: Used for test filtering, grouping, and analysis
+- **Examples**: `model_name`, `deployment_profile`, `guidellm_loadshape`
+- **Scope**: Specific to the test configuration
+
+### KPI Labels (System Context)
+- **Purpose**: Provide system/environment context for KPI records
+- **Usage**: Applied to all KPI metrics from the test, enables cross-environment analysis
+- **Examples**: `platform`, `gpu_type`, `test_harness`
+- **Scope**: Describes the execution environment
+
+## Common Labels
+
+- **`model_name`**: AI/ML model name (e.g., `"llama-3.1-8b"`)
+- **`deployment_profile`**: Deployment variant (e.g., `"simple-tp2-x4"`)  
+- **`guidellm_loadshape`**: Benchmark load pattern (e.g., `"heavy-heterogeneous"`)
+- **`benchmark_type`**: Benchmark type (e.g., `"throughput"`, `"latency"`)
+
+## Common KPI Labels
+
+- **`platform`**: Target platform (e.g., `"CKS"`, `"RHOAI"`)
+- **`gpu_type`**: GPU hardware type (e.g., `"H100"`, `"A100"`)
+- **`test_harness`**: Testing framework (e.g., `"guidellm"`, `"vllm"`)
+
+## Examples
+
+### Basic Test
+```yaml
+version: "1"
+labels:
+  model_name: "llama-3.1-8b"
+  deployment_profile: "simple"
+  guidellm_loadshape: "default"
+kpi_labels:
+  platform: "CKS"
+  gpu_type: "H100"
+  test_harness: "guidellm"
+```
+
+### Completed Test
+```yaml
+version: "1"
+labels:
+  model_name: "llama-3.1-8b"
+  deployment_profile: "simple-tp2-x4"
+  guidellm_loadshape: "heavy-heterogeneous"
+kpi_labels:
+  platform: "CKS"
+  gpu_type: "H100"
+  test_harness: "guidellm"
+completion:
+  success: true
+  message: "Test completed successfully"
+```
+
+### Failed Test
+```yaml
+version: "1"
+labels:
+  model_name: "gpt-4o"
+  deployment_profile: "distributed"
+kpi_labels:
+  platform: "RHOAI"
+  gpu_type: "A100"
+  test_harness: "vllm"
+completion:
+  success: false
+  message: "Connection timeout to inference service"
+```
+
+## Usage
+
+- **Test Discovery**: Caliper scans for `__test_labels__.yaml` files to find test results
+- **Test Analysis**: Labels enable filtering and comparative analysis of test configurations
+- **KPI Labeling**: KPI labels are automatically applied to all generated KPI metrics
+- **Cross-Environment Analysis**: KPI labels enable performance comparisons across different platforms/hardware
+- **Report Generation**: Both labels and KPI labels provide context for charts and report organization
+- **Status Tracking**: Completion field tracks test execution outcome
+
+## Best Practices
+
+- **Labels**: Use for test-specific configuration and distinguishing characteristics
+- **KPI Labels**: Use for system/environment context that applies to all KPIs
+- Generate both label sets early, add completion status at test end
+- Use consistent, descriptive keys across related tests
+- Use lowercase with underscores (e.g., `model_name`, `gpu_type`)
+- Keep label schemas stable within projects
+- Populate KPI labels from configuration to ensure consistency (e.g., from `cpt.kpi.labels.*`)
+- Missing KPI labels should be handled gracefully with fallback values

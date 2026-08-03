@@ -187,7 +187,7 @@ def run_replot_from_orchestration_config(
 
     if skip_download:
         keep_replot_dir = True
-        logger.info("No replot URL provided, skipping artifact download")
+        logger.warning("No replot URL provided, skipping artifact download")
         logger.info("Automatically setting keep_replot_dir=True to preserve existing files")
         logger.info(f"Download directory: {replot_download_dir}")
         logger.info(f"Output directory: {artifact_directory}")

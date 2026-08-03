@@ -86,6 +86,9 @@ inference_service:
   name: llm-d
   template: manifests/llminferenceservice.yaml
   workload_deployment_name_suffix: -kserve
+  scheduler:
+    node_selector:
+      nvidia.com/gpu.present: "true"
 
 artifacts:
   capture_namespace_events: true
@@ -95,3 +98,6 @@ smoke:
   client_image: quay.io/curl/curl:8.21.0
   endpoint_path: /v1/completions
   request_timeout_seconds: 60
+
+preflight:
+  check_crds: true
