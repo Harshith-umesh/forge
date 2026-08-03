@@ -1,7 +1,7 @@
 apiVersion: serving.kserve.io/v1alpha1
 kind: LLMInferenceService
 metadata:
-  name: llm-d-intelligentrouting-tp4-x4
+  name: llm-d-intelligentr-4e3b09
   namespace: forge-llm-d
   annotations:
     security.opendatahub.io/enable-auth: 'false'

@@ -674,7 +674,7 @@ def _generate_failure_file_for_agent(exception: Exception) -> None:
         with open(failure_file_path, "w", encoding="utf-8") as f:
             f.write(failure_content)
 
-        logger.info(f"Generated FAILURE file for agent analysis: {failure_file_path}")
+        logger.debug(f"Generated FAILURE file for agent analysis: {failure_file_path}")
 
     except Exception as failure_error:
         logger.warning(f"Failed to generate FAILURE file for agent: {failure_error}")

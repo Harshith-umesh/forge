@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import base64
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def save_figure(
@@ -12,8 +15,8 @@ def save_figure(
     filename: str,
     as_image: bool = True,
     report_number: int | None = None,
-    width: int = 800,
-    height: int = 500,
+    width: int = 1200,
+    height: int = 650,
 ) -> str | None:
     """
     Save a plotly figure as either an image or HTML file with optional report numbering.
@@ -38,135 +41,34 @@ def save_figure(
             final_filename = filename
 
         if as_image:
-            print(f"💾 Saving {final_filename} as PNG image...")
+            logger.info(f"Saving {final_filename} as PNG image...")
             output_file = output_dir / f"{final_filename}.png"
-            fig.write_image(output_file, width=width, height=height, scale=2)
+            fig.write_image(output_file, width=width, height=height)
         else:
-            print(f"💾 Saving {final_filename} as full-page interactive HTML...")
+            logger.info(f"Saving {final_filename} as full-page interactive HTML...")
             output_file = output_dir / f"{final_filename}.html"
 
-            # Configure the figure for full-page display
+            # Configure figure for full-screen responsive behavior
             fig.update_layout(
                 autosize=True,
-                margin=dict(l=20, r=20, t=60, b=40),
+                width=None,  # Remove any fixed width
+                height=None,  # Remove any fixed height
             )
+            fig.write_html(output_file)
 
-            # Save with full-page configuration
-            fig.write_html(
-                output_file,
-                include_plotlyjs="cdn",
-                config={
-                    "displayModeBar": True,
-                    "displaylogo": False,
-                    "modeBarButtonsToRemove": ["pan2d", "lasso2d"],
-                    "responsive": True,
-                },
-                div_id="plotly-div",
-                full_html=True,
-                include_mathjax=False,
-            )
-
-            # Make it full page
-            _make_html_full_page(output_file)
-
-        print(f"✅ {final_filename} saved successfully")
+        logger.info(f"{final_filename} saved successfully")
         return str(output_file)
 
     except Exception as e:
         final_filename = (
             f"report_{report_number:02d}_{filename}" if report_number is not None else filename
         )
-        print(f"❌ Failed to save figure {final_filename}: {e}")
+        logger.error(f"Failed to save figure {final_filename}: {e}")
         return None
 
 
-def _make_html_full_page(html_file_path: str) -> None:
-    """
-    Modify an HTML file to make the plot full page by adding custom CSS.
-
-    Args:
-        html_file_path: Path to the HTML file to modify
-    """
-    try:
-        with open(html_file_path, encoding="utf-8") as f:
-            content = f.read()
-
-        # Insert full-page CSS styles
-        full_page_css = """
-    <style>
-        html, body {
-            height: 100%;
-            margin: 0;
-            padding: 0;
-            overflow: hidden;
-        }
-        #plotly-div {
-            height: 100vh !important;
-            width: 100vw !important;
-        }
-        .plotly-graph-div {
-            height: 100vh !important;
-            width: 100vw !important;
-        }
-    </style>
-"""
-
-        # Insert the CSS before the closing </head> tag
-        content = content.replace("</head>", f"{full_page_css}</head>")
-
-        with open(html_file_path, "w", encoding="utf-8") as f:
-            f.write(content)
-
-    except Exception as e:
-        print(f"⚠️  Warning: Failed to make HTML full page: {e}")
-
-
-def write_full_page_html(fig, output_file_path: str, title: str = "Plot") -> bool:
-    """
-    Save a Plotly figure as a full-page HTML file.
-
-    Args:
-        fig: Plotly figure object
-        output_file_path: Path where to save the HTML file
-        title: Title for the HTML page
-
-    Returns:
-        True if successful, False otherwise
-    """
-    try:
-        # Configure the figure for full-page display
-        fig.update_layout(
-            autosize=True,
-            margin=dict(l=20, r=20, t=60, b=40),
-            title_text=title if title != "Plot" else None,
-        )
-
-        # Save with full-page configuration
-        fig.write_html(
-            output_file_path,
-            include_plotlyjs="cdn",
-            config={
-                "displayModeBar": True,
-                "displaylogo": False,
-                "modeBarButtonsToRemove": ["pan2d", "lasso2d"],
-                "responsive": True,
-            },
-            div_id="plotly-div",
-            full_html=True,
-            include_mathjax=False,
-        )
-
-        # Make it full page
-        _make_html_full_page(output_file_path)
-        return True
-
-    except Exception as e:
-        print(f"❌ Failed to save full-page HTML: {e}")
-        return False
-
-
 def figure_to_base64(
-    fig, width: int = 800, height: int = 500, plot_name: str = "plot"
+    fig, width: int = 1200, height: int = 650, plot_name: str = "plot"
 ) -> str | None:
     """
     Convert a plotly figure to base64-encoded PNG for embedding in HTML.
@@ -181,20 +83,20 @@ def figure_to_base64(
         Base64-encoded image string with data URI prefix, or None if failed
     """
     try:
-        print(f"🖼️  Converting {plot_name} to high-quality PNG ({width}x{height})...")
+        logger.info(f"Converting {plot_name} to high-quality PNG ({width}x{height})...")
 
         # Convert figure to PNG bytes
-        img_bytes = fig.to_image(format="png", width=width, height=height, scale=2)
+        img_bytes = fig.to_image(format="png", width=width, height=height)
 
-        print(f"📦 Encoding {plot_name} as base64 for HTML embedding...")
+        logger.info(f"Encoding {plot_name} as base64 for HTML embedding...")
         # Encode as base64
         img_base64 = base64.b64encode(img_bytes).decode()
 
-        print(f"✅ {plot_name} image ready ({len(img_base64) // 1024}KB)")
+        logger.info(f"{plot_name} image ready ({len(img_base64) // 1024}KB)")
         return f"data:image/png;base64,{img_base64}"
 
     except Exception as e:
-        print(f"❌ Failed to convert {plot_name} to base64: {e}")
+        logger.error(f"Failed to convert {plot_name} to base64: {e}")
         return None
 
 
@@ -265,3 +167,28 @@ def create_report_title_display(base_title: str, report_number: int | None = Non
         return f"Report {report_number:02d}: {base_title}"
     else:
         return base_title
+
+
+def write_full_page_html(fig, output_path: str, title: str) -> bool:
+    """
+    Write a plotly figure as a full-page HTML file.
+
+    Args:
+        fig: Plotly figure object
+        output_path: Full path to the output HTML file
+        title: Title for the HTML document (currently unused but kept for compatibility)
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        output_file = Path(output_path)
+        output_dir = output_file.parent
+        filename = output_file.stem  # Get filename without extension
+
+        # Use save_figure to write HTML
+        result = save_figure(fig, output_dir, filename, as_image=False)
+        return result is not None
+    except Exception as e:
+        logger.error(f"Failed to write full-page HTML to {output_path}: {e}")
+        return False

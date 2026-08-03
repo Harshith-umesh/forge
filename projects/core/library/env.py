@@ -3,6 +3,8 @@ import os
 import pathlib
 import threading
 import time
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 
 # ARTIFACT_DIR is accessed via __getattr__ for thread-local support
 BASE_ARTIFACT_DIR = None  # Immutable copy of the initial ARTIFACT_DIR
@@ -33,7 +35,7 @@ def __getattr__(name):
             )
             return globals().get("_GLOBAL_ARTIFACT_DIR")
 
-    return globals()[name]
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
 def get_tls_artifact_dir():
@@ -215,3 +217,77 @@ def next_artifact_index():
         return 0
 
     return len(list(current_artifact_dir.glob("*__*")))
+
+
+class MuteStdOut:
+    """Context manager to mute stdout, stderr, and logging with a startup message."""
+
+    def __init__(self, reason: str):
+        self.reason = reason
+        self.captured_stdout = StringIO()
+        self.captured_stderr = StringIO()
+        self.original_logging_level = None
+        self.original_handlers_streams = []
+
+    def __enter__(self):
+        # Print the startup message before muting
+        logger = logging.getLogger(__name__)
+        logger.info(self.reason)
+
+        # Redirect logging handlers that have direct stream references
+        self._redirect_logging_handlers()
+
+        # Suppress logging by setting root logger level to CRITICAL
+        root_logger = logging.getLogger()
+        self.original_logging_level = root_logger.level
+        root_logger.setLevel(logging.CRITICAL)
+
+        # Start capturing stdout and stderr
+        self.stdout_redirect = redirect_stdout(self.captured_stdout)
+        self.stderr_redirect = redirect_stderr(self.captured_stderr)
+
+        self.stdout_redirect.__enter__()
+        self.stderr_redirect.__enter__()
+
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # Restore stdout and stderr
+        self.stdout_redirect.__exit__(exc_type, exc_val, exc_tb)
+        self.stderr_redirect.__exit__(exc_type, exc_val, exc_tb)
+
+        # Restore original logging level
+        if self.original_logging_level is not None:
+            root_logger = logging.getLogger()
+            root_logger.setLevel(self.original_logging_level)
+
+        # Restore original logging handler streams
+        self._restore_logging_handlers()
+
+        return False
+
+    def _redirect_logging_handlers(self):
+        """Redirect logging handlers with direct stream references to captured streams."""
+        import sys
+
+        # Save and redirect handlers from root logger and all existing loggers
+        all_loggers = [logging.getLogger()] + [
+            logging.getLogger(name) for name in logging.Logger.manager.loggerDict
+        ]
+
+        for logger in all_loggers:
+            for handler in getattr(logger, "handlers", []):
+                if hasattr(handler, "stream"):
+                    original_stream = handler.stream
+                    self.original_handlers_streams.append((handler, original_stream))
+
+                    if original_stream is sys.stdout:
+                        handler.stream = self.captured_stdout
+                    elif original_stream is sys.stderr:
+                        handler.stream = self.captured_stderr
+
+    def _restore_logging_handlers(self):
+        """Restore original streams to logging handlers."""
+        for handler, original_stream in self.original_handlers_streams:
+            handler.stream = original_stream
+        self.original_handlers_streams.clear()

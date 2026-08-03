@@ -637,7 +637,7 @@ def generate_comprehensive_performance_report(
     report_title: str = "GuideLLM Performance Analysis",
 ) -> str | None:
     """
-    Generate comprehensive performance analysis report with separate plot files.
+    Generate comprehensive performance analysis report with separate plots for each loadshape.
 
     Args:
         records: List of unified result records
@@ -653,13 +653,21 @@ def generate_comprehensive_performance_report(
         logger.info(f"\n🚀 Starting {display_title} generation...")
         logger.info("=" * 70)
 
-        df = create_dataframe_from_records(records)
-        if df.empty:
+        # Group records by guidellm_loadshape
+        loadshape_groups = {}
+        for record in records:
+            loadshape = record.distinguishing_labels.get("guidellm_loadshape", "default")
+            if loadshape not in loadshape_groups:
+                loadshape_groups[loadshape] = []
+            loadshape_groups[loadshape].append(record)
+
+        if not loadshape_groups:
             logger.info("❌ No data available for analysis")
             return None
 
-        logger.info("\n📊 Generating performance analysis plots...")
-        logger.info("   This may take a moment as we create high-quality visualizations...")
+        logger.info(
+            f"\n🔍 Found {len(loadshape_groups)} loadshape(s): {', '.join(loadshape_groups.keys())}"
+        )
 
         # Generate all the plots as figures
         plot_functions = [
@@ -680,74 +688,339 @@ def generate_comprehensive_performance_report(
         report_dir.mkdir(exist_ok=True)
         logger.info(f"\n📁 Created report directory: {report_dir_name}")
 
-        plots_data = []
-        for i, (plot_name, plot_func) in enumerate(plot_functions, 1):
-            logger.info(f"\n📈 [{i}/{len(plot_functions)}] Processing {plot_name}...")
-            try:
-                fig = plot_func(df, title_context)
-                if fig:
-                    # Save as both PNG and HTML in the report directory
-                    filename = plot_name.lower().replace(" ", "_")
-                    logger.info(f"💾 Saving {plot_name} as PNG and HTML...")
+        all_plots_data = []
 
-                    # Save PNG image
-                    width = 900 if "Percentiles" in plot_name else 800
-                    height = 600 if "Percentiles" in plot_name else 500
-                    png_path = save_figure(
-                        fig, report_dir, filename, as_image=True, width=width, height=height
-                    )
+        # Process each loadshape separately
+        for loadshape, loadshape_records in loadshape_groups.items():
+            logger.info(f"\n📊 Processing loadshape: {loadshape}")
+            logger.info(f"   Records: {len(loadshape_records)}")
 
-                    # Save HTML version
-                    html_path = save_figure(fig, report_dir, filename, as_image=False)
+            # Create DataFrame for this loadshape
+            df = create_dataframe_from_records(loadshape_records)
+            if df.empty:
+                logger.info(f"   ⚠️  No data available for loadshape: {loadshape}")
+                continue
 
-                    if png_path and html_path:
-                        # Store relative paths for linking
-                        plots_data.append(
-                            (
-                                plot_name,
-                                f"{report_dir_name}/{Path(png_path).name}",  # PNG path
-                                f"{report_dir_name}/{Path(html_path).name}",  # HTML path
-                            )
+            logger.info(f"   📈 Generating {len(plot_functions)} plots for {loadshape}...")
+
+            # Create subdirectory for this loadshape
+            loadshape_dir = report_dir / loadshape
+            loadshape_dir.mkdir(exist_ok=True)
+
+            # Extract model information for this loadshape
+            model_info = "Unknown"
+            if loadshape_records:
+                # Try to get model information from distinguishing labels
+                first_record = loadshape_records[0]
+                model_info = (
+                    first_record.distinguishing_labels.get("model")
+                    or first_record.distinguishing_labels.get("model_name")
+                    or first_record.distinguishing_labels.get("llm_model")
+                    or first_record.run_identity.get("model")
+                    or "Unknown"
+                )
+
+            loadshape_plots = []
+            for i, (plot_name, plot_func) in enumerate(plot_functions, 1):
+                logger.info(
+                    f"   📊 [{i}/{len(plot_functions)}] Creating {plot_name} for {loadshape}..."
+                )
+                try:
+                    # Create subtitle with model and loadshape info
+                    subtitle = f"Model: {model_info} • Load Shape: {loadshape}"
+
+                    # Add original title context if provided
+                    if title_context:
+                        loadshape_title_context = f"{title_context}<br><sub>{subtitle}</sub>"
+                    else:
+                        loadshape_title_context = f"<br><sub>{subtitle}</sub>"
+
+                    fig = plot_func(df, loadshape_title_context)
+                    if fig:
+                        # Save as both PNG and HTML in the loadshape directory
+                        filename = f"{loadshape}_{plot_name.lower().replace(' ', '_')}"
+
+                        # Save PNG image
+                        width = 900 if "Percentiles" in plot_name else 800
+                        height = 600 if "Percentiles" in plot_name else 500
+                        png_path = save_figure(
+                            fig, loadshape_dir, filename, as_image=True, width=width, height=height
                         )
-                        logger.info(f"✅ {plot_name} saved as PNG and HTML")
-                else:
-                    logger.info(f"⚠️  {plot_name} could not be created (no figure returned)")
 
-            except Exception as e:
-                logger.info(f"❌ Failed to generate {plot_name}: {e}")
+                        # Save HTML version
+                        html_path = save_figure(fig, loadshape_dir, filename, as_image=False)
 
-        logger.info(f"\n✅ Successfully generated {len(plots_data)} visualizations!")
+                        if png_path and html_path:
+                            # Store relative paths for linking
+                            loadshape_plots.append(
+                                (
+                                    plot_name,
+                                    f"{report_dir_name}/{loadshape}/{Path(png_path).name}",  # PNG path
+                                    f"{report_dir_name}/{loadshape}/{Path(html_path).name}",  # HTML path
+                                )
+                            )
+                            logger.info(f"   ✅ {plot_name} saved for {loadshape}")
+                    else:
+                        logger.info(
+                            f"   ⚠️  {plot_name} could not be created for {loadshape} (no figure returned)"
+                        )
 
-        # Generate summary statistics
-        logger.info("\n📊 Computing performance statistics and insights...")
-        summary_stats = _generate_performance_summary(df)
+                except Exception as e:
+                    logger.info(f"   ❌ Failed to generate {plot_name} for {loadshape}: {e}")
 
-        if summary_stats.get("best_tokens"):
-            best = summary_stats["best_tokens"]
-            logger.info(f"   🏆 Best performance: {best['value']:.0f} tok/s ({best['config']})")
+            # Store loadshape plots data
+            if loadshape_plots:
+                all_plots_data.append((loadshape, loadshape_plots))
 
-        # Create comprehensive HTML report
+        if not all_plots_data:
+            logger.info("❌ No plots were successfully generated")
+            return None
+
+        logger.info(f"\n✅ Successfully generated plots for {len(all_plots_data)} loadshape(s)!")
+
+        # Create comprehensive HTML report with sections for each loadshape
         logger.info("\n📝 Assembling comprehensive HTML report...")
-        logger.info("   🔗 Creating report with images linking to interactive HTML versions...")
+        logger.info("   🔗 Creating report with loadshape sections and interactive HTML links...")
 
-        html_content = _create_comprehensive_html_report_with_images(
-            plots_data, summary_stats, title_context, display_title
+        html_content = f"""
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+    <meta charset='UTF-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+    <title>{display_title}</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 40px; }}
+        .header {{ text-align: center; margin-bottom: 30px; }}
+        .loadshape-section {{ margin: 40px 0; }}
+        .loadshape-title {{ color: #333; font-size: 24px; margin-bottom: 20px; border-bottom: 2px solid #007acc; padding-bottom: 10px; }}
+        .navigation {{ background-color: #f5f5f5; padding: 15px; border-radius: 4px; margin-bottom: 20px; }}
+        .navigation ul {{ list-style: none; padding: 0; margin: 0; }}
+        .navigation li {{ display: inline-block; margin-right: 20px; }}
+        .navigation a {{ color: #007acc; text-decoration: none; font-weight: bold; }}
+        .navigation a:hover {{ text-decoration: underline; }}
+
+        .tabs-container {{
+            margin: 20px 0;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background-color: #f9f9f9;
+        }}
+
+        .tab-headers {{
+            display: flex;
+            background-color: #f1f1f1;
+            border-bottom: 1px solid #ddd;
+            border-top-left-radius: 8px;
+            border-top-right-radius: 8px;
+            flex-wrap: wrap;
+        }}
+
+        .tab-header {{
+            background-color: #e1e1e1;
+            color: #333;
+            padding: 15px 20px;
+            cursor: pointer;
+            border: none;
+            border-right: 1px solid #ddd;
+            font-family: Arial, sans-serif;
+            font-size: 16px;
+            font-weight: bold;
+            transition: background-color 0.3s;
+            flex: 1;
+            min-width: 150px;
+        }}
+
+        .tab-header:hover {{
+            background-color: #d1d1d1;
+        }}
+
+        .tab-header.active {{
+            background-color: #4CAF50;
+            color: white;
+        }}
+
+        .tab-header:first-child {{
+            border-top-left-radius: 8px;
+        }}
+
+        .tab-header:last-child {{
+            border-right: none;
+            border-top-right-radius: 8px;
+        }}
+
+        .tab-content {{
+            padding: 20px;
+            background-color: white;
+            display: none;
+            border-bottom-left-radius: 8px;
+            border-bottom-right-radius: 8px;
+        }}
+
+        .tab-content.active {{
+            display: block;
+        }}
+
+        .performance-insights {{
+            border-radius: 5px;
+            padding: 0.5em;
+            background-color: lightgray;
+            margin-top: 15px;
+        }}
+
+        .plot-container {{
+            text-align: center;
+        }}
+
+        .plot-container img {{
+            max-width: 100%;
+            height: auto;
+            cursor: pointer;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }}
+    </style>
+
+    <script>
+    function showTab(containerId, tabId, buttonElement) {{
+        // Get the specific container
+        var container = document.getElementById(containerId);
+
+        // Hide all tab contents within this container
+        var contents = container.querySelectorAll('.tab-content');
+        for (var i = 0; i < contents.length; i++) {{
+            contents[i].classList.remove('active');
+        }}
+
+        // Remove active class from all headers within this container
+        var headers = container.querySelectorAll('.tab-header');
+        for (var i = 0; i < headers.length; i++) {{
+            headers[i].classList.remove('active');
+        }}
+
+        // Show selected tab content and mark header as active
+        document.getElementById(tabId).classList.add('active');
+        buttonElement.classList.add('active');
+    }}
+    </script>
+</head>
+<body>
+    <p><i>Click on the image to open the interactive full-size view of the plot.</i><br/>
+    <i>In the interactive view, click in the legend to hide a line, double click to see only this line.</i></p>
+
+    <div class="header">
+        <h1>{display_title}</h1>
+        <p>Generated performance analysis with separate visualizations for each loadshape</p>
+    </div>
+
+    <div class="navigation">
+        <h3>Quick Navigation:</h3>
+        <ul>"""
+
+        # Add navigation links for each loadshape
+        for loadshape, _ in all_plots_data:
+            html_content += f'\n            <li><a href="#{loadshape}">{loadshape}</a></li>'
+
+        html_content += """
+        </ul>
+    </div>
+"""
+
+        # Add sections for each loadshape with tabbed interface
+        container_id = 0
+        for loadshape, plots in all_plots_data:
+            # Extract model information for this loadshape
+            loadshape_records = loadshape_groups[loadshape]
+            model_info = "Unknown"
+            if loadshape_records:
+                # Try to get model information from distinguishing labels
+                first_record = loadshape_records[0]
+                model_info = (
+                    first_record.distinguishing_labels.get("model")
+                    or first_record.distinguishing_labels.get("model_name")
+                    or first_record.distinguishing_labels.get("llm_model")
+                    or first_record.run_identity.get("model")
+                    or "Unknown"
+                )
+
+            html_content += f"""
+    <div class="loadshape-section" id="{loadshape}">
+        <h2 class="loadshape-title">Loadshape: {loadshape}</h2>
+        <p style="color: #666; font-size: 16px; margin: -10px 0 20px 0; font-style: italic;">
+            Model: {model_info} • Load Shape: {loadshape}
+        </p>
+
+        <div id='tabs-container-{container_id}' class='tabs-container'>
+            <div class='tab-headers'>"""
+
+            # Define tab mapping with icons
+            tab_mapping = {
+                "Token Throughput vs Concurrency": "🚀 Throughput",
+                "TTFT Analysis": "⏱️ TTFT",
+                "Token Throughput Percentiles": "📊 Throughput Percentiles",
+                "Throughput Scaling": "📈 Scaling",
+                "Latency vs Throughput": "⚖️ Latency Trade-off",
+            }
+
+            # Create tab headers
+            for tab_idx, (plot_name, _png_path, _html_path) in enumerate(plots):
+                tab_title = tab_mapping.get(plot_name, plot_name)
+                active_class = " active" if tab_idx == 0 else ""
+                html_content += f"""
+                <button class='tab-header{active_class}' onclick="showTab('tabs-container-{container_id}', 'tab-{container_id}-{tab_idx}', this)">{tab_title}</button>"""
+
+            html_content += """
+            </div>"""
+
+            # Create tab contents
+            for tab_idx, (plot_name, png_path, html_path) in enumerate(plots):
+                active_class = " active" if tab_idx == 0 else ""
+
+                # Create descriptions for each plot type
+                descriptions = {
+                    "Token Throughput vs Concurrency": "Token generation throughput scaling analysis across different concurrency levels.",
+                    "TTFT Analysis": "Time To First Token analysis - measuring responsiveness and initial latency.",
+                    "Token Throughput Percentiles": "Complete token throughput percentile distribution analysis.",
+                    "Throughput Scaling": "Throughput scaling behavior and efficiency analysis.",
+                    "Latency vs Throughput": "Trade-off analysis between latency and throughput performance.",
+                }
+
+                description = descriptions.get(plot_name, f"{plot_name} performance analysis.")
+
+                html_content += f"""
+            <div id='tab-{container_id}-{tab_idx}' class='tab-content{active_class}'>
+                <div style='padding:20px;'>
+                    <h4>{plot_name}</h4>
+                    <p>{description}</p>
+                    <p><a href='{html_path}' target='_blank' title='Click to access the full-size interactive version.'><img src='{png_path}' alt='{plot_name}'/></a></p>
+                </div>
+            </div>"""
+
+            html_content += """
+        </div>
+    </div>"""
+            container_id += 1
+
+        html_content += """
+</body>
+</html>"""
+
+        # Save the main HTML report
+        main_html_filename = create_report_filename(
+            report_title.lower().replace(" ", "_"), report_number, report_title, "html"
         )
+        main_html_path = output_dir / main_html_filename
 
-        # Write report with proper naming using core utility
-        filename = create_report_filename(
-            "performance_analysis", report_number, report_title, "html"
-        )
-        report_file = output_dir / filename
-        logger.info(f"\n💾 Writing {display_title} to: {report_file.name}")
-        report_file.write_text(html_content, encoding="utf-8")
+        with open(main_html_path, "w", encoding="utf-8") as f:
+            f.write(html_content)
 
-        file_size_mb = report_file.stat().st_size / (1024 * 1024)
-        logger.info(f"📄 Report complete! File size: {file_size_mb:.1f}MB")
+        logger.info(f"✅ Comprehensive report saved as: {main_html_filename}")
+        logger.info(f"📁 Individual plots organized in subdirectories under: {report_dir_name}/")
+
         logger.info("=" * 70)
-        logger.info(f"🎉 {display_title} ready: {report_file.name}")
+        logger.info(f"🎉 {display_title} ready: {main_html_path.name}")
 
-        return str(report_file)
+        return str(main_html_path)
 
     except Exception as e:
         logger.info(f"❌ Failed to generate comprehensive performance report: {e}")

@@ -558,6 +558,9 @@ def write_variables_override(presets=None, variables_dict=None):
 
     # Set presets in project.args
     if presets:
+        if len(presets) == 1 and "," in presets[0]:
+            presets = list(presets[0].split(","))
+
         overrides["project.args"] = presets
         logger.info(f"write_variables_override: project.args --> {presets}")
 

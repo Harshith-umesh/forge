@@ -1,6 +1,8 @@
 vaults:
 - psap-forge-notifications
 - psap-forge-mlflow-export
+- psap-forge-aws-s3-export
+- psap-forge-dashboard-s3
 
 benchmarks:
   guidellm:
@@ -9,6 +11,7 @@ benchmarks:
     image: ghcr.io/vllm-project/guidellm:v0.6.0
     timeout: 14400
     pvc_size: 10Gi
+    hf_token_secret: "storage-config"
     args:
       backend_type: openai_http
       rate_type: concurrent
@@ -19,6 +22,12 @@ tests:
   rhaiis:
     model_key: qwen3-0_6b
     workload_key: profile1
+    workload_keys: []
+    run_benchmark: true
+    warmup: true
+    version: ""
+    compare_version: ""
+    slack_user: ""
 
 caliper:
   postprocess:
@@ -34,6 +43,16 @@ caliper:
       artifacts_to_kpis:
         enabled: true
         output: kpis.json
+      kpis_to_csv:
+        enabled: true
+        output: dashboard.csv
+    csv_dashboard:
+      enabled: true
+      s3_key: staging/rhaiis-dashboard/consolidated_dashboard.csv
+    analyze:
+      enabled: false
+      historical_kpis: historical_kpis
+      output: regression_analysis.json
 
   export:
     from: null

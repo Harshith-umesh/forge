@@ -26,6 +26,7 @@ def setup_directories(args, context):
     """Create the artifacts directory"""
 
     shell.mkdir("artifacts")
+    shell.mkdir("artifacts/logs")
     return "Artifacts directory created"
 
 
@@ -121,7 +122,7 @@ def capture_namespace_pods(args, context):
     """Capture all pods in the namespace with wide output"""
     shell.run(
         f"oc get pods -owide -n {context.target_namespace}",
-        stdout_dest=args.artifact_dir / "artifacts/namespace.pods.status",
+        stdout_dest=args.artifact_dir / "artifacts/namespace.pods.status.txt",
         check=False,
     )
     return "Namespace pods status captured"
@@ -132,7 +133,7 @@ def capture_namespace_services(args, context):
     """Capture all services in the namespace"""
     shell.run(
         f"oc get svc -n {context.target_namespace}",
-        stdout_dest=args.artifact_dir / "artifacts/namespace.services.status",
+        stdout_dest=args.artifact_dir / "artifacts/namespace.services.status.txt",
         check=False,
     )
     return "Namespace services captured"
@@ -173,20 +174,19 @@ def capture_pod_logs(args, context):
     if not pod_names or not result.stdout.strip():
         return "No pods found to capture logs"
 
-    log_file = args.artifact_dir / "artifacts/llminferenceservice.pods.logs"
+    logs_dir = args.artifact_dir / "artifacts/logs"
+    captured_count = 0
 
-    with open(log_file, "w") as handle:
-        for pod_name in pod_names:
-            handle.write(f"=== Logs for pod: {pod_name} ===\n")
-            log_result = shell.run(
-                f"oc logs {pod_name} -n {context.target_namespace} --all-containers=true",
-                check=False,
-                log_stdout=False,
-            )
-            handle.write(log_result.stdout)
-            handle.write("\n")
+    for pod_name in pod_names:
+        log_file = logs_dir / f"{pod_name}.log"
+        shell.run(
+            f"oc logs {pod_name} -n {context.target_namespace} --all-containers=true",
+            stdout_dest=log_file,
+            check=False,
+        )
+        captured_count += 1
 
-    return f"Pod logs captured for {len(pod_names)} pods"
+    return f"Pod logs captured for {captured_count} pods in dedicated files"
 
 
 @task
@@ -195,26 +195,26 @@ def capture_pod_previous_logs(args, context):
     result = shell.run(
         f'oc get pods -l "app.kubernetes.io/name={args.llmisvc_name}" -n {context.target_namespace} -o jsonpath="{{.items[*].metadata.name}}"',
         check=False,
+        log_stdout=False,
     )
 
     pod_names = result.stdout.strip().split()
     if not pod_names or not result.stdout.strip():
         return "No pods found to capture previous logs"
 
-    log_file = args.artifact_dir / "artifacts/llminferenceservice.pods.previous.logs"
+    logs_dir = args.artifact_dir / "artifacts/logs"
+    captured_count = 0
 
-    with open(log_file, "w") as handle:
-        for pod_name in pod_names:
-            handle.write(f"=== Previous logs for pod: {pod_name} ===\n")
-            log_result = shell.run(
-                f"oc logs {pod_name} -n {context.target_namespace} --previous --all-containers=true",
-                check=False,
-                log_stdout=False,
-            )
-            handle.write(log_result.stdout)
-            handle.write("\n")
+    for pod_name in pod_names:
+        log_file = logs_dir / f"{pod_name}.previous.log"
+        shell.run(
+            f"oc logs {pod_name} -n {context.target_namespace} --previous --all-containers=true",
+            stdout_dest=log_file,
+            check=False,
+        )
+        captured_count += 1
 
-    return f"Pod previous logs captured for {len(pod_names)} pods"
+    return f"Pod previous logs captured for {captured_count} pods in dedicated files"
 
 
 @task
@@ -226,6 +226,62 @@ def capture_llminferenceservice_describe(args, context):
         check=False,
     )
     return "LLMInferenceService describe captured"
+
+
+@task
+def capture_workload_overview(args, context):
+    """Capture deployment, replicaset, and pod overview for debugging"""
+
+    workload_overview_path = args.artifact_dir / "artifacts/workload_overview.txt"
+
+    # Capture deployment, replicaset, and pod overview with wide output
+    shell.run(
+        f'oc get deploy,rs,pod -l "app.kubernetes.io/name={args.llmisvc_name}" -n {context.target_namespace} -o wide',
+        stdout_dest=workload_overview_path,
+        check=False,
+    )
+
+    return f"Captured workload overview to {workload_overview_path}"
+
+
+@task
+def capture_workload_descriptions(args, context):
+    """Capture workload descriptions for deployments, replicasets, and pods in a single file"""
+
+    descriptions_file = args.artifact_dir / "artifacts/workload_descriptions.txt"
+
+    with open(descriptions_file, "w") as handle:
+        # Capture deployments descriptions
+        handle.write("=== DEPLOYMENTS ===\n")
+        deploy_result = shell.run(
+            f'oc describe deployments -l "app.kubernetes.io/name={args.llmisvc_name}" -n {context.target_namespace}',
+            log_stdout=False,
+            check=False,
+        )
+        handle.write(deploy_result.stdout)
+        handle.write("\n\n")
+
+        # Capture replicasets descriptions
+        handle.write("=== REPLICASETS ===\n")
+        rs_result = shell.run(
+            f'oc describe replicasets -l "app.kubernetes.io/name={args.llmisvc_name}" -n {context.target_namespace}',
+            log_stdout=False,
+            check=False,
+        )
+        handle.write(rs_result.stdout)
+        handle.write("\n\n")
+
+        # Capture pods descriptions
+        handle.write("=== PODS ===\n")
+        pods_result = shell.run(
+            f'oc describe pods -l "app.kubernetes.io/name={args.llmisvc_name}" -n {context.target_namespace}',
+            log_stdout=False,
+            check=False,
+        )
+        handle.write(pods_result.stdout)
+        handle.write("\n")
+
+    return f"Captured workload descriptions to {descriptions_file}"
 
 
 @task
