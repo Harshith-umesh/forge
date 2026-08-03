@@ -12,14 +12,13 @@ All resources are labeled for easy bulk cleanup between test levels.
 from __future__ import annotations
 
 import logging
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from projects.core.dsl import always, entrypoint, execute_tasks, retry, task
+from projects.core.dsl import always, entrypoint, execute_tasks, retry, shell, task
 from projects.core.dsl.utils.k8s import oc
 
 logger = logging.getLogger(__name__)
@@ -46,6 +45,16 @@ def run(
 
 
 @task
+def setup_directories(args, ctx):
+    """Create command source and artifact directories"""
+
+    shell.mkdir("src")
+    shell.mkdir("artifacts")
+
+    return "Prepared src and artifacts directories"
+
+
+@task
 def generate_and_apply_manifests(args, ctx):
     """Generate YAML manifests for all servers and apply them."""
     merged_labels = dict(args.labels) if args.labels else {}
@@ -69,14 +78,10 @@ def generate_and_apply_manifests(args, ctx):
     combined_yaml = "---\n".join(all_manifests)
 
     src_dir = args.artifact_dir / "src"
-    src_dir.mkdir(parents=True, exist_ok=True)
-    (src_dir / "mock-servers.yaml").write_text(combined_yaml, encoding="utf-8")
+    mock_servers_manifest = src_dir / "mock-servers.yaml"
+    mock_servers_manifest.write_text(combined_yaml, encoding="utf-8")
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as tmp:
-        tmp.write(combined_yaml)
-        tmp_path = tmp.name
-    oc("apply", "-f", tmp_path)
-    Path(tmp_path).unlink(missing_ok=True)
+    oc("apply", "-f", mock_servers_manifest, log_stdout=False)
 
     return f"Applied {args.count} server manifest(s)"
 
