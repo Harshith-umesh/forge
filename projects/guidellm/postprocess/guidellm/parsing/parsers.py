@@ -21,7 +21,7 @@ from .models import GuideLLMBenchmark, GuideLLMConfiguration
 
 def _labels_from_node(node: TestBaseNode) -> dict[str, Any]:
     """Extract labels from a test node."""
-    raw = node.labels
+    raw = node.test_labels
     inner = raw.get("labels")
     if isinstance(inner, dict):
         return dict(inner)
@@ -32,7 +32,7 @@ def _labels_from_node(node: TestBaseNode) -> dict[str, Any]:
 
 def _kpi_labels_from_node(node: TestBaseNode) -> dict[str, Any]:
     """Extract kpi_labels from a test node."""
-    raw = node.labels
+    raw = node.test_labels
     kpi_labels = raw.get("kpi_labels")
     if isinstance(kpi_labels, dict):
         return dict(kpi_labels)
