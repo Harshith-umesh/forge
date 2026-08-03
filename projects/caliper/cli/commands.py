@@ -1027,10 +1027,15 @@ def artifacts_export(
             dry_run=dry_run,
             verbose=verbose,
             status_yaml_path=status_yaml_path,
-            mlflow_config=final_config,
+            mlflow_config_data=final_config,
         )
     except Exception as e:  # noqa: BLE001
+        import traceback
+
+        full_traceback = traceback.format_exc()
         click.echo(f"artifacts export failed: {e}", err=True)
+        click.echo("Full traceback:", err=True)
+        click.echo(full_traceback, err=True)
         sys.exit(3)
 
 
