@@ -136,7 +136,7 @@ def _resolve_tracking_uri(tracking_uri: str | None) -> str | int:
         tracking_uri = os.environ.get("MLFLOW_TRACKING_URI")
     if not tracking_uri:
         click.echo(
-            "MLflow backend requires a tracking URI: --mlflow-endpoint / MLFLOW_TRACKING_URI, "
+            "MLflow backend requires a tracking URI: --mlflow-tracking-uri / MLFLOW_TRACKING_URI, "
             "or tracking_uri in --mlflow-secrets or --mlflow-config.",
             err=True,
         )
