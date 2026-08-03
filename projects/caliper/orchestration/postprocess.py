@@ -21,7 +21,6 @@ from pydantic import ValidationError
 
 from projects.caliper.orchestration.cli_builder import (
     build_ai_eval_export_command,
-    build_analyse_kpis_command,
     build_kpi_csv_export_command,
     build_kpi_generate_command,
     build_parse_command,
@@ -355,17 +354,33 @@ def _transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
     except (ImportError, AttributeError):
         kpi_functions = {}
 
+    # First pass: determine which labels are common (same value for all KPIs in a run)
+    # vs per-KPI (vary across KPIs, e.g. rate_index, intended_concurrency)
+    run_label_values: dict[str, dict[str, set]] = defaultdict(lambda: defaultdict(set))
+    for kpi in kpis:
+        run_id = kpi.get("run_id", "unknown")
+        for k, v in kpi.get("labels", {}).items():
+            if k == "higher_is_better":
+                continue
+            run_label_values[run_id][k].add(str(v))
+
+    # Labels with more than one distinct value per run are per-KPI
+    per_kpi_label_keys: dict[str, set[str]] = {}
+    for run_id, label_vals in run_label_values.items():
+        per_kpi_label_keys[run_id] = {k for k, vals in label_vals.items() if len(vals) > 1}
+
     for kpi in kpis:
         run_id = kpi.get("run_id", "unknown")
         test_data = tests_data[run_id]
+        varying_keys = per_kpi_label_keys.get(run_id, set())
 
-        # Extract common labels (excluding KPI-specific ones)
         kpi_labels = kpi.get("labels", {})
         test_labels = {
-            k: v for k, v in kpi_labels.items() if k not in ["higher_is_better"]
-        }  # Exclude KPI-specific labels
+            k: v
+            for k, v in kpi_labels.items()
+            if k not in ("higher_is_better",) and k not in varying_keys
+        }
 
-        # Merge test labels (they should be the same for all KPIs in a test)
         if not test_data["labels"]:
             test_data["labels"] = test_labels
 
@@ -376,6 +391,9 @@ def _transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
                 "source": kpi.get("source", {}),
                 "run_id": run_id,
             }
+
+        # Per-KPI labels that vary across rate points
+        kpi_specific_labels = {k: kpi_labels[k] for k in varying_keys if k in kpi_labels}
 
         # Create KPI record with metadata
         kpi_id = kpi.get("kpi_id")
@@ -401,12 +419,14 @@ def _transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
         else:
             final_value = raw_value
 
-        kpi_record = {
+        kpi_record: dict[str, Any] = {
             "id": kpi_id,
             "value": final_value,
             "unit": kpi.get("unit"),
             "higher_is_better": kpi_labels.get("higher_is_better", True),
         }
+        if kpi_specific_labels:
+            kpi_record["labels"] = kpi_specific_labels
 
         # Add KPI metadata from function decorator if available
         if kpi_id in kpi_functions:
@@ -495,8 +515,13 @@ def _run_artifacts_to_kpis(
         }
 
     try:
-        # Prepare paths
-        output_file = output_dir / postprocess_config.kpi.artifacts_to_kpis.output
+        # Prepare paths — reject absolute or parent-traversal output names
+        configured_output = postprocess_config.kpi.artifacts_to_kpis.output
+        if Path(configured_output).is_absolute() or ".." in Path(configured_output).parts:
+            raise ValueError(
+                f"kpi.artifacts_to_kpis.output must be a relative path without '..': {configured_output}"
+            )
+        output_file = output_dir / configured_output
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
         # Create temporary status file for subprocess communication
@@ -527,6 +552,43 @@ def _run_artifacts_to_kpis(
 
         # Convert to expected format
         if status_data.get("success"):
+            # Transform JSONL (schema v1) to hierarchical JSON (schema v2)
+            try:
+                logger.info(f"Transforming KPI output to hierarchical format: {output_file}")
+
+                # Read the generated JSONL file
+                kpis = []
+                with open(output_file, encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            import json
+
+                            kpis.append(json.loads(line))
+
+                if kpis:
+                    hierarchical_data = _transform_kpis_to_hierarchical_format(kpis, model)
+
+                    import json
+
+                    with open(output_file, "w", encoding="utf-8") as f:
+                        json.dump(hierarchical_data, f, indent=2, ensure_ascii=False)
+
+                    logger.info(
+                        f"Successfully transformed {len(kpis)} KPI records to hierarchical format"
+                    )
+                else:
+                    logger.warning("No KPI records found in output file")
+
+            except Exception as transform_error:
+                logger.error(f"Failed to transform KPIs to hierarchical format: {transform_error}")
+                return {
+                    "status": "failed",
+                    "error": f"KPI transformation failed: {transform_error}",
+                    "completed_at": time.time(),
+                    "log_file": log_file,
+                }
+
             relative_path = _make_path_relative_to_base(output_file, env.ARTIFACT_DIR)
             logger.info(
                 f"KPI generate: output_file={output_file}, env.ARTIFACT_DIR={env.ARTIFACT_DIR}, relative_path={relative_path}"
@@ -767,8 +829,12 @@ def _run_kpis_to_csv(
         }
 
     try:
-        # Create output file path
-        output_file = output_dir / postprocess_config.kpi.kpis_to_csv.output
+        csv_output = postprocess_config.kpi.kpis_to_csv.output
+        if Path(csv_output).is_absolute() or ".." in Path(csv_output).parts:
+            raise ValueError(
+                f"kpi.kpis_to_csv.output must be a relative path without '..': {csv_output}"
+            )
+        output_file = output_dir / csv_output
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
         # Create temporary status file for subprocess communication
@@ -857,23 +923,35 @@ def _run_analyse_kpis(
         # Create temporary status file for subprocess communication
         status_file = output_dir / "analyse_kpis_status.yaml"
 
-        # Build CLI command
-        command = build_analyse_kpis_command(
-            config=postprocess_config,
-            tree_root=base_dir,
-            manifest_path=manifest_path,
-            status_file=status_file,
-            output_file=output_file,
-            current_kpis_file=current_kpis_file,
-            historical_kpis_dir=historical_kpis_dir,
+        # Note: CLI command building removed in favor of direct function call
+
+        # Load plugin for KPI definitions
+        from projects.caliper.engine.load_plugin import load_plugin
+
+        plugin = load_plugin(plugin_module)
+
+        # Find the most recent baseline file
+        from projects.caliper.engine.kpi.analyze_hierarchical import (
+            analyze_hierarchical_kpis,
+            find_most_recent_baseline,
         )
 
-        # Execute command using generic function
-        result, status_data, log_file = _execute_caliper_command(
-            command=command,
-            step_name="caliper kpi analyse-kpis",
-            status_file=status_file,
-            step_logs_dir=step_logs_dir,
+        baseline_file = find_most_recent_baseline(historical_kpis_dir)
+        if not baseline_file:
+            return {
+                "status": "failed",
+                "error": f"No baseline KPI files found in {historical_kpis_dir}",
+                "completed_at": time.time(),
+                "log_file": None,
+            }
+
+        # Run hierarchical KPI analysis using core engine
+        logger.info(f"Running KPI analysis: {current_kpis_file} vs {baseline_file}")
+        result = analyze_hierarchical_kpis(
+            current_kpis_path=current_kpis_file,
+            baseline_kpis_path=baseline_file,
+            output_path=output_file,
+            plugin=plugin,
         )
 
         # Clean up temporary status file
@@ -882,20 +960,26 @@ def _run_analyse_kpis(
         except FileNotFoundError:
             pass
 
-        # Convert to expected format
-        if status_data.get("success"):
+        # Handle the analysis result
+        if result["status"] == "success":
+            logger.info(
+                f"Analysis completed: {result['regressions_count']} regressions, {result['improvements_count']} improvements"
+            )
             return {
                 "status": "success",
                 "output_file": _make_path_relative_to_base(output_file, env.ARTIFACT_DIR),
+                "findings_count": result["findings_count"],
+                "regressions_count": result["regressions_count"],
+                "improvements_count": result["improvements_count"],
                 "completed_at": time.time(),
-                "log_file": log_file,
+                "log_file": None,
             }
         else:
             return {
                 "status": "failed",
-                "error": status_data.get("error", "Unknown error"),
+                "error": result.get("error", "Analysis failed"),
                 "completed_at": time.time(),
-                "log_file": log_file,
+                "log_file": None,
             }
 
     except Exception as e:
@@ -1092,7 +1176,10 @@ class CaliperPostprocessOrchestrator:
                     logger.warning(f"Step '{step_name}' completed with warning: {warning_msg}")
                 elif status == "failed":
                     error_msg = result.get("error", "unknown error")
+                    traceback_msg = result.get("traceback")
                     logger.error(f"Step '{step_name}' failed: {error_msg}")
+                    if traceback_msg:
+                        logger.error("Full traceback:\n%s", traceback_msg)
 
             return True
         return False
@@ -1194,7 +1281,10 @@ class CaliperPostprocessOrchestrator:
                 error_msg = (status_data or {}).get(
                     "error", f"Command failed with exit code {result.returncode}"
                 )
+                traceback_msg = (status_data or {}).get("traceback")
                 logger.error("Caliper parse failed: %s", error_msg)
+                if traceback_msg:
+                    logger.error("Full traceback:\n%s", traceback_msg)
                 self._add_step(
                     "parse",
                     {
@@ -1308,7 +1398,10 @@ class CaliperPostprocessOrchestrator:
                 error_msg = (status_data or {}).get(
                     "error", f"Command failed with exit code {result.returncode}"
                 )
+                traceback_msg = (status_data or {}).get("traceback")
                 logger.error("Caliper visualize failed: %s", error_msg)
+                if traceback_msg:
+                    logger.error("Full traceback:\n%s", traceback_msg)
                 self._add_step(
                     "visualize",
                     {
@@ -1486,7 +1579,6 @@ class CaliperPostprocessOrchestrator:
             )
             return
 
-        # Path to the JSON file for reference in command logging
         kpi_json_path = output_dir / self.config.kpi.artifacts_to_kpis.output
         result = _run_kpis_to_csv(
             self.config,

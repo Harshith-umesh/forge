@@ -73,6 +73,11 @@ def render_inference_service_from_parts(
     is_pd_deployment = "pd_config" in deployment_profile
 
     name = inference_service["name"]
+    if deployment_profile_name:
+        name = f"{name}-{deployment_profile_name}"
+    # Normalize name to be Kubernetes compliant and limit to 25 characters
+    name = slugify_identifier(name)
+    name = truncate_k8s_name(name, max_length=25)
     manifest["metadata"]["name"] = name
     manifest["metadata"]["namespace"] = namespace
     manifest["metadata"].setdefault("labels", {})
@@ -188,7 +193,10 @@ def _render_standard_deployment(
     scheduler = deployment_profile.get("scheduler")
     has_scheduler_manifest = "scheduler_manifest" in deployment_profile
 
-    manifest["metadata"]["name"] = f"llm-d-{deployment_profile_name}"
+    name = f"llm-d-{deployment_profile_name}"
+    name = slugify_identifier(name)
+    name = truncate_k8s_name(name, max_length=25)
+    manifest["metadata"]["name"] = name
 
     manifest["spec"]["replicas"] = deployment_profile["replicas"]
 
@@ -235,7 +243,10 @@ def _render_pd_deployment(
     from .runtime_config import get_decode_pod_count, get_prefill_pod_count
 
     # Set manifest name with deployment profile
-    manifest["metadata"]["name"] = f"llm-d-{deployment_profile_name}"
+    name = f"llm-d-{deployment_profile_name}"
+    name = slugify_identifier(name)
+    name = truncate_k8s_name(name, max_length=25)
+    manifest["metadata"]["name"] = name
 
     # Configure prefill section
     manifest["spec"]["prefill"] = {

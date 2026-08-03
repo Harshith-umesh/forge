@@ -237,8 +237,4 @@ def create_legend_name(
 
     legend_name = ", ".join(param_pairs)
 
-    # Truncate if too long
-    if len(legend_name) > max_length:
-        legend_name = legend_name[: max_length - 3] + "..."
-
     return legend_name

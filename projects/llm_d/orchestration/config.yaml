@@ -59,7 +59,7 @@ caliper:
         enabled: true
         output: kpis/kpis.json
       kpis_to_csv:
-        enabled: true
+        enabled: false
         output: kpis/kpis.csv
         include_header_comments: true
       artifacts_to_ai_data:
@@ -67,7 +67,7 @@ caliper:
         output_dir: ai_data
 
     analyze:
-      enabled: true
+      enabled: false
       historical_kpis: historical_data
       output: regression_analyze/kpi_analyze.json
 

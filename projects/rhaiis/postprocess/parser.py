@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-import uuid
-from datetime import UTC, datetime
-from pathlib import Path
+import re
 from typing import Any
 
 from projects.caliper.engine.model import (
@@ -36,8 +34,12 @@ class RhaiisParser:
 
             node = _find_node_for_record(record, nodes)
             if node:
-                extra = _extract_extra_metrics(node)
-                merged_metrics = {**record.metrics, **extra}
+                extra_metrics, extra_curves = _extract_extra_metrics(node)
+                merged_metrics = {**record.metrics, **extra_metrics}
+                if extra_curves:
+                    existing_curves = merged_metrics.get("performance_curves", {})
+                    existing_curves.update(extra_curves)
+                    merged_metrics["performance_curves"] = existing_curves
                 enriched_records.append(
                     UnifiedResultRecord(
                         test_base_path=record.test_base_path,
@@ -63,119 +65,163 @@ def _find_node_for_record(
     return None
 
 
-def _extract_extra_metrics(node: TestBaseNode) -> dict[str, Any]:
+def _bench_sort_key(bench: dict) -> float:
+    """Sort key matching GuideLLMParser: requests_per_second.successful.mean."""
+    return float(
+        bench.get("metrics", {}).get("requests_per_second", {}).get("successful", {}).get("mean", 0)
+    )
+
+
+def _extract_extra_metrics(node: TestBaseNode) -> tuple[dict[str, Any], dict[str, list]]:
+    """Return (scalar_metrics, extra_curves) extracted from raw benchmarks.json files."""
     extra: dict[str, Any] = {}
-    benchmarks_files = [p for p in node.artifact_paths if p.name == "benchmarks.json"]
+    benchmarks_files = sorted(
+        [
+            p
+            for p in node.artifact_paths
+            if p.name == "benchmarks.json"
+            or (p.name.startswith("benchmarks-rate-") and p.suffix == ".json")
+        ],
+        key=lambda p: p.name,
+    )
     if not benchmarks_files:
-        return extra
+        return extra, {}
 
-    try:
-        data = json.loads(benchmarks_files[0].read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return extra
+    all_benchmarks: list[dict] = []
+    report_metadata: dict[str, Any] = {}
+    report_args: dict[str, Any] = {}
 
-    benchmarks = data.get("benchmarks", [])
-    if not benchmarks:
-        return extra
+    for bf in benchmarks_files:
+        try:
+            data = json.loads(bf.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        all_benchmarks.extend(data.get("benchmarks", []))
+        if not report_metadata:
+            report_metadata = data.get("metadata", {})
+        if not report_args:
+            report_args = data.get("args", {})
 
-    bench = benchmarks[0]
-    metrics = bench.get("metrics", {})
+    if not all_benchmarks:
+        return extra, {}
 
-    def _percentile(metric_name: str, pct: str, default: float = 0.0) -> float:
+    # Sort by request_rate to match GuideLLMParser curve ordering
+    all_benchmarks.sort(key=_bench_sort_key)
+
+    # Report-level metadata
+    extra["guidellm_version"] = report_metadata.get("guidellm_version", "")
+
+    data_str = ""
+    if isinstance(report_args, dict):
+        data_list = report_args.get("data", [])
+        if data_list:
+            data_str = data_list[0] if isinstance(data_list, list) else str(data_list)
+    tokens = dict(re.findall(r"(\w+)=([\d.]+)", data_str))
+    extra["prompt_toks"] = int(float(tokens["prompt_tokens"])) if "prompt_tokens" in tokens else ""
+    extra["output_toks"] = int(float(tokens["output_tokens"])) if "output_tokens" in tokens else ""
+
+    start_times = []
+    end_times = []
+    for bench in all_benchmarks:
+        sched = bench.get("scheduler_metrics", {})
+        if "start_time" in sched:
+            start_times.append(sched["start_time"])
+        if "end_time" in sched:
+            end_times.append(sched["end_time"])
+    extra["guidellm_start_time_ms"] = int(min(start_times) * 1000) if start_times else ""
+    extra["guidellm_end_time_ms"] = int(max(end_times) * 1000) if end_times else ""
+
+    # Scalar extras from first benchmark (backward compat)
+    bench0 = all_benchmarks[0]
+    m0 = bench0.get("metrics", {})
+
+    def _percentile0(metric_name: str, pct: str, default: float = 0.0) -> float:
         return float(
-            metrics.get(metric_name, {})
-            .get("successful", {})
-            .get("percentiles", {})
-            .get(pct, default)
+            m0.get(metric_name, {}).get("successful", {}).get("percentiles", {}).get(pct, default)
         )
 
-    def _stat(metric_name: str, stat: str, default: float = 0.0) -> float:
-        return float(metrics.get(metric_name, {}).get("successful", {}).get(stat, default))
+    def _stat0(metric_name: str, stat: str, default: float = 0.0) -> float:
+        return float(m0.get(metric_name, {}).get("successful", {}).get(stat, default))
 
-    extra["ttft_p99"] = _percentile("time_to_first_token_ms", "p99") / 1000.0
-    extra["tpot_p99"] = _percentile("time_per_output_token_ms", "p99") / 1000.0
-    extra["itl_p99"] = _percentile("inter_token_latency_ms", "p99") / 1000.0
+    extra["ttft_p99"] = _percentile0("time_to_first_token_ms", "p99") / 1000.0
+    extra["tpot_p99"] = _percentile0("time_per_output_token_ms", "p99") / 1000.0
+    extra["itl_p99"] = _percentile0("inter_token_latency_ms", "p99") / 1000.0
 
-    request_totals = metrics.get("request_totals", {})
-    extra["completed_requests"] = int(request_totals.get("successful", 0))
-    extra["failed_requests"] = int(request_totals.get("errored", 0))
+    request_totals0 = m0.get("request_totals", {})
+    extra["completed_requests"] = int(request_totals0.get("successful", 0))
+    extra["failed_requests"] = int(request_totals0.get("errored", 0))
+    extra["prompt_token_count_mean"] = _stat0("prompt_token_count", "mean")
 
-    extra["prompt_token_count_mean"] = _stat("prompt_token_count", "mean")
-
-    concurrency = _stat("request_concurrency", "mean")
+    concurrency = _stat0("request_concurrency", "mean")
     if concurrency > 0:
         extra["request_concurrency"] = concurrency
 
-    return extra
-
-
-def generate_psap_payload(
-    *,
-    benchmarks_json_path: Path,
-    model_id: str,
-    vllm_image: str,
-    vllm_args: dict[str, Any],
-    accelerator: str,
-    workload_key: str,
-) -> dict[str, Any]:
-    report = json.loads(benchmarks_json_path.read_text(encoding="utf-8"))
-
-    image, tag = _split_image_tag(vllm_image)
-    tp_size = int(vllm_args.get("tensor-parallel-size", 1))
-
-    guidellm_start = None
-    guidellm_end = None
-    benchmarks = report.get("benchmarks", [])
-    if benchmarks:
-        starts = [b.get("start_time", 0) for b in benchmarks if b.get("start_time")]
-        ends = [b.get("end_time", 0) for b in benchmarks if b.get("end_time")]
-        if starts:
-            guidellm_start = int(min(starts) * 1000)
-        if ends:
-            guidellm_end = int(max(ends) * 1000)
-
-    return {
-        "experiment_id": str(uuid.uuid4()).upper(),
-        "experiment_type": "perf",
-        "model": model_id,
-        "inference_server": "vllm",
-        "inference_server_version": tag,
-        "container_image": image,
-        "container_image_tag": tag,
-        "container_entrypoint": None,
-        "inference_server_args": dict(vllm_args),
-        "accelerator_type": accelerator.upper(),
-        "accelerator_count": tp_size,
-        "accelerator_memory_gb": 0,
-        "machine_type": None,
-        "provider": "redhat",
-        "report": report,
-        "timestamp": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S%z"),
-        "guidellm_start_time_ms": guidellm_start,
-        "guidellm_end_time_ms": guidellm_end,
+    # Per-benchmark extra curves — indices align with GuideLLM's sorted curves
+    extra_curves: dict[str, list] = {
+        "ttft_p1": [],
+        "ttft_p999": [],
+        "ttft_mean": [],
+        "tpot_p1": [],
+        "tpot_p999": [],
+        "itl_p1": [],
+        "itl_p999": [],
+        "itl_mean": [],
+        "request_latency_min": [],
+        "request_latency_max": [],
+        "measured_rps": [],
+        "prompt_token_count_mean": [],
+        "prompt_token_count_p99": [],
+        "output_token_count_mean": [],
+        "output_token_count_p99": [],
+        "output_tok_per_sec": [],
+        "total_tok_per_sec": [],
+        "successful_requests": [],
+        "errored_requests": [],
+        "intended_concurrency": [],
     }
 
+    for bench in all_benchmarks:
+        metrics = bench.get("metrics", {})
+        strategy = bench.get("config", {}).get("strategy", {})
 
-def write_psap_payload(
-    *,
-    payload: dict[str, Any],
-    output_dir: Path,
-    accelerator: str,
-    model_id: str,
-    workload_key: str,
-) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    model_short = model_id.rsplit("/", 1)[-1].lower().replace(".", "-")
-    date_str = datetime.now(UTC).strftime("%Y%m%d")
-    filename = f"PSAP_perf_{workload_key}_{accelerator}_{model_short}_{date_str}.json"
-    path = output_dir / filename
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    logger.info("PSAP payload written to %s", path)
-    return path
+        def _pct(metric_name: str, pct: str, _m: dict = metrics):
+            return _m.get(metric_name, {}).get("successful", {}).get("percentiles", {}).get(pct)
 
+        def _pct_s(metric_name: str, pct: str):
+            v = _pct(metric_name, pct)
+            return v / 1000.0 if v is not None else None
 
-def _split_image_tag(full_image: str) -> tuple[str, str]:
-    if ":" in full_image:
-        parts = full_image.rsplit(":", 1)
-        return parts[0], parts[1]
-    return full_image, "latest"
+        def _stat(metric_name: str, stat: str, _m: dict = metrics):
+            return _m.get(metric_name, {}).get("successful", {}).get(stat)
+
+        def _stat_s(metric_name: str, stat: str):
+            v = _stat(metric_name, stat)
+            return v / 1000.0 if v is not None else None
+
+        def _total_stat(metric_name: str, stat: str, _m: dict = metrics):
+            return _m.get(metric_name, {}).get("total", {}).get(stat)
+
+        request_totals = metrics.get("request_totals", {})
+
+        extra_curves["ttft_p1"].append(_pct_s("time_to_first_token_ms", "p01"))
+        extra_curves["ttft_p999"].append(_pct_s("time_to_first_token_ms", "p999"))
+        extra_curves["ttft_mean"].append(_stat_s("time_to_first_token_ms", "mean"))
+        extra_curves["tpot_p1"].append(_pct_s("time_per_output_token_ms", "p01"))
+        extra_curves["tpot_p999"].append(_pct_s("time_per_output_token_ms", "p999"))
+        extra_curves["itl_p1"].append(_pct_s("inter_token_latency_ms", "p01"))
+        extra_curves["itl_p999"].append(_pct_s("inter_token_latency_ms", "p999"))
+        extra_curves["itl_mean"].append(_stat_s("inter_token_latency_ms", "mean"))
+        extra_curves["request_latency_min"].append(_stat("request_latency", "min"))
+        extra_curves["request_latency_max"].append(_stat("request_latency", "max"))
+        extra_curves["measured_rps"].append(_stat("requests_per_second", "mean"))
+        extra_curves["prompt_token_count_mean"].append(_stat("prompt_token_count", "mean"))
+        extra_curves["prompt_token_count_p99"].append(_pct("prompt_token_count", "p99"))
+        extra_curves["output_token_count_mean"].append(_stat("output_token_count", "mean"))
+        extra_curves["output_token_count_p99"].append(_pct("output_token_count", "p99"))
+        extra_curves["output_tok_per_sec"].append(_total_stat("output_tokens_per_second", "mean"))
+        extra_curves["total_tok_per_sec"].append(_total_stat("tokens_per_second", "mean"))
+        extra_curves["successful_requests"].append(request_totals.get("successful", 0))
+        extra_curves["errored_requests"].append(request_totals.get("errored", 0))
+        extra_curves["intended_concurrency"].append(strategy.get("streams"))
+
+    return extra, extra_curves

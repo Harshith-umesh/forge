@@ -51,7 +51,13 @@ def cli(ctx):
 @click.option("--namespace", "-n", default=None, help="Kubernetes namespace")
 @click.option("--deployment-name", default=None, help="Deployment name (defaults to model name)")
 @click.option("--accelerator", type=click.Choice(["nvidia", "amd"]), default=None)
-@click.option("--vllm-image", help="vLLM container image override")
+@click.option(
+    "--engine",
+    type=click.Choice(["vllm", "sglang", "trtllm"]),
+    default=None,
+    help="Inference engine",
+)
+@click.option("--serving-image", help="Serving engine container image override")
 @click.option("--tensor-parallel", "-tp", type=int, help="Tensor parallel size override")
 @click.option("--replicas", "-r", type=int, default=None)
 @click.option("--storage-source", type=click.Choice(["hf", "pvc"]), default=None)
@@ -70,7 +76,8 @@ def test(
     namespace: str | None,
     deployment_name: str | None,
     accelerator: str | None,
-    vllm_image: str | None,
+    engine: str | None,
+    serving_image: str | None,
     tensor_parallel: int | None,
     replicas: int | None,
     storage_source: str | None,
@@ -93,7 +100,8 @@ def test(
     _apply_cli_overrides(
         workload_key=workload_key,
         accelerator=accelerator,
-        vllm_image=vllm_image,
+        engine=engine,
+        serving_image=serving_image,
         tensor_parallel=tensor_parallel,
         replicas=replicas,
         storage_source=storage_source,
@@ -113,7 +121,7 @@ def test(
     try:
         test_phase.run(
             model_key=model_key,
-            workload_key=workload_key,
+            workload_keys=[workload_key],
             namespace=namespace,
             deployment_name=deployment_name,
         )
@@ -128,7 +136,8 @@ def _apply_cli_overrides(
     *,
     workload_key: str,
     accelerator: str | None,
-    vllm_image: str | None,
+    engine: str | None,
+    serving_image: str | None,
     tensor_parallel: int | None,
     replicas: int | None,
     storage_source: str | None,
@@ -140,11 +149,21 @@ def _apply_cli_overrides(
 ) -> None:
     if accelerator:
         config.project.set_config("rhaiis.accelerator", accelerator)
-    if vllm_image:
+    if engine:
+        config.project.set_config("rhaiis.engine", engine)
+    resolved_engine = runtime_config.get_engine()
+    if serving_image:
         resolved_accel = runtime_config.get_accelerator()
-        config.project.set_config(f"rhaiis.images.{resolved_accel}", vllm_image)
+        config.project.set_config(
+            f"rhaiis.engines.{resolved_engine}.images.{resolved_accel}", serving_image
+        )
     if tensor_parallel is not None:
-        config.project.set_config("rhaiis.vllm_args.tensor-parallel-size", tensor_parallel)
+        tp_key = {"sglang": "tp-size", "trtllm": "tp_size"}.get(
+            resolved_engine, "tensor-parallel-size"
+        )
+        config.project.set_config(
+            f"rhaiis.engines.{resolved_engine}.args.{tp_key}", tensor_parallel
+        )
     if replicas is not None:
         config.project.set_config("rhaiis.deploy.replicas", replicas)
     if storage_source:
@@ -169,9 +188,10 @@ def _print_dry_run(
     workload_cfg = runtime_config.get_workload(workload_key)
     deploy_cfg = runtime_config.get_deploy_config()
     accelerator = runtime_config.get_accelerator()
-    vllm_image = runtime_config.get_vllm_image(accelerator)
-    vllm_defaults = runtime_config.get_vllm_defaults()
-    vllm_args = runtime_config.merge_vllm_args(vllm_defaults, model_cfg, workload_cfg)
+    engine = runtime_config.get_engine()
+    serving_image = runtime_config.get_serving_image(accelerator, engine)
+    engine_defaults = runtime_config.get_engine_args(engine)
+    engine_args = runtime_config.merge_engine_args(engine_defaults, model_cfg, workload_cfg, engine)
     env_vars = runtime_config.merge_env_vars(accelerator, model_cfg)
 
     if not deployment_name:
@@ -182,9 +202,10 @@ def _print_dry_run(
     click.echo(f"  Workload: {workload_key}")
     click.echo(f"  Namespace: {namespace}")
     click.echo(f"  Deployment: {deployment_name}")
+    click.echo(f"  Engine: {engine}")
     click.echo(f"  Accelerator: {accelerator}")
-    click.echo(f"  Image: {vllm_image}")
-    click.echo(f"  vLLM args: {vllm_args}")
+    click.echo(f"  Image: {serving_image}")
+    click.echo(f"  Engine args: {engine_args}")
     click.echo(f"  Env vars: {env_vars}")
     click.echo(f"  Replicas: {deploy_cfg.get('replicas', 1)}")
     click.echo(

@@ -2,46 +2,46 @@
 qwen3-0_6b:
   name: Qwen3-0.6B
   hf_model_id: Qwen/Qwen3-0.6B
-  vllm_args: {}
+  engine_args: {}
 
 # Llama-4 Scout (MoE)
 llama-4-scout:
   name: Llama-4-Scout-17B-16E-Instruct
   hf_model_id: meta-llama/Llama-4-Scout-17B-16E-Instruct
-  vllm_args:
+  engine_args:
     tensor-parallel-size: 4
 
 llama-4-scout-fp8:
   name: Llama-4-Scout-17B-16E-Instruct-FP8
   hf_model_id: RedHatAI/Llama-4-Scout-17B-16E-Instruct-FP8-dynamic
-  vllm_args:
+  engine_args:
     tensor-parallel-size: 2
     kv-cache-dtype: fp8
 
 llama-4-scout-int4:
   name: Llama-4-Scout-17B-16E-Instruct-INT4
   hf_model_id: RedHatAI/Llama-4-Scout-17B-16E-Instruct-quantized.w4a16
-  vllm_args:
+  engine_args:
     tensor-parallel-size: 2
 
 # Llama-4 Maverick (MoE)
 llama-4-maverick:
   name: Llama-4-Maverick-17B-128E-Instruct
   hf_model_id: meta-llama/Llama-4-Maverick-17B-128E-Instruct
-  vllm_args:
+  engine_args:
     tensor-parallel-size: 8
 
 llama-4-maverick-fp8:
   name: Llama-4-Maverick-17B-128E-Instruct-FP8
   hf_model_id: RedHatAI/Llama-4-Maverick-17B-128E-Instruct-FP8
-  vllm_args:
+  engine_args:
     tensor-parallel-size: 8
     kv-cache-dtype: fp8
 
 llama-4-maverick-w4a16:
   name: Llama-4-Maverick-17B-128E-Instruct-W4A16
   hf_model_id: RedHatAI/Llama-4-Maverick-17B-128E-Instruct-quantized.w4a16
-  vllm_args:
+  engine_args:
     tensor-parallel-size: 8
     enable-expert-parallel: true
 
@@ -66,25 +66,25 @@ mistral-2503-fp8:
 llama-3-3-70b:
   name: Llama-3.3-70B-Instruct
   hf_model_id: meta-llama/Llama-3.3-70B-Instruct
-  vllm_args:
+  engine_args:
     tensor-parallel-size: 4
 
 llama-3-3-70b-fp8:
   name: Llama-3.3-70B-Instruct-FP8
   hf_model_id: RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
-  vllm_args:
+  engine_args:
     tensor-parallel-size: 4
 
 llama-3-3-70b-w8a8:
   name: Llama-3.3-70B-Instruct-W8A8
   hf_model_id: RedHatAI/Llama-3.3-70B-Instruct-quantized.w8a8
-  vllm_args:
+  engine_args:
     tensor-parallel-size: 4
 
 llama-3-3-70b-w4a16:
   name: Llama-3.3-70B-Instruct-W4A16
   hf_model_id: RedHatAI/Llama-3.3-70B-Instruct-quantized.w4a16
-  vllm_args:
+  engine_args:
     tensor-parallel-size: 4
 
 # Granite 3.1 8B
@@ -125,7 +125,7 @@ qwen25-7b-w4a16:
 qwen3-n-80b-a3b-instruct:
   name: Qwen3-Next-80B-A3B-Instruct
   hf_model_id: Qwen/Qwen3-Next-80B-A3B-Instruct
-  vllm_args:
+  engine_args:
     tensor-parallel-size: 4
 
 qwen3-30b-a3b-instruct:
@@ -135,13 +135,13 @@ qwen3-30b-a3b-instruct:
 qwen3-30b-a3b:
   name: Qwen3-30B-A3B
   hf_model_id: Qwen/Qwen3-30B-A3B
-  vllm_args:
+  engine_args:
     tensor-parallel-size: 4
 
 qwen3-235b-instruct:
   name: Qwen3-235B-A22B-Instruct
   hf_model_id: Qwen/Qwen3-235B-A22B-Instruct-2507
-  vllm_args:
+  engine_args:
     tensor-parallel-size: 4
   env_vars:
     VLLM_ROCM_USE_AITER: "0"
@@ -149,7 +149,7 @@ qwen3-235b-instruct:
 qwen3-235b-instruct-fp8:
   name: Qwen3-235B-A22B-Instruct-FP8
   hf_model_id: Qwen/Qwen3-235B-A22B-Instruct-2507-FP8
-  vllm_args:
+  engine_args:
     tensor-parallel-size: 4
     enable-expert-parallel: true
     kv-cache-dtype: fp8
@@ -157,20 +157,20 @@ qwen3-235b-instruct-fp8:
 qwen3-235b-fp8-dynamic:
   name: Qwen3-235B-A22B-FP8-dynamic
   hf_model_id: RedHatAI/Qwen3-235B-A22B-FP8-dynamic
-  vllm_args:
+  engine_args:
     tensor-parallel-size: 4
     enable-expert-parallel: true
 
 qwen3-vl-235b-fp8:
   name: Qwen3-VL-235B-A22B-FP8
   hf_model_id: Qwen/Qwen3-VL-235B-A22B-Instruct-FP8
-  vllm_args:
+  engine_args:
     tensor-parallel-size: 4
 
 qwen3-vl-30b-a3b:
   name: Qwen3-VL-30B-A3B-Instruct
   hf_model_id: Qwen/Qwen3-VL-30B-A3B-Instruct
-  vllm_args:
+  engine_args:
     tensor-parallel-size: 4
 
 # GPT-OSS
@@ -200,7 +200,7 @@ mixtral-8x7b:
 nemotron-3-1-70b:
   name: Nemotron-70B-Instruct
   hf_model_id: nvidia/Llama-3.1-Nemotron-70B-Instruct-HF
-  vllm_args:
+  engine_args:
     tensor-parallel-size: 2
 
 nemotron-3-1-70b-fp8:
@@ -224,25 +224,25 @@ gemma-9b-w8a16:
 deepseek-v4-pro:
   name: DeepSeek-V4-Pro
   hf_model_id: deepseek-ai/DeepSeek-V4-Pro
-  vllm_args:
+  engine_args:
     tensor-parallel-size: 8
 
 deepseek-r1-0528:
   name: DeepSeek-R1-0528
   hf_model_id: deepseek-ai/DeepSeek-R1-0528
-  vllm_args:
+  engine_args:
     tensor-parallel-size: 8
 
 deepseek-r1-0528-w4a16:
   name: DeepSeek-R1-0528-W4A16
   hf_model_id: RedHatAI/DeepSeek-R1-0528-quantized.w4a16
-  vllm_args:
+  engine_args:
     tensor-parallel-size: 8
 
 deepseek-v3-2:
   name: DeepSeek-V3.2
   hf_model_id: deepseek-ai/DeepSeek-V3.2
-  vllm_args:
+  engine_args:
     tensor-parallel-size: 8
 
 # Mistral 7B
@@ -258,30 +258,30 @@ nemotron3nano-30b:
 nemotron3nano-30b-fp8:
   name: Nemotron-3-Nano-30B-A3B-FP8
   hf_model_id: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-FP8
-  vllm_args:
+  engine_args:
     tensor-parallel-size: 4
 
 nemotron3super-120b-fp8:
   name: Nemotron-3-Super-120B-A12B-FP8
   hf_model_id: nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8
-  vllm_args:
+  engine_args:
     tensor-parallel-size: 4
 
 # Ministral
 ministral-3-14b-reasoning:
   name: Ministral-3-14B-Reasoning
   hf_model_id: mistralai/Ministral-3-14B-Reasoning-2512
-  vllm_args:
+  engine_args:
     tensor-parallel-size: 4
 
 ministral-3-14b-fp16:
   name: Ministral-3-14B-Instruct
   hf_model_id: mistralai/Ministral-3-14B-Instruct-2512
-  vllm_args:
+  engine_args:
     tensor-parallel-size: 4
 
 ministral-3-14b-fp8:
   name: Ministral-3-14B-FP8
   hf_model_id: RedHatAI/Ministral-3-14B-Instruct-2512
-  vllm_args:
+  engine_args:
     tensor-parallel-size: 4

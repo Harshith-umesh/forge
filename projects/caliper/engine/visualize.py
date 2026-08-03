@@ -70,19 +70,30 @@ def run_visualize(
     use_cache: bool,
     cache_path: Path | None,
 ) -> list[str]:
+    # Convert include pairs to directory-level filter for discovery
+    directory_filter = None
+    if include_pairs:
+        inc = parse_filter_kv(include_pairs)
+        directory_filter = inc  # Use include filters for directory discovery
+
+    # Apply directory-level filtering during parsing
     model = run_parse(
         base_dir=base_dir,
         plugin_module=plugin_module,
         plugin=plugin,
         use_cache=use_cache,
+        label_filter=directory_filter,
     )
+
+    # Still apply record-level filtering for exclude filters and any remaining include filters
     inc = parse_filter_kv(include_pairs)
     exc = parse_filter_kv(exclude_pairs)
-    model.unified_result_records = filter_records(
-        model.unified_result_records,
-        include=inc,
-        exclude=exc,
-    )
+    if exc:  # Only filter records if there are exclude filters
+        model.unified_result_records = filter_records(
+            model.unified_result_records,
+            include={},  # Include filtering already done at directory level
+            exclude=exc,
+        )
     cfg = resolve_visualize_config(base_dir, visualize_config_path)
     ids = resolve_report_ids(
         reports_csv=reports_csv,
