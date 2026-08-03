@@ -164,8 +164,15 @@ def parse_cmd(
             label_filter=label_filter,
         )
 
-        # Extract test directories from test nodes
-        test_directories = [str(node.directory) for node in model.test_nodes]
+        # Extract test directories with labels and relative paths
+        test_directories = []
+        for node in model.test_nodes:
+            test_directories.append(
+                {
+                    "path": str(node.test_path),  # relative to artifact_dir
+                    "labels": node.labels,
+                }
+            )
 
         status.update(
             {
