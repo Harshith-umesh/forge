@@ -18,6 +18,15 @@ class CaliperOrchestrationParseSection(BaseModel):
     no_cache: bool = False
 
 
+class CaliperOrchestrationFilteringSection(BaseModel):
+    """``caliper.postprocess.filtering`` — label-based test directory filtering applied across all steps."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    include_labels: list[str] | None = Field(default=None)
+    exclude_labels: list[str] | None = Field(default=None)
+
+
 class CaliperOrchestrationVisualizeSection(BaseModel):
     """``caliper.postprocess.visualize`` — same semantics as ``caliper visualize``."""
 
@@ -281,6 +290,9 @@ class CaliperOrchestrationPostprocessConfig(BaseModel):
     postprocess_config: str | None = Field(
         default=None,
         description="Explicit path to caliper.yaml manifest.",
+    )
+    filtering: CaliperOrchestrationFilteringSection = Field(
+        default_factory=CaliperOrchestrationFilteringSection
     )
     parse: CaliperOrchestrationParseSection = Field(
         default_factory=CaliperOrchestrationParseSection

@@ -69,7 +69,7 @@ def test_parser_accepts_rate_split_benchmark_files(tmp_path: Path) -> None:
     parser = GuideLLMParser()
     node = TestBaseNode(
         directory=test_dir,
-        labels={"labels": {"guidellm_loadshape": "multi-turn"}},
+        test_labels={"labels": {"guidellm_loadshape": "multi-turn"}},
         artifact_paths=[file_b, file_a],
     )
 

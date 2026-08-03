@@ -15,13 +15,17 @@ MATRIXBENCHMARKING_MARKER = "settings.yaml"
 
 
 def discover_test_bases(
-    base_dir: Path, *, label_filter: dict[str, Any] | None = None
+    base_dir: Path,
+    *,
+    include_label_filter: list[dict[str, str]] | None = None,
+    exclude_label_filter: list[dict[str, str]] | None = None,
 ) -> list[TestBaseNode]:
     """Walk base_dir; each directory containing MARKER or MATRIXBENCHMARKING_MARKER becomes a TestBaseNode.
 
     Args:
         base_dir: Base directory to search
-        label_filter: Optional dict of label key-value pairs that must match for inclusion
+        include_label_filter: List of filter dicts or single dict of label key-value pairs that must match for inclusion
+        exclude_label_filter: List of filter dicts or single dict of label key-value pairs that exclude directories if they match
     """
     base_dir = base_dir.resolve()
     if not base_dir.is_dir():
@@ -42,23 +46,47 @@ def discover_test_bases(
 
         # Use hierarchical label loading for both marker types
         if marker_found == MARKER:
-            labels = _load_hierarchical_labels(path, base_dir)
+            test_labels = _load_hierarchical_test_labels(path, base_dir)
+            # For filtering, use the labels directly (hierarchical loading returns the labels dict)
+            # Normalize missing "labels" entry to empty mapping to allow discovery of empty marker files
+            labels = test_labels.get("labels", {})
         else:
             # Use hierarchical loading for MatrixBenchmarking settings.yaml too
             labels = _load_hierarchical_labels_matrixbenchmarking(path, base_dir)
-
+            test_labels = dict(
+                path=str(path.relative_to(base_dir)),
+                labels=labels,
+                version="matrix_benchmarking/settings",
+            )
         # Skip directory if skip: true is set in labels
         if labels.get("skip") is True:
             continue
 
         # Apply label filtering if specified
-        if label_filter is not None and not _matches_label_filter(labels, label_filter):
+        from projects.caliper.engine.label_filters import matches_filters
+
+        def _apply_filters(labels, include_filters, exclude_filters):
+            # For exclude filters, ANY match excludes (OR logic)
+            if exclude_filters:
+                for exclude_filter in exclude_filters:
+                    if not matches_filters(labels, include={}, exclude=exclude_filter):
+                        return False
+
+            # For include filters, ALL must match (AND logic)
+            if include_filters:
+                for include_filter in include_filters:
+                    if not matches_filters(labels, include=include_filter, exclude={}):
+                        return False
+
+            return True
+
+        if not _apply_filters(labels, include_label_filter, exclude_label_filter):
             continue
 
         nodes.append(
             TestBaseNode(
                 directory=path,
-                labels=labels,
+                test_labels=test_labels,
                 artifact_paths=_list_files_under(path, exclude_markers=True),
                 test_path=path.relative_to(base_dir),
             )
@@ -66,7 +94,7 @@ def discover_test_bases(
     return sorted(nodes, key=lambda n: str(n.directory))
 
 
-def _load_hierarchical_labels(test_dir: Path, base_dir: Path) -> dict[str, Any]:
+def _load_hierarchical_test_labels(test_dir: Path, base_dir: Path) -> dict[str, Any]:
     """Load and merge __test_labels__.yaml files hierarchically from base_dir down to test_dir.
 
     Merges in order:
@@ -188,47 +216,6 @@ def _load_hierarchical_labels_matrixbenchmarking(test_dir: Path, base_dir: Path)
             pass
 
     return merged_labels
-
-
-def _matches_label_filter(labels: dict[str, Any], label_filter: dict[str, Any]) -> bool:
-    """Check if labels match the specified filter criteria.
-
-    Args:
-        labels: The hierarchically merged labels from the test directory
-        label_filter: Dict of key-value pairs that must match
-
-    Returns:
-        True if all filter criteria match, False otherwise
-
-    Examples:
-        _matches_label_filter({"labels": {"platform": "CKS", "version": "3.5"}},
-                            {"platform": "CKS"}) -> True
-        _matches_label_filter({"labels": {"platform": "OCP"}},
-                            {"platform": "CKS"}) -> False
-    """
-    # Extract the labels section if it exists (for __test_labels__.yaml structure)
-    actual_labels = labels.get("labels", {}) if isinstance(labels.get("labels"), dict) else labels
-
-    for filter_key, filter_value in label_filter.items():
-        # Support nested key access with dot notation (e.g., "labels.platform")
-        if "." in filter_key:
-            keys = filter_key.split(".")
-            current = labels
-            for key in keys:
-                if not isinstance(current, dict) or key not in current:
-                    return False
-                current = current[key]
-            if current != filter_value:
-                return False
-        else:
-            # Direct key access in labels section or root level
-            if filter_key not in actual_labels and filter_key not in labels:
-                return False
-            value = actual_labels.get(filter_key, labels.get(filter_key))
-            if value != filter_value:
-                return False
-
-    return True
 
 
 def _deep_merge_dict(target: dict[str, Any], source: dict[str, Any]) -> None:
