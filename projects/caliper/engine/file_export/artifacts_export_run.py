@@ -201,7 +201,7 @@ def run_artifacts_export(
     if not backends:
         click.echo(
             "Specify at least one --backend: mlflow "
-            "(e.g. --from ./out --backend mlflow --mlflow-endpoint http://...).",
+            "(e.g. --from ./out --backend mlflow --mlflow-tracking-uri http://...).",
             err=True,
         )
         return 1
