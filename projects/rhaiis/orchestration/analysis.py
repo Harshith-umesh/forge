@@ -165,6 +165,11 @@ def run_regression_check(
             restrict_profiles=restrict_profiles,
         )
 
+        _ea = engine_args or {}
+        tp = _ea.get("tensor-parallel-size") or _ea.get("tp-size") or _ea.get("tp_size") or ""
+        dp = _ea.get("data-parallel-size") or _ea.get("dp-size") or ""
+        slack_user = config.project.get_config("tests.rhaiis.slack_user", "")
+
         if analysis.get("regression_count", 0) > 0 or analysis.get("improvement_count", 0) > 0:
             report_url = ""
             agent_cfg = config.project.get_config("rhaiis.agent_analysis", {})
@@ -181,19 +186,31 @@ def run_regression_check(
 
             from projects.rhaiis.postprocess.regression import send_regression_notification
 
-            _ea = engine_args or {}
-            tp = _ea.get("tensor-parallel-size") or _ea.get("tp-size") or _ea.get("tp_size") or ""
-            dp = _ea.get("data-parallel-size") or _ea.get("dp-size") or ""
             send_regression_notification(
                 analysis,
                 model=model_cfg.get("hf_model_id", ""),
                 accelerator=accelerator,
                 job_id=run_uuid,
-                slack_user=config.project.get_config("tests.rhaiis.slack_user", ""),
+                slack_user=slack_user,
                 notification_vault="psap-forge-notifications",
                 report_url=report_url,
                 tp=str(tp),
                 dp=str(dp),
+            )
+        elif config.project.get_config("tests.rhaiis.slack_notify_always", False):
+            from projects.rhaiis.postprocess.regression import send_success_notification
+
+            send_success_notification(
+                model=model_cfg.get("hf_model_id", ""),
+                accelerator=accelerator,
+                job_id=run_uuid,
+                slack_user=slack_user,
+                notification_vault="psap-forge-notifications",
+                tp=str(tp),
+                dp=str(dp),
+                version=current_version,
+                workload_keys=config.project.get_config("tests.rhaiis.workload_keys", []),
+                cluster=config.project.get_config("rhaiis.cluster_tag", ""),
             )
     except Exception:
         logger.warning("Regression analysis failed; continuing", exc_info=True)

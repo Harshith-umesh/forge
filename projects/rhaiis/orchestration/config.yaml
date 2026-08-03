@@ -28,6 +28,7 @@ tests:
     version: ""
     compare_version: ""
     slack_user: ""
+    slack_notify_always: false
 
 caliper:
   postprocess:

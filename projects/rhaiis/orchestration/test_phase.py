@@ -619,27 +619,52 @@ def _sync_postprocessed_dashboard_csv(model_key: str, workload_keys: list[str]) 
 
     version = config.project.get_config("tests.rhaiis.version", "")
     compare_version = config.project.get_config("tests.rhaiis.compare_version", "")
-    if not compare_version or not version:
+
+    if compare_version and version:
+        model_cfg = runtime_config.get_model(model_key)
+        accelerator = runtime_config.get_accelerator()
+        engine = runtime_config.get_engine()
+        engine_defaults = runtime_config.get_engine_args(engine)
+        first_workload = runtime_config.get_workload(workload_keys[0])
+        ea = runtime_config.merge_engine_args(engine_defaults, model_cfg, first_workload, engine)
+
+        from projects.rhaiis.orchestration.analysis import run_regression_check
+
+        run_regression_check(
+            csv_path,
+            compare_version,
+            version,
+            model_cfg,
+            accelerator,
+            run_uuid="",
+            engine_args=ea,
+        )
         return
 
-    model_cfg = runtime_config.get_model(model_key)
-    accelerator = runtime_config.get_accelerator()
-    engine = runtime_config.get_engine()
-    engine_defaults = runtime_config.get_engine_args(engine)
-    first_workload = runtime_config.get_workload(workload_keys[0])
-    ea = runtime_config.merge_engine_args(engine_defaults, model_cfg, first_workload, engine)
+    if config.project.get_config("tests.rhaiis.slack_notify_always", False):
+        from projects.rhaiis.postprocess.regression import send_success_notification
 
-    from projects.rhaiis.orchestration.analysis import run_regression_check
+        model_cfg = runtime_config.get_model(model_key)
+        accelerator = runtime_config.get_accelerator()
+        engine = runtime_config.get_engine()
+        engine_defaults = runtime_config.get_engine_args(engine)
+        first_workload = runtime_config.get_workload(workload_keys[0])
+        ea = runtime_config.merge_engine_args(engine_defaults, model_cfg, first_workload, engine)
+        tp = ea.get("tensor-parallel-size") or ea.get("tp-size") or ea.get("tp_size") or ""
+        dp = ea.get("data-parallel-size") or ea.get("dp-size") or ""
 
-    run_regression_check(
-        csv_path,
-        compare_version,
-        version,
-        model_cfg,
-        accelerator,
-        run_uuid="",
-        engine_args=ea,
-    )
+        send_success_notification(
+            model=model_cfg.get("hf_model_id", ""),
+            accelerator=accelerator,
+            job_id=os.environ.get("FJOB_NAME", ""),
+            slack_user=config.project.get_config("tests.rhaiis.slack_user", ""),
+            notification_vault="psap-forge-notifications",
+            tp=str(tp),
+            dp=str(dp),
+            version=version,
+            workload_keys=workload_keys,
+            cluster=config.project.get_config("rhaiis.cluster_tag", ""),
+        )
 
 
 def _upload_predictor_log(run_uuid: str) -> None:

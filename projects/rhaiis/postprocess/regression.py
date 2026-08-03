@@ -526,6 +526,90 @@ def send_regression_notification(
     )
 
 
+def send_success_notification(
+    *,
+    model: str = "",
+    accelerator: str = "",
+    job_id: str = "",
+    slack_user: str = "",
+    notification_vault: str | None = None,
+    dry_run: bool = False,
+    tp: str = "",
+    dp: str = "",
+    version: str = "",
+    workload_keys: list[str] | None = None,
+    cluster: str = "",
+) -> bool:
+    """Send a Slack notification when the RHAIIS pipeline succeeds with no regressions.
+
+    Returns:
+        True if notification sent successfully
+    """
+    if slack_user and re.match(r"^[UW][A-Z0-9]+$", slack_user):
+        user_line = f"*Triggered by:* <@{slack_user}>\n"
+    elif slack_user:
+        user_line = f"*Triggered by:* {slack_user}\n"
+    else:
+        user_line = ""
+
+    parallelism_parts = []
+    if tp:
+        parallelism_parts.append(f"TP={tp}")
+    if dp:
+        parallelism_parts.append(f"DP={dp}")
+    parallelism_line = (
+        f"*Parallelism:* {', '.join(parallelism_parts)}\n" if parallelism_parts else ""
+    )
+
+    profiles_line = ""
+    if workload_keys:
+        profiles_line = f"*Workloads:* {', '.join(workload_keys)}\n"
+
+    cluster_line = f"*Cluster:* {cluster}\n" if cluster else ""
+    version_line = f"*Version:* {version}\n" if version else ""
+
+    dashboard_line = ""
+    try:
+        from projects.core.library import config
+
+        if config.project.get_config("caliper.postprocess.csv_dashboard.enabled", False):
+            dashboard_url = _build_dashboard_url(
+                model=model,
+                accelerator=accelerator,
+                current_version=version,
+                profiles=workload_keys,
+                tp=tp,
+            )
+            dashboard_line = f"*Dashboard:* <{dashboard_url}|View Dashboard>\n"
+    except Exception:
+        pass
+
+    mlflow_url = _build_mlflow_run_url()
+    mlflow_line = f"*MLflow:* <{mlflow_url}|View Run>\n" if mlflow_url else ""
+
+    message = (
+        f":white_check_mark: *RHAIIS Pipeline Succeeded*\n"
+        f"{user_line}"
+        f"*Job:* `{job_id}`\n"
+        f"*Model:* {model}\n"
+        f"*Accelerator:* {accelerator}\n"
+        f"{parallelism_line}"
+        f"{version_line}"
+        f"{cluster_line}"
+        f"{profiles_line}"
+        f"{dashboard_line}"
+        f"{mlflow_line}"
+    )
+
+    if dry_run:
+        logger.info("DRY RUN success notification:\n%s", message)
+        return True
+
+    return _send_via_topsail_bot(
+        message, notification_vault=notification_vault, channel_id=RHAIIS_SLACK_CHANNEL_ID
+    )
+
+
 def send_failure_notification(
     *,
     error: str,
