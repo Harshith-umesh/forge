@@ -13,20 +13,9 @@ cpt:
   caliper.export.backend.mlflow.config.experiment: cpt-llm-d
   cpt.kpi.labels.test_harness: rhoai-release
 
-cpt-release-testing-gpt-oss-120b:
+cpt-release-testing-rhoai:
   extends:
   - cpt
-  - gpt-oss
-  runtime.benchmark_key:
-  - concurrent-1k-1k
-  - heavy-heterogeneous
-  - multi-turn
-
-cpt-release-testing-llama-33-70b:
-  extends:
-  - cpt
-  runtime.selected_preset: cpt-release-testing-llama-33-70b
-  runtime.model_name: RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
   runtime.deployment_profile:
   - release-distributed-default
   - release-precise-prefix-cache
@@ -38,5 +27,15 @@ cpt-release-testing-llama-33-70b:
   - multi-turn
   model_cache.pvc.size: 300Gi
   platform.operators.rhods-operator.channel: beta
-  workloads.args:
-    request_type: text_completions
+
+cpt-release-testing-gpt-oss-120b:
+  extends:
+  - gpt-oss
+  - cpt-release-testing-rhoai
+  runtime.selected_preset: cpt-release-testing-gpt-oss-120b
+
+cpt-release-testing-llama-33-70b:
+  extends:
+  - cpt-release-testing-rhoai
+  runtime.selected_preset: cpt-release-testing-llama-33-70b
+  runtime.model_name: RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic

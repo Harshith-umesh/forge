@@ -176,7 +176,11 @@ def test_release_preset_expands_benchmark_list_and_merges_workload_args() -> Non
         == "rhoai-release"
     )
 
-    assert runtime_config.get_deployment_profile_name() == "distributed-default"
+    assert core_config.project.get_config("runtime.deployment_profile", print=False) == [
+        "release-distributed-default",
+        "release-precise-prefix-cache",
+        "release-approximate-prefix-cache",
+    ]
     assert runtime_config.get_model_cache_config()["pvc"]["size"] == "300Gi"
     assert runtime_config.get_benchmark_keys() == [
         "concurrent-1k-1k",
@@ -191,21 +195,25 @@ def test_release_preset_expands_benchmark_list_and_merges_workload_args() -> Non
             assert benchmark["args"]["request_type"] == "text_completions"
 
 
-def test_release_preset_produces_3_run_specs() -> None:
+def test_gpt_release_preset_produces_deployment_workload_matrix() -> None:
     _init_project_config()
 
     core_config.project.apply_preset("cpt-release-testing-gpt-oss-120b")
 
     run_specs = runtime_config.get_run_specs()
 
-    assert len(run_specs) == 3
-    assert [spec.benchmark_key for spec in run_specs] == [
+    assert len(run_specs) == 9
+    assert {spec.benchmark_key for spec in run_specs} == {
         "concurrent-1k-1k",
         "heavy-heterogeneous",
         "multi-turn",
-    ]
+    }
     assert all(spec.model_name == "openai/gpt-oss-120b" for spec in run_specs)
-    assert all(spec.deployment_profile_name == "distributed-default" for spec in run_specs)
+    assert {spec.deployment_profile_name for spec in run_specs} == {
+        "release-distributed-default",
+        "release-precise-prefix-cache",
+        "release-approximate-prefix-cache",
+    }
 
 
 def test_llama_release_preset_produces_deployment_workload_matrix() -> None:
@@ -300,7 +308,11 @@ def test_ci_init_uses_framework_project_args_preset_and_keeps_var_overrides() ->
     llmd_ci.init()
 
     assert runtime_config.get_model_name() == "openai/gpt-oss-120b"
-    assert runtime_config.get_deployment_profile_name() == "distributed-default"
+    assert core_config.project.get_config("runtime.deployment_profile", print=False) == [
+        "release-distributed-default",
+        "release-precise-prefix-cache",
+        "release-approximate-prefix-cache",
+    ]
     assert runtime_config.get_benchmark_keys() == ["multi-turn"]
 
 
