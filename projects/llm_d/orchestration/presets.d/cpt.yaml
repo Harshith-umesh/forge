@@ -11,3 +11,31 @@ cpt-reference-flavors:
 
 cpt:
   caliper.export.backend.mlflow.config.experiment: cpt-llm-d
+  cpt.kpi.labels.test_harness: rhoai-release
+
+cpt-release-testing-rhoai:
+  extends:
+  - cpt
+  runtime.deployment_profile:
+  - release-distributed-default
+  - release-precise-prefix-cache
+  - release-approximate-prefix-cache
+  runtime.smoke_request_key: default
+  runtime.benchmark_key:
+  - concurrent-1k-1k
+  - heavy-heterogeneous
+  - multi-turn
+  model_cache.pvc.size: 300Gi
+  platform.operators.rhods-operator.channel: beta
+
+cpt-release-testing-gpt-oss-120b:
+  extends:
+  - gpt-oss
+  - cpt-release-testing-rhoai
+  runtime.selected_preset: cpt-release-testing-gpt-oss-120b
+
+cpt-release-testing-llama-33-70b:
+  extends:
+  - llama3-70b
+  - cpt-release-testing-rhoai
+  runtime.selected_preset: cpt-release-testing-llama-33-70b

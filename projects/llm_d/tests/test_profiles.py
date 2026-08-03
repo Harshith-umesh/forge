@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import base64
 import json
+from contextlib import nullcontext
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -48,20 +50,27 @@ def test_deployment_presets_resolve_deployments() -> None:
 def test_release_deployment_profiles_have_expected_shape() -> None:
     _init_project_config()
 
-    core_config.project.set_config("runtime.deployment_profile", "approximate-prefix-cache")
+    core_config.project.set_config("runtime.deployment_profile", "release-approximate-prefix-cache")
     approximate = runtime_config.get_deployment_profile()
-    core_config.project.set_config("runtime.deployment_profile", "precise-prefix-cache")
+    core_config.project.set_config("runtime.deployment_profile", "release-precise-prefix-cache")
     precise = runtime_config.get_deployment_profile()
-    core_config.project.set_config("runtime.deployment_profile", "distributed-default")
+    core_config.project.set_config("runtime.deployment_profile", "release-distributed-default")
     distributed = runtime_config.get_deployment_profile()
 
     for profile in (approximate, precise, distributed):
-        assert profile["replicas"] == 1
-        assert profile["tensor_parallelism"] == 1
+        assert profile["replicas"] == 4
+        assert profile["tensor_parallelism"] == 2
 
     assert isinstance(approximate["scheduler"], dict)
     assert isinstance(precise["scheduler"], dict)
     assert distributed["scheduler"] == {}
+
+
+def test_active_profile_inference_service_name_matches_rendered_name() -> None:
+    _init_project_config()
+    core_config.project.set_config("runtime.deployment_profile", "precise-prefix-cache")
+
+    assert runtime_config.get_inference_service_name() == "llm-d-precise-prefix-cache"
 
 
 @pytest.mark.parametrize(
@@ -87,11 +96,16 @@ def test_smoke_presets_inherit_deployment_modes(preset: str, expected_deployment
 def test_benchmark_workloads_are_available() -> None:
     _init_project_config()
 
+    short = core_config.project.get_config("workloads.benchmarks.short", print=False)
     concurrent = core_config.project.get_config(
         "workloads.benchmarks.concurrent-1k-1k", print=False
     )
     heavy = core_config.project.get_config("workloads.benchmarks.heavy-heterogeneous", print=False)
     multi_turn = core_config.project.get_config("workloads.benchmarks.multi-turn", print=False)
+
+    for benchmark in (short, concurrent, heavy):
+        assert benchmark["timeout_seconds"] == 3600
+    assert multi_turn["timeout_seconds"] == 7200
 
     assert concurrent["args"]["rate"] == [300, 200, 100, 50, 1]
     assert heavy["args"]["max_seconds"] == 600
@@ -120,7 +134,7 @@ def test_benchmark_resolution_applies_workload_defaults_and_per_benchmark_overri
     assert multi_turn["job_name"] == "guidellm-benchmark"
     assert multi_turn["image"] == "ghcr.io/vllm-project/guidellm:v0.5.4"
     assert multi_turn["pvc_size"] == "1Gi"
-    assert multi_turn["timeout_seconds"] == 3600
+    assert multi_turn["timeout_seconds"] == 7200
 
 
 def test_guidellm_benchmark_uses_original_model_name_as_processor(
@@ -128,7 +142,7 @@ def test_guidellm_benchmark_uses_original_model_name_as_processor(
 ) -> None:
     _init_project_config()
     core_config.project.set_config("runtime.model_name", "openai/gpt-oss-120b")
-    core_config.project.set_config("runtime.deployment_profile", "distributed-default")
+    core_config.project.set_config("runtime.deployment_profile", "release-distributed-default")
     core_config.project.set_config("runtime.benchmark_key", "concurrent-1k-1k")
 
     captured: dict[str, object] = {}
@@ -140,6 +154,7 @@ def test_guidellm_benchmark_uses_original_model_name_as_processor(
     monkeypatch.setattr(test_phase.run_guidellm_benchmark_command, "run", _fake_run)
     test_phase.run_guidellm_benchmark(endpoint_url="https://example.test/llm-d")
 
+    assert captured["timeout"] == 3600
     guidellm_args = captured["guidellm_args"]
     assert isinstance(guidellm_args, list)
     assert "--processor=openai/gpt-oss-120b" in guidellm_args
@@ -148,9 +163,24 @@ def test_guidellm_benchmark_uses_original_model_name_as_processor(
 def test_release_preset_expands_benchmark_list_and_merges_workload_args() -> None:
     _init_project_config()
 
-    core_config.project.apply_preset("gpt-oss-120b-inference-scheduling-release")
+    core_config.project.apply_preset("cpt-release-testing-gpt-oss-120b")
 
-    assert runtime_config.get_deployment_profile_name() == "distributed-default"
+    assert (
+        core_config.project.get_config(
+            "caliper.export.backend.mlflow.config.experiment", print=False
+        )
+        == "cpt-llm-d"
+    )
+    assert (
+        core_config.project.get_config("cpt.kpi.labels.test_harness", print=False)
+        == "rhoai-release"
+    )
+
+    assert core_config.project.get_config("runtime.deployment_profile", print=False) == [
+        "release-distributed-default",
+        "release-precise-prefix-cache",
+        "release-approximate-prefix-cache",
+    ]
     assert runtime_config.get_model_cache_config()["pvc"]["size"] == "300Gi"
     assert runtime_config.get_benchmark_keys() == [
         "concurrent-1k-1k",
@@ -165,21 +195,100 @@ def test_release_preset_expands_benchmark_list_and_merges_workload_args() -> Non
             assert benchmark["args"]["request_type"] == "text_completions"
 
 
-def test_release_preset_produces_3_run_specs() -> None:
+def test_gpt_release_preset_produces_deployment_workload_matrix() -> None:
     _init_project_config()
 
-    core_config.project.apply_preset("gpt-oss-120b-inference-scheduling-release")
+    core_config.project.apply_preset("cpt-release-testing-gpt-oss-120b")
 
     run_specs = runtime_config.get_run_specs()
 
-    assert len(run_specs) == 3
-    assert [spec.benchmark_key for spec in run_specs] == [
+    assert len(run_specs) == 9
+    assert {spec.benchmark_key for spec in run_specs} == {
         "concurrent-1k-1k",
         "heavy-heterogeneous",
         "multi-turn",
-    ]
+    }
     assert all(spec.model_name == "openai/gpt-oss-120b" for spec in run_specs)
-    assert all(spec.deployment_profile_name == "distributed-default" for spec in run_specs)
+    assert {spec.deployment_profile_name for spec in run_specs} == {
+        "release-distributed-default",
+        "release-precise-prefix-cache",
+        "release-approximate-prefix-cache",
+    }
+
+
+def test_llama_release_preset_produces_deployment_workload_matrix() -> None:
+    _init_project_config()
+
+    core_config.project.apply_preset("cpt-release-testing-llama-33-70b")
+
+    assert (
+        core_config.project.get_config(
+            "caliper.export.backend.mlflow.config.experiment", print=False
+        )
+        == "cpt-llm-d"
+    )
+    assert (
+        core_config.project.get_config("cpt.kpi.labels.test_harness", print=False)
+        == "rhoai-release"
+    )
+
+    run_specs = runtime_config.get_run_specs()
+    assert len(run_specs) == 9
+    assert {spec.deployment_profile_name for spec in run_specs} == {
+        "release-distributed-default",
+        "release-precise-prefix-cache",
+        "release-approximate-prefix-cache",
+    }
+    assert {spec.benchmark_key for spec in run_specs} == {
+        "concurrent-1k-1k",
+        "heavy-heterogeneous",
+        "multi-turn",
+    }
+    assert {spec.namespace for spec in run_specs} == {"forge-llm-d"}
+
+
+def test_test_matrix_continues_after_a_failed_entry(monkeypatch: pytest.MonkeyPatch) -> None:
+    _init_project_config()
+    run_specs = [
+        SimpleNamespace(
+            deployment_profile_name="distributed-default",
+            benchmark_key="multi-turn",
+            artifact_dirname="failed-entry",
+        ),
+        SimpleNamespace(
+            deployment_profile_name="precise-prefix-cache",
+            benchmark_key="multi-turn",
+            artifact_dirname="next-entry",
+        ),
+    ]
+    calls: list[str] = []
+
+    monkeypatch.setattr(test_phase.runtime_config, "get_run_specs", lambda: run_specs)
+    monkeypatch.setattr(
+        test_phase.runtime_config,
+        "activate_run_spec",
+        lambda _run_spec: nullcontext(),
+    )
+
+    def _test_entry() -> int:
+        calls.append("run")
+        if len(calls) == 1:
+            raise RuntimeError("expected test failure")
+        return 0
+
+    monkeypatch.setattr(test_phase, "do_test", _test_entry)
+
+    assert test_phase.run_all_tests(stop_on_error=False) == 1
+    assert calls == ["run", "run"]
+
+
+def test_precise_profile_preserves_kv_events_json_for_the_serving_eval() -> None:
+    _init_project_config()
+    core_config.project.set_config("runtime.deployment_profile", "release-precise-prefix-cache")
+
+    profile = runtime_config.get_deployment_profile()
+    args = profile["vllm_extra"]["args"]
+    assert args["kv_events_config"].startswith('\'{"enable_kv_cache_events"')
 
 
 def test_ci_init_uses_framework_project_args_preset_and_keeps_var_overrides() -> None:
@@ -188,7 +297,7 @@ def test_ci_init_uses_framework_project_args_preset_and_keeps_var_overrides() ->
     variable_overrides_path.write_text(
         yaml.safe_dump(
             {
-                "project.args": ["gpt-oss-120b-inference-scheduling-release"],
+                "project.args": ["cpt-release-testing-gpt-oss-120b"],
                 "runtime.benchmark_key": "multi-turn",
             },
             sort_keys=True,
@@ -199,7 +308,11 @@ def test_ci_init_uses_framework_project_args_preset_and_keeps_var_overrides() ->
     llmd_ci.init()
 
     assert runtime_config.get_model_name() == "openai/gpt-oss-120b"
-    assert runtime_config.get_deployment_profile_name() == "distributed-default"
+    assert core_config.project.get_config("runtime.deployment_profile", print=False) == [
+        "release-distributed-default",
+        "release-precise-prefix-cache",
+        "release-approximate-prefix-cache",
+    ]
     assert runtime_config.get_benchmark_keys() == ["multi-turn"]
 
 
@@ -654,7 +767,7 @@ def test_render_uses_sanitized_model_name_and_profile_resources() -> None:
     _init_project_config()
     core_config.project.set_config("model_cache.enabled", False)
     core_config.project.set_config("runtime.model_name", "openai/gpt-oss-120b")
-    core_config.project.set_config("runtime.deployment_profile", "distributed-default")
+    core_config.project.set_config("runtime.deployment_profile", "release-distributed-default")
 
     manifest = render_inference_service_from_parts(
         config_dir=str(PROJECT_ORCHESTRATION_DIR),
@@ -666,12 +779,12 @@ def test_render_uses_sanitized_model_name_and_profile_resources() -> None:
         model_cache=runtime_config.get_model_cache_config(),
     )
 
-    assert manifest["spec"]["replicas"] == 1
+    assert manifest["spec"]["replicas"] == 4
     assert manifest["spec"]["model"]["uri"] == "hf://openai/gpt-oss-120b"
     assert manifest["spec"]["model"]["name"] == "openai-gpt-oss-120b"
     assert manifest["spec"]["template"]["containers"][0]["resources"] == {
-        "requests": {"nvidia.com/gpu": "1"},
-        "limits": {"nvidia.com/gpu": "1"},
+        "requests": {"nvidia.com/gpu": "2"},
+        "limits": {"nvidia.com/gpu": "2"},
     }
     assert manifest["spec"]["router"]["scheduler"] == {}
 
@@ -725,7 +838,7 @@ def test_render_removes_scheduler_when_deployment_requests_null_scheduler() -> N
 def test_benchmark_job_name_from_activated_spec() -> None:
     _init_project_config()
 
-    core_config.project.apply_preset("gpt-oss-120b-inference-scheduling-release")
+    core_config.project.apply_preset("cpt-release-testing-gpt-oss-120b")
 
     for run_spec in runtime_config.get_run_specs():
         with runtime_config.activate_run_spec(run_spec):

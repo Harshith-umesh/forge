@@ -114,6 +114,7 @@ def test_render_guidellm_job_from_parts_uses_shell_for_multi_run_benchmarks() ->
         name="guidellm-benchmark",
         image="ghcr.io/vllm-project/guidellm:v0.5.4",
         endpoint_url="https://example.test/llm-d",
+        timeout_seconds=3600,
         guidellm_args=[
             "--backend-type=openai_http",
             "--rate-type=concurrent",
@@ -124,6 +125,7 @@ def test_render_guidellm_job_from_parts_uses_shell_for_multi_run_benchmarks() ->
     )
 
     container = manifest["spec"]["template"]["spec"]["containers"][0]
+    assert manifest["spec"]["activeDeadlineSeconds"] == 3600
     assert container["command"] == ["/bin/sh", "-lc"]
     script = container["args"][0]
     assert "--rate=32" in script
@@ -142,6 +144,7 @@ def test_render_guidellm_job_from_parts_keeps_plain_rates_as_single_guidellm_run
         name="guidellm-benchmark",
         image="ghcr.io/vllm-project/guidellm:v0.5.4",
         endpoint_url="https://example.test/llm-d",
+        timeout_seconds=3600,
         guidellm_args=[
             "--backend-type=openai_http",
             "--rate-type=concurrent",

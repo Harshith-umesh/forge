@@ -147,6 +147,16 @@ def delete_llm_d_labeled_resources(args, ctx):
         "--ignore-not-found=true",
     )
     _best_effort_delete(
+        "llm_d inference services",
+        "delete",
+        "llminferenceservice",
+        "-n",
+        args.namespace,
+        "-l",
+        "forge.openshift.io/project=llm_d",
+        "--ignore-not-found=true",
+    )
+    _best_effort_delete(
         "llm_d non-preserved pvcs",
         "delete",
         "pvc",

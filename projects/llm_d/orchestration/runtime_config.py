@@ -444,6 +444,12 @@ def get_deployment_profile_name() -> str:
     return deployment_profiles[0]
 
 
+def get_inference_service_name() -> str:
+    """Return the rendered LLMInferenceService name for the active profile."""
+    base_name = get_platform_config()["inference_service"]["name"]
+    return f"{base_name}-{get_deployment_profile_name()}"
+
+
 def _resolve_template_profile(
     profile_name: str, deployment_config: dict[str, Any]
 ) -> dict[str, Any]:
@@ -618,6 +624,7 @@ def get_run_specs() -> list[RunSpec]:
     for model_name, profile_name, (bench_key, bench_slug) in combinations:
         model_slug = get_model_slug(model_name)
         profile_slug = slugify_identifier(profile_name, max_length=24)
+        artifact_dirname = f"llmd__{bench_key or 'default'}__{profile_slug}"
 
         run_specs.append(
             RunSpec(
@@ -628,7 +635,7 @@ def get_run_specs() -> list[RunSpec]:
                 benchmark_key=bench_key,
                 benchmark_slug=bench_slug,
                 namespace=namespace,
-                artifact_dirname=f"llmd__{bench_key or 'default'}__{profile_slug}",
+                artifact_dirname=artifact_dirname,
             )
         )
 
@@ -642,18 +649,20 @@ def activate_run_spec(run_spec: RunSpec):
     saved = {
         "model_name": _get_runtime_value("model_name"),
         "deployment_profile": _get_runtime_value("deployment_profile"),
-        "namespace_override": _get_runtime_value("namespace_override"),
+        "namespace": _get_runtime_value("namespace"),
         "benchmark_key": _get_runtime_value("benchmark_key"),
     }
 
     config.project.set_config("runtime.model_name", run_spec.model_name)
     config.project.set_config("runtime.deployment_profile", run_spec.deployment_profile_name)
+    config.project.set_config("runtime.namespace", run_spec.namespace)
     config.project.set_config("runtime.benchmark_key", run_spec.benchmark_key)
     try:
         yield
     finally:
         config.project.set_config("runtime.model_name", saved["model_name"])
         config.project.set_config("runtime.deployment_profile", saved["deployment_profile"])
+        config.project.set_config("runtime.namespace", saved["namespace"])
         config.project.set_config("runtime.benchmark_key", saved["benchmark_key"])
 
 
