@@ -163,7 +163,18 @@ def test_guidellm_benchmark_uses_original_model_name_as_processor(
 def test_release_preset_expands_benchmark_list_and_merges_workload_args() -> None:
     _init_project_config()
 
-    core_config.project.apply_preset("gpt-oss-120b-inference-scheduling-release")
+    core_config.project.apply_preset("cpt-release-testing-gpt-oss-120b")
+
+    assert (
+        core_config.project.get_config(
+            "caliper.export.backend.mlflow.config.experiment", print=False
+        )
+        == "cpt-llm-d"
+    )
+    assert (
+        core_config.project.get_config("cpt.kpi.labels.test_harness", print=False)
+        == "rhoai-release"
+    )
 
     assert runtime_config.get_deployment_profile_name() == "distributed-default"
     assert runtime_config.get_model_cache_config()["pvc"]["size"] == "300Gi"
@@ -183,7 +194,7 @@ def test_release_preset_expands_benchmark_list_and_merges_workload_args() -> Non
 def test_release_preset_produces_3_run_specs() -> None:
     _init_project_config()
 
-    core_config.project.apply_preset("gpt-oss-120b-inference-scheduling-release")
+    core_config.project.apply_preset("cpt-release-testing-gpt-oss-120b")
 
     run_specs = runtime_config.get_run_specs()
 
@@ -200,7 +211,18 @@ def test_release_preset_produces_3_run_specs() -> None:
 def test_llama_release_preset_produces_deployment_workload_matrix() -> None:
     _init_project_config()
 
-    core_config.project.apply_preset("llama-33-70b-rhoai-release")
+    core_config.project.apply_preset("cpt-release-testing-llama-33-70b")
+
+    assert (
+        core_config.project.get_config(
+            "caliper.export.backend.mlflow.config.experiment", print=False
+        )
+        == "cpt-llm-d"
+    )
+    assert (
+        core_config.project.get_config("cpt.kpi.labels.test_harness", print=False)
+        == "rhoai-release"
+    )
 
     run_specs = runtime_config.get_run_specs()
     assert len(run_specs) == 9
@@ -267,7 +289,7 @@ def test_ci_init_uses_framework_project_args_preset_and_keeps_var_overrides() ->
     variable_overrides_path.write_text(
         yaml.safe_dump(
             {
-                "project.args": ["gpt-oss-120b-inference-scheduling-release"],
+                "project.args": ["cpt-release-testing-gpt-oss-120b"],
                 "runtime.benchmark_key": "multi-turn",
             },
             sort_keys=True,
@@ -804,7 +826,7 @@ def test_render_removes_scheduler_when_deployment_requests_null_scheduler() -> N
 def test_benchmark_job_name_from_activated_spec() -> None:
     _init_project_config()
 
-    core_config.project.apply_preset("gpt-oss-120b-inference-scheduling-release")
+    core_config.project.apply_preset("cpt-release-testing-gpt-oss-120b")
 
     for run_spec in runtime_config.get_run_specs():
         with runtime_config.activate_run_spec(run_spec):

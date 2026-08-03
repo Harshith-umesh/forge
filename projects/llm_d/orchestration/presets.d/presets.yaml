@@ -37,28 +37,3 @@ benchmark-short:
   runtime.model_name: meta-llama/Llama-3.1-8B-Instruct
   runtime.smoke_request_key: default
   runtime.benchmark_key: short
-
-gpt-oss-120b-inference-scheduling-release:
-  extends:
-    - gpt-oss
-  runtime.benchmark_key:
-    - concurrent-1k-1k
-    - heavy-heterogeneous
-    - multi-turn
-
-llama-33-70b-rhoai-release:
-  runtime.selected_preset: llama-33-70b-rhoai-release
-  runtime.model_name: RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
-  runtime.deployment_profile:
-    - release-distributed-default
-    - release-precise-prefix-cache
-    - release-approximate-prefix-cache
-  runtime.smoke_request_key: default
-  runtime.benchmark_key:
-    - concurrent-1k-1k
-    - heavy-heterogeneous
-    - multi-turn
-  model_cache.pvc.size: 300Gi
-  platform.operators.rhods-operator.channel: beta
-  workloads.args:
-    request_type: text_completions
