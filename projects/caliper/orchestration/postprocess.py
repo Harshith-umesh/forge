@@ -692,7 +692,7 @@ class CaliperPostprocessOrchestrator:
                 warning_msg = result.get("message", "unknown warning")
                 logger.warning(f"Step '{step_name}' completed with warning: {warning_msg}")
             elif status == "failed":
-                error_msg = result.get("message", "unknown error")
+                error_msg = result.get("error", result.get("message", "unknown error"))
                 traceback_msg = result.get("traceback")
                 logger.error(f"Step '{step_name}' failed: {error_msg}")
                 if traceback_msg:
