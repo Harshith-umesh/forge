@@ -956,6 +956,7 @@ def kpi_s3_import(
 @click.option("--mlflow-experiment", default=None, envvar="MLFLOW_EXPERIMENT_NAME")
 @click.option("--mlflow-run-id", default=None, envvar="MLFLOW_RUN_ID")
 @click.option("--mlflow-run-name", default=None, envvar="CALIPER_MLFLOW_RUN_NAME")
+@click.option("--mlflow-workspace", default=None, help="MLflow workspace name")
 @click.option("--mlflow-insecure-tls", is_flag=True)
 @click.option(
     "--mlflow-secrets",
@@ -988,6 +989,7 @@ def artifacts_export(
     mlflow_experiment: str | None,
     mlflow_run_id: str | None,
     mlflow_run_name: str | None,
+    mlflow_workspace: str | None,
     mlflow_insecure_tls: bool,
     mlflow_secrets_path: Path | None,
     mlflow_config_path: Path | None,
@@ -996,6 +998,7 @@ def artifacts_export(
     status_yaml_path: Path | None,
     upload_workers: int,
 ) -> None:
+
     # Load config from file if provided, CLI args override
     config = {}
     if mlflow_config_path:
@@ -1011,6 +1014,7 @@ def artifacts_export(
         "experiment": mlflow_experiment or config.get("experiment"),
         "run_id": mlflow_run_id or config.get("run_id"),
         "run_name": mlflow_run_name or config.get("run_name"),
+        "workspace": mlflow_workspace or config.get("workspace"),
         "insecure_tls": mlflow_insecure_tls or config.get("insecure_tls", False),
         "secrets_path": mlflow_secrets_path or config.get("secrets_path"),
         "upload_workers": upload_workers,
@@ -1023,10 +1027,15 @@ def artifacts_export(
             dry_run=dry_run,
             verbose=verbose,
             status_yaml_path=status_yaml_path,
-            mlflow_config=final_config,
+            mlflow_config_data=final_config,
         )
     except Exception as e:  # noqa: BLE001
+        import traceback
+
+        full_traceback = traceback.format_exc()
         click.echo(f"artifacts export failed: {e}", err=True)
+        click.echo("Full traceback:", err=True)
+        click.echo(full_traceback, err=True)
         sys.exit(3)
 
 
