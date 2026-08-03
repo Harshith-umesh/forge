@@ -5,12 +5,11 @@ from __future__ import annotations
 import gzip
 import json
 import logging
-import math
 import subprocess
 import time
 from pathlib import Path
 
-from projects.core.dsl import entrypoint, execute_tasks, retry, task
+from projects.core.dsl import always, entrypoint, execute_tasks, retry, task
 from projects.core.dsl.utils import write_json, write_text
 from projects.core.dsl.utils.k8s import (
     oc,
@@ -79,18 +78,8 @@ def run(
     if timeout <= 0:
         raise ValueError("timeout must be greater than zero")
 
-    # Allow time for Kubernetes to record the Job's terminal status after its deadline.
-    wait_guidellm_benchmark_task._retry_config["attempts"] = _wait_attempts(timeout)
     execute_tasks(locals())
     return 0
-
-
-def _wait_attempts(timeout_seconds: int) -> int:
-    return max(
-        1,
-        math.ceil((timeout_seconds + JOB_COMPLETION_GRACE_SECONDS) / WAIT_POLL_INTERVAL_SECONDS)
-        + 1,
-    )
 
 
 @task
@@ -208,7 +197,8 @@ def create_guidellm_resources_task(args, ctx):
     return f"GuideLLM benchmark {ctx.benchmark_name} created with job as PVC owner"
 
 
-@retry(attempts=366, delay=WAIT_POLL_INTERVAL_SECONDS, backoff=1.0)
+# An upper safety bound only; ctx.wait_deadline enforces the per-run timeout.
+@retry(attempts=1080, delay=WAIT_POLL_INTERVAL_SECONDS, backoff=1.0)
 @task
 def wait_guidellm_benchmark_task(args, ctx):
     """Wait for the GuideLLM benchmark job to complete"""
@@ -229,7 +219,9 @@ def wait_guidellm_benchmark_task(args, ctx):
 
     if active:
         if time.monotonic() >= ctx.wait_deadline:
-            _raise_benchmark_timeout(args, ctx)
+            raise TimeoutError(
+                f"GuideLLM benchmark {ctx.benchmark_name} did not complete within {args.timeout}s"
+            )
         logger.info("Job %s is still active, retrying...", ctx.benchmark_name)
         return False  # Retry immediately
 
@@ -267,13 +259,6 @@ def wait_guidellm_benchmark_task(args, ctx):
     if succeeded:
         return f"GuideLLM benchmark {ctx.benchmark_name} completed"
     if failed:
-        # Capture state and generate failure file before raising exception
-        capture_guidellm_state(
-            artifact_dir=args.artifact_dir,
-            namespace=ctx.target_namespace,
-            benchmark_name=ctx.benchmark_name,
-        )
-
         # Write failure file
         failure_file = args.artifact_dir / "FAILURE"
         failure_message = f"""GuideLLM benchmark job '{ctx.benchmark_name}' failed.
@@ -290,21 +275,13 @@ Check the job logs for detailed error information:
 
         raise RuntimeError(f"GuideLLM job {ctx.benchmark_name} failed")
     if time.monotonic() >= ctx.wait_deadline:
-        _raise_benchmark_timeout(args, ctx)
+        raise TimeoutError(
+            f"GuideLLM benchmark {ctx.benchmark_name} did not complete within {args.timeout}s"
+        )
     return False  # Retry
 
 
-def _raise_benchmark_timeout(args, ctx) -> None:
-    capture_guidellm_state(
-        artifact_dir=args.artifact_dir,
-        namespace=ctx.target_namespace,
-        benchmark_name=ctx.benchmark_name,
-    )
-    raise TimeoutError(
-        f"GuideLLM benchmark {ctx.benchmark_name} did not complete within {args.timeout}s"
-    )
-
-
+@always
 @task
 def capture_guidellm_state_task(args, ctx):
     """Capture GuideLLM benchmark job state and logs"""
