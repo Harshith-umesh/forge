@@ -133,7 +133,7 @@ class CIApp:
         return list(dict.fromkeys(all_vaults))
 
     def should_init_vaults(self, phase: str) -> bool:
-        """Return False to skip vault init for certain phases."""
+        """Return False to skip vault init for the resolve phase."""
         return phase != "resolve-fournos-config"
 
     def register_extra_commands(self, group: click.Group) -> None:
@@ -176,6 +176,13 @@ class CIApp:
     # Build
     # ------------------------------------------------------------------
 
+    _NIGHTLY_PHASES: dict[str, PhaseSpec] = {
+        "nightly": PhaseSpec(
+            func="projects.core.nightly.handler:run",
+            help="Nightly: check for new image version and trigger test if needed.",
+        ),
+    }
+
     def build(self) -> click.Group:
         """Assemble and return the fully-wired click.Group."""
         app = self
@@ -199,6 +206,10 @@ class CIApp:
 
         for cmd_name, spec in self.phases.items():
             _register_phase_command(main, cmd_name, spec)
+
+        for cmd_name, spec in self._NIGHTLY_PHASES.items():
+            if cmd_name not in self.phases:
+                _register_phase_command(main, cmd_name, spec)
 
         main.add_command(
             create_fournos_resolve_entrypoint(
