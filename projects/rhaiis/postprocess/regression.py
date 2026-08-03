@@ -334,50 +334,9 @@ DASHBOARD_BASE_URL = "https://staging-aidash.apps.ocp4.intlab.redhat.com/"
 
 def _build_mlflow_run_url() -> str:
     """Construct the MLflow run URL at runtime from vault secrets and config."""
-    try:
-        from projects.core.library import config
-        from projects.core.library import vault as vault_lib
+    from projects.caliper.orchestration.export import build_mlflow_run_url
 
-        run_id = config.project.get_config(
-            "caliper.export.mlflow_run_id", None, print=False, warn=False
-        )
-        experiment_id = config.project.get_config(
-            "caliper.export.mlflow_experiment_id", None, print=False, warn=False
-        )
-        if not run_id or not experiment_id:
-            return ""
-
-        vault_name = config.project.get_config(
-            "caliper.export.backend.mlflow.secrets.vault.name", None, print=False, warn=False
-        )
-        vault_key = config.project.get_config(
-            "caliper.export.backend.mlflow.secrets.vault.mlflow_secret",
-            None,
-            print=False,
-            warn=False,
-        )
-        if not vault_name or not vault_key:
-            return ""
-
-        secrets_path = vault_lib.get_vault_content_path(vault_name, vault_key)
-        if not secrets_path or not secrets_path.exists():
-            return ""
-
-        from projects.caliper.engine.file_export.mlflow_secrets import load_mlflow_secrets_yaml
-
-        secrets_data = load_mlflow_secrets_yaml(secrets_path)
-        tracking_uri = secrets_data.get("tracking_uri", "").rstrip("/")
-        if not tracking_uri.startswith(("http://", "https://")):
-            return ""
-
-        workspace = config.project.get_config(
-            "caliper.export.backend.mlflow.config.workspace", None, print=False, warn=False
-        )
-        qs = f"?workspace={workspace}" if workspace else ""
-        return f"{tracking_uri}/#/experiments/{experiment_id}/runs/{run_id}/artifacts{qs}"
-    except Exception:
-        logger.debug("Failed to build MLflow run URL", exc_info=True)
-        return ""
+    return build_mlflow_run_url()
 
 
 PROFILE_DISPLAY_NAMES = {

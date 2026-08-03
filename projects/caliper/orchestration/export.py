@@ -268,7 +268,132 @@ def run_from_orchestration_config(
         return yaml.safe_load(f.read())
 
 
+def precreate_mlflow_run() -> dict[str, str]:
+    """Pre-create an MLflow run so its IDs can be embedded in test labels before CSV generation.
+
+    The run is created and immediately ended (status FINISHED). The export step
+    will resume it via ``mlflow.start_run(run_id=...)`` to upload artifacts.
+
+    Returns a dict with ``run_id`` and ``experiment_id`` on success,
+    or an empty dict if MLflow is unavailable.
+    """
+    from projects.core.library import config
+
+    vault_name = config.project.get_config(
+        "caliper.export.backend.mlflow.secrets.vault.name", None, print=False, warn=False
+    )
+    vault_key = config.project.get_config(
+        "caliper.export.backend.mlflow.secrets.vault.mlflow_secret", None, print=False, warn=False
+    )
+    if not vault_name or not vault_key:
+        logger.info("MLflow vault not configured, skipping run pre-creation")
+        return {}
+
+    secrets_path = vault_lib.get_vault_content_path(vault_name, vault_key)
+    if not secrets_path or not secrets_path.exists():
+        logger.info("MLflow secrets file not found, skipping run pre-creation")
+        return {}
+
+    experiment = config.project.get_config(
+        "caliper.export.backend.mlflow.config.experiment", None, print=False, warn=False
+    )
+    workspace = config.project.get_config(
+        "caliper.export.backend.mlflow.config.workspace", None, print=False, warn=False
+    )
+
+    import mlflow
+
+    from projects.caliper.engine.file_export.mlflow_secrets import (
+        load_mlflow_secrets_yaml,
+        mlflow_connection_env,
+    )
+
+    secrets_data = load_mlflow_secrets_yaml(secrets_path)
+    tracking_uri = secrets_data.get("tracking_uri", "")
+
+    prev_workspace = os.environ.get("MLFLOW_WORKSPACE")
+    with mlflow_connection_env(secrets_data):
+        if tracking_uri:
+            mlflow.set_tracking_uri(tracking_uri)
+        if workspace:
+            os.environ["MLFLOW_WORKSPACE"] = workspace
+        if experiment:
+            mlflow.set_experiment(experiment)
+
+        run_name = os.environ.get("FJOB_NAME")
+        with mlflow.start_run(run_name=run_name):
+            active = mlflow.active_run()
+            run_id = active.info.run_id
+            experiment_id = str(active.info.experiment_id)
+
+    if prev_workspace is not None:
+        os.environ["MLFLOW_WORKSPACE"] = prev_workspace
+    else:
+        os.environ.pop("MLFLOW_WORKSPACE", None)
+
+    logger.info("Pre-created MLflow run %s (experiment=%s)", run_id, experiment_id)
+
+    return {
+        "run_id": run_id,
+        "experiment_id": experiment_id,
+    }
+
+
 MLFLOW_PRECREATED_RUN_MARKER = "__mlflow_precreated_run__.yaml"
+
+
+def write_mlflow_precreated_run_marker(meta: dict[str, str]) -> None:
+    """Persist the pre-created MLflow run_id to disk so the export step can resume it."""
+    marker_path = env.ARTIFACT_DIR / MLFLOW_PRECREATED_RUN_MARKER
+    marker_path.parent.mkdir(parents=True, exist_ok=True)
+    marker_path.write_text(yaml.safe_dump(meta, sort_keys=False), encoding="utf-8")
+    logger.info("Wrote MLflow pre-created run marker: %s", marker_path)
+
+
+def build_mlflow_run_url() -> str:
+    """Construct the MLflow run URL at runtime from vault secrets and config."""
+    try:
+        from projects.caliper.engine.file_export.mlflow_secrets import load_mlflow_secrets_yaml
+        from projects.core.library import config
+
+        run_id = config.project.get_config(
+            "caliper.export.mlflow_run_id", None, print=False, warn=False
+        )
+        experiment_id = config.project.get_config(
+            "caliper.export.mlflow_experiment_id", None, print=False, warn=False
+        )
+        if not run_id or not experiment_id:
+            return ""
+
+        vault_name = config.project.get_config(
+            "caliper.export.backend.mlflow.secrets.vault.name", None, print=False, warn=False
+        )
+        vault_key = config.project.get_config(
+            "caliper.export.backend.mlflow.secrets.vault.mlflow_secret",
+            None,
+            print=False,
+            warn=False,
+        )
+        if not vault_name or not vault_key:
+            return ""
+
+        secrets_path = vault_lib.get_vault_content_path(vault_name, vault_key)
+        if not secrets_path or not secrets_path.exists():
+            return ""
+
+        secrets_data = load_mlflow_secrets_yaml(secrets_path)
+        tracking_uri = secrets_data.get("tracking_uri", "").rstrip("/")
+        if not tracking_uri.startswith(("http://", "https://")):
+            return ""
+
+        workspace = config.project.get_config(
+            "caliper.export.backend.mlflow.config.workspace", None, print=False, warn=False
+        )
+        qs = f"?workspace={workspace}" if workspace else ""
+        return f"{tracking_uri}/#/experiments/{experiment_id}/runs/{run_id}/artifacts{qs}"
+    except Exception:
+        logger.debug("Failed to build MLflow run URL", exc_info=True)
+        return ""
 
 
 def _discover_precreated_mlflow_run_id(

@@ -296,15 +296,20 @@ def _run_test(
                 _warnings.append("Profiler trace upload failed")
 
         # Pre-create MLflow run so its URL can be embedded in test labels / CSV
+        from projects.caliper.orchestration.export import (
+            precreate_mlflow_run,
+            write_mlflow_precreated_run_marker,
+        )
+
         mlflow_run_meta: dict[str, str] = {}
         try:
-            mlflow_run_meta = _precreate_mlflow_run()
+            mlflow_run_meta = precreate_mlflow_run()
         except Exception:
             logger.warning("MLflow run pre-creation failed; continuing", exc_info=True)
 
         if mlflow_run_meta.get("run_id"):
             try:
-                _write_mlflow_precreated_run_marker(mlflow_run_meta)
+                write_mlflow_precreated_run_marker(mlflow_run_meta)
             except Exception:
                 logger.warning("Failed to write MLflow marker file; continuing", exc_info=True)
 
@@ -523,93 +528,6 @@ def _create_test_labels(
     }
     write_test_labels(env.ARTIFACT_DIR, labels)
     logger.info("Created test labels: %s", labels)
-
-
-def _precreate_mlflow_run() -> dict[str, str]:
-    """Pre-create an MLflow run so its IDs can be embedded in test labels before CSV generation.
-
-    The run is created and immediately ended (status FINISHED). The export step
-    will resume it via ``mlflow.start_run(run_id=...)`` to upload artifacts.
-
-    Returns a dict with ``run_id`` and ``experiment_id`` on success,
-    or an empty dict if MLflow is unavailable.
-    """
-    from projects.core.library import config
-    from projects.core.library import vault as vault_lib
-
-    vault_name = config.project.get_config(
-        "caliper.export.backend.mlflow.secrets.vault.name", None, print=False, warn=False
-    )
-    vault_key = config.project.get_config(
-        "caliper.export.backend.mlflow.secrets.vault.mlflow_secret", None, print=False, warn=False
-    )
-    if not vault_name or not vault_key:
-        logger.info("MLflow vault not configured, skipping run pre-creation")
-        return {}
-
-    secrets_path = vault_lib.get_vault_content_path(vault_name, vault_key)
-    if not secrets_path or not secrets_path.exists():
-        logger.info("MLflow secrets file not found, skipping run pre-creation")
-        return {}
-
-    experiment = config.project.get_config(
-        "caliper.export.backend.mlflow.config.experiment", None, print=False, warn=False
-    )
-    workspace = config.project.get_config(
-        "caliper.export.backend.mlflow.config.workspace", None, print=False, warn=False
-    )
-
-    import os
-
-    import mlflow
-
-    from projects.caliper.engine.file_export.mlflow_secrets import (
-        load_mlflow_secrets_yaml,
-        mlflow_connection_env,
-    )
-
-    secrets_data = load_mlflow_secrets_yaml(secrets_path)
-    tracking_uri = secrets_data.get("tracking_uri", "")
-
-    prev_workspace = os.environ.get("MLFLOW_WORKSPACE")
-    with mlflow_connection_env(secrets_data):
-        if tracking_uri:
-            mlflow.set_tracking_uri(tracking_uri)
-        if workspace:
-            os.environ["MLFLOW_WORKSPACE"] = workspace
-        if experiment:
-            mlflow.set_experiment(experiment)
-
-        run_name = os.environ.get("FJOB_NAME")
-        with mlflow.start_run(run_name=run_name):
-            active = mlflow.active_run()
-            run_id = active.info.run_id
-            experiment_id = str(active.info.experiment_id)
-
-    if prev_workspace is not None:
-        os.environ["MLFLOW_WORKSPACE"] = prev_workspace
-    else:
-        os.environ.pop("MLFLOW_WORKSPACE", None)
-
-    logger.info("Pre-created MLflow run %s (experiment=%s)", run_id, experiment_id)
-
-    return {
-        "run_id": run_id,
-        "experiment_id": experiment_id,
-    }
-
-
-MLFLOW_PRECREATED_RUN_MARKER = "__mlflow_precreated_run__.yaml"
-
-
-def _write_mlflow_precreated_run_marker(meta: dict[str, str]) -> None:
-    """Persist the pre-created MLflow run_id to disk so the export step can resume it."""
-    import yaml
-
-    marker_path = env.ARTIFACT_DIR / MLFLOW_PRECREATED_RUN_MARKER
-    marker_path.parent.mkdir(parents=True, exist_ok=True)
-    marker_path.write_text(yaml.safe_dump(meta, sort_keys=False), encoding="utf-8")
-    logger.info("Wrote MLflow pre-created run marker: %s", marker_path)
 
 
 def _set_mlflow_metadata(
