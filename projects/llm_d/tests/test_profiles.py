@@ -233,13 +233,12 @@ def test_test_matrix_continues_after_a_failed_entry(monkeypatch: pytest.MonkeyPa
     ]
     calls: list[str] = []
 
-    monkeypatch.setattr(llmd_ci.runtime_config, "get_run_specs", lambda: run_specs)
+    monkeypatch.setattr(test_phase.runtime_config, "get_run_specs", lambda: run_specs)
     monkeypatch.setattr(
-        llmd_ci.runtime_config,
+        test_phase.runtime_config,
         "activate_run_spec",
         lambda _run_spec: nullcontext(),
     )
-    monkeypatch.setattr(llmd_ci, "trigger_config_review_for_ci", lambda *_args, **_kwargs: None)
 
     def _test_entry() -> int:
         calls.append("run")
@@ -247,9 +246,9 @@ def test_test_matrix_continues_after_a_failed_entry(monkeypatch: pytest.MonkeyPa
             raise RuntimeError("expected test failure")
         return 0
 
-    monkeypatch.setattr(llmd_ci, "test_toolbox_run", _test_entry)
+    monkeypatch.setattr(test_phase, "do_test", _test_entry)
 
-    assert llmd_ci.run_test_matrix() == 1
+    assert test_phase.run_all_tests(stop_on_error=False) == 1
     assert calls == ["run", "run"]
 
 

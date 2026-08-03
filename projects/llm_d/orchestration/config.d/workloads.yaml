@@ -36,6 +36,7 @@ benchmarks:
       max_seconds: 600
 
   heavy-heterogeneous:
+    timeout_seconds: 3600
     vllm_args:
       max_model_len: 40960
     args:

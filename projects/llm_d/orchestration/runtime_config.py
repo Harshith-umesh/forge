@@ -624,7 +624,7 @@ def get_run_specs() -> list[RunSpec]:
     for model_name, profile_name, (bench_key, bench_slug) in combinations:
         model_slug = get_model_slug(model_name)
         profile_slug = slugify_identifier(profile_name, max_length=24)
-        artifact_dirname = f"llmd__{bench_key or 'default'}"
+        artifact_dirname = f"llmd__{bench_key or 'default'}__{profile_slug}"
 
         run_specs.append(
             RunSpec(

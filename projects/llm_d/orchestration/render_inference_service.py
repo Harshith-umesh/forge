@@ -258,7 +258,10 @@ def _build_vllm_additional_args(
     # Add workload vllm_args if available
     if workload and "vllm_args" in workload:
         workload_vllm_args = _build_vllm_args(workload["vllm_args"])
-        vllm_deploy_args.extend(workload_vllm_args)
+        deployment_options = {arg.split("=", 1)[0] for arg in vllm_deploy_args}
+        vllm_deploy_args.extend(
+            arg for arg in workload_vllm_args if arg.split("=", 1)[0] not in deployment_options
+        )
 
     return " ".join(vllm_deploy_args)
 
