@@ -28,13 +28,22 @@ pd:
 profiles:
   approximate-prefix-cache:
     scheduler_manifest: manifests/deployments/approximate-prefix-cache.yaml
+
+  precise-prefix-cache:
+    scheduler_manifest: manifests/deployments/precise-prefix-cache.yaml
+
+  distributed-default:
+    scheduler: {}
+
+  release-approximate-prefix-cache:
+    scheduler_manifest: manifests/deployments/approximate-prefix-cache.yaml
     replicas: 4
     tensor_parallelism: 2
     vllm_extra:
       args:
         max_model_len: 40960
 
-  precise-prefix-cache:
+  release-precise-prefix-cache:
     scheduler_manifest: manifests/deployments/precise-prefix-cache.yaml
     replicas: 4
     tensor_parallelism: 2
@@ -59,7 +68,7 @@ profiles:
         - name: PYTHONHASHSEED
           value: "42"
 
-  distributed-default:
+  release-distributed-default:
     scheduler: {}
     replicas: 4
     tensor_parallelism: 2

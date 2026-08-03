@@ -50,11 +50,11 @@ def test_deployment_presets_resolve_deployments() -> None:
 def test_release_deployment_profiles_have_expected_shape() -> None:
     _init_project_config()
 
-    core_config.project.set_config("runtime.deployment_profile", "approximate-prefix-cache")
+    core_config.project.set_config("runtime.deployment_profile", "release-approximate-prefix-cache")
     approximate = runtime_config.get_deployment_profile()
-    core_config.project.set_config("runtime.deployment_profile", "precise-prefix-cache")
+    core_config.project.set_config("runtime.deployment_profile", "release-precise-prefix-cache")
     precise = runtime_config.get_deployment_profile()
-    core_config.project.set_config("runtime.deployment_profile", "distributed-default")
+    core_config.project.set_config("runtime.deployment_profile", "release-distributed-default")
     distributed = runtime_config.get_deployment_profile()
 
     for profile in (approximate, precise, distributed):
@@ -142,7 +142,7 @@ def test_guidellm_benchmark_uses_original_model_name_as_processor(
 ) -> None:
     _init_project_config()
     core_config.project.set_config("runtime.model_name", "openai/gpt-oss-120b")
-    core_config.project.set_config("runtime.deployment_profile", "distributed-default")
+    core_config.project.set_config("runtime.deployment_profile", "release-distributed-default")
     core_config.project.set_config("runtime.benchmark_key", "concurrent-1k-1k")
 
     captured: dict[str, object] = {}
@@ -205,9 +205,9 @@ def test_llama_release_preset_produces_deployment_workload_matrix() -> None:
     run_specs = runtime_config.get_run_specs()
     assert len(run_specs) == 9
     assert {spec.deployment_profile_name for spec in run_specs} == {
-        "distributed-default",
-        "precise-prefix-cache",
-        "approximate-prefix-cache",
+        "release-distributed-default",
+        "release-precise-prefix-cache",
+        "release-approximate-prefix-cache",
     }
     assert {spec.benchmark_key for spec in run_specs} == {
         "concurrent-1k-1k",
@@ -254,7 +254,7 @@ def test_test_matrix_continues_after_a_failed_entry(monkeypatch: pytest.MonkeyPa
 
 def test_precise_profile_preserves_kv_events_json_for_the_serving_eval() -> None:
     _init_project_config()
-    core_config.project.set_config("runtime.deployment_profile", "precise-prefix-cache")
+    core_config.project.set_config("runtime.deployment_profile", "release-precise-prefix-cache")
 
     profile = runtime_config.get_deployment_profile()
     args = profile["vllm_extra"]["args"]
@@ -733,7 +733,7 @@ def test_render_uses_sanitized_model_name_and_profile_resources() -> None:
     _init_project_config()
     core_config.project.set_config("model_cache.enabled", False)
     core_config.project.set_config("runtime.model_name", "openai/gpt-oss-120b")
-    core_config.project.set_config("runtime.deployment_profile", "distributed-default")
+    core_config.project.set_config("runtime.deployment_profile", "release-distributed-default")
 
     manifest = render_inference_service_from_parts(
         config_dir=str(PROJECT_ORCHESTRATION_DIR),

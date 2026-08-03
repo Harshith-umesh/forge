@@ -50,9 +50,9 @@ llama-33-70b-rhoai-release:
   runtime.selected_preset: llama-33-70b-rhoai-release
   runtime.model_name: RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
   runtime.deployment_profile:
-    - distributed-default
-    - precise-prefix-cache
-    - approximate-prefix-cache
+    - release-distributed-default
+    - release-precise-prefix-cache
+    - release-approximate-prefix-cache
   runtime.smoke_request_key: default
   runtime.benchmark_key:
     - concurrent-1k-1k
