@@ -106,10 +106,10 @@ spec:
           fi
         }
 
-        # Export environment variables from FournosJob spec
-        export_env_var_from_fjob PULL_BASE_SHA
-        export_env_var_from_fjob PULL_PULL_SHA
-        export_env_var_from_fjob PULL_NUMBER
+        # Export all environment variables from FournosJob spec.env
+        for var_name in $(cat "$ARTIFACT_DIR/fournos_fjob.yaml" | yq -r '.spec.env // {} | keys[]'); do
+          export_env_var_from_fjob "$var_name"
+        done
 
         if [[ "${PULL_PULL_SHA:-}" ]]; then
           echo

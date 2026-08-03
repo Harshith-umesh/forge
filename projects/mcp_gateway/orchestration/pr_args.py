@@ -9,6 +9,8 @@ Supported syntax::
     /test fournos mcp_gateway smoke
     /test fournos mcp_gateway smoke collect_cluster_info
     /version 0.7.0
+    /pipeline nightly ghcr
+    /pipeline nightly quay
 """
 
 from __future__ import annotations
@@ -76,5 +78,25 @@ def parse_project_directives(comment_text: str) -> tuple[dict[str, Any], list[st
             config_overrides["infrastructure.mcp_gateway_version"] = parts[0]
             parsed_directives.append(line)
             logger.info("Parsed mcp_gateway version: %s", parts[0])
+
+        # Parse /pipeline nightly <source> — extract source from pipeline directive
+        # The directive line itself is already captured by the FOURNOS /pipeline handler,
+        # so only extract the config overrides here to avoid duplicating it in notifications.
+        if line.startswith("/pipeline nightly "):
+            parts = line.split()
+            if len(parts) == 3:
+                source = parts[2]
+                config_overrides["nightly.source"] = source
+                config_overrides["fournos.job.pipeline_name"] = "nightly"
+                config_overrides["caliper.export.backend.mlflow.config.experiment"] = (
+                    "nightly-pipeline-experiment"
+                )
+                config_overrides["caliper.export.backend.mlflow.config.run_naming.prefix"] = (
+                    "mcp-gw-nightly"
+                )
+                config_overrides["caliper.export.backend.mlflow.config.run_naming.single_run"] = (
+                    "{prefix}-{timestamp}-{outcome}"
+                )
+                logger.info("Parsed nightly source from pipeline directive: %s", source)
 
     return config_overrides, parsed_directives

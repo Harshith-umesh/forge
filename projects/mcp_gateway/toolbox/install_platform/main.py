@@ -115,8 +115,8 @@ def install_service_mesh_instance(args, ctx):
 
     if "wait_for_ready" in step:
         spec = step["wait_for_ready"]
-        ctx._mesh_ready_spec = spec
-        return (False, "Service Mesh instance applied, readiness checked in next task")
+        ctx.mesh_ready_spec = spec
+        return "Service Mesh instance applied, readiness checked in next task"
 
     return f"Service Mesh instance applied from {kustomize_path}"
 
@@ -125,7 +125,7 @@ def install_service_mesh_instance(args, ctx):
 @task
 def wait_service_mesh_ready(args, ctx):
     """Wait for Istio instance to report Ready condition"""
-    spec = getattr(ctx, "_mesh_ready_spec", None)
+    spec = getattr(ctx, "mesh_ready_spec", None)
     if not spec:
         return "No readiness spec, skipping"
 
