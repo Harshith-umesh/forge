@@ -43,6 +43,9 @@ caliper:
     artifacts_dir: null
     plugin_module: projects.guidellm.postprocess.guidellm.plugin
     postprocess_config: null
+    filtering:
+      include_labels: []
+      exclude_labels: []
     parse:
       enabled: true
       no_cache: false
