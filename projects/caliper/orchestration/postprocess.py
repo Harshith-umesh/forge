@@ -210,7 +210,12 @@ def _run_artifacts_to_kpis(
         full_traceback = traceback.format_exc()
         logger.error(f"KPI generation failed: {e}")
         logger.error(f"Full traceback:\n{full_traceback}")
-        return {"status": "failed", "error": str(e), "completed_at": time.time(), "log_file": None}
+        return {
+            "status": "failed",
+            "message": str(e),
+            "completed_at": time.time(),
+            "log_file": None,
+        }
 
 
 # _run_s3_import function removed - now using fork/exec subprocess execution directly
@@ -282,7 +287,12 @@ def _run_artifacts_to_ai_data(
         full_traceback = traceback.format_exc()
         logger.error(f"AI eval export failed: {e}")
         logger.error(f"Full traceback:\n{full_traceback}")
-        return {"status": "failed", "error": str(e), "completed_at": time.time(), "log_file": None}
+        return {
+            "status": "failed",
+            "message": str(e),
+            "completed_at": time.time(),
+            "log_file": None,
+        }
 
 
 def _load_test_labels(test_dir: Path) -> dict[str, Any]:
@@ -396,7 +406,12 @@ def _run_kpis_to_csv(
         full_traceback = traceback.format_exc()
         logger.error(f"KPI CSV export failed: {e}")
         logger.error(f"Full traceback:\n{full_traceback}")
-        return {"status": "failed", "error": str(e), "completed_at": time.time(), "log_file": None}
+        return {
+            "status": "failed",
+            "message": str(e),
+            "completed_at": time.time(),
+            "log_file": None,
+        }
 
 
 def _run_analyse_kpis(
@@ -477,7 +492,12 @@ def _run_analyse_kpis(
 
     except Exception as e:
         logger.exception("KPI analysis failed in _run_analyse_kpis")
-        return {"status": "failed", "error": str(e), "completed_at": time.time(), "log_file": None}
+        return {
+            "status": "failed",
+            "message": str(e),
+            "completed_at": time.time(),
+            "log_file": None,
+        }
 
 
 class CaliperPostprocessOrchestrator:
@@ -672,7 +692,7 @@ class CaliperPostprocessOrchestrator:
                 warning_msg = result.get("message", "unknown warning")
                 logger.warning(f"Step '{step_name}' completed with warning: {warning_msg}")
             elif status == "failed":
-                error_msg = result.get("error", "unknown error")
+                error_msg = result.get("message", "unknown error")
                 traceback_msg = result.get("traceback")
                 logger.error(f"Step '{step_name}' failed: {error_msg}")
                 if traceback_msg:
