@@ -5,8 +5,6 @@ pvc:
   name_prefix: llm-d-model
   size: 15Gi
   access_mode: ReadWriteOnce
-  # GitHub /var overrides can select an RWX-capable class together with
-  # access_mode: ReadWriteMany for multi-node model-cache mounts.
   storage_class_name: null
   model_directory_name: model
 
