@@ -58,7 +58,6 @@ def parse_project_directives(comment_text: str) -> tuple[dict[str, Any], list[st
         args = _parse_test_line(line)
         if args is not None:
             if args:
-                parsed_directives.append(line)
                 logger.info("Parsed mcp_gateway presets: %s", args)
             continue
 

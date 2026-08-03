@@ -378,57 +378,6 @@ def oc_cp_from_pod(
     return oc(*args)
 
 
-def ensure_node_labels(
-    labels: dict[str, str],
-    *,
-    node_role: str = "worker",
-) -> list[str]:
-    """Ensure that all nodes matching a role carry the given labels.
-
-    For each node with the role ``node_role``, any missing labels from
-    ``labels`` are applied via ``oc label``.  Labels that already have
-    the correct value are left untouched.
-
-    Args:
-        labels: Mapping of label-key → label-value to enforce.
-        node_role: The ``node-role.kubernetes.io/<role>`` to select nodes
-            (default ``"worker"``).
-
-    Returns:
-        List of node names that were modified.
-    """
-    if not labels:
-        return []
-
-    selector = f"node-role.kubernetes.io/{node_role}"
-    result = oc_get_json("node", selector=selector)
-    if not result:
-        logger.warning("No nodes found with role '%s'", node_role)
-        return []
-
-    nodes = result.get("items", [])
-    if not nodes:
-        logger.warning("No nodes found with role '%s'", node_role)
-        return []
-
-    modified: list[str] = []
-    for node in nodes:
-        node_name = node["metadata"]["name"]
-        existing = node.get("metadata", {}).get("labels", {})
-
-        missing = {k: v for k, v in labels.items() if existing.get(k) != v}
-        if not missing:
-            logger.info("Node %s already has required labels", node_name)
-            continue
-
-        label_args = [f"{k}={v}" for k, v in missing.items()]
-        logger.info("Labeling node %s with %s", node_name, ", ".join(label_args))
-        oc("label", "node", node_name, *label_args, "--overwrite")
-        modified.append(node_name)
-
-    return modified
-
-
 def best_effort_oc(*oc_args: str, description: str | None = None) -> None:
     """Run an oc command, swallowing timeout and other errors.
 

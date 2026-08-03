@@ -22,7 +22,7 @@ import os
 import re
 
 from projects.agentic_tools.mcp.toolbox.deploy_mock_servers import main as deploy_mock_servers
-from projects.core.dsl.utils.k8s import ensure_node_labels, oc, oc_get_json, oc_resource_exists
+from projects.core.dsl.utils.k8s import oc, oc_get_json, oc_resource_exists
 from projects.core.library import config
 from projects.core.orchestration.utils.k8s import ensure_namespace
 from projects.mcp_gateway.orchestration.runtime_config import cfg
@@ -49,7 +49,6 @@ def run() -> int:
         ("MCP Gateway deployment running", check_gateway_deployment),
         ("MCPGatewayExtension reconciled", check_extension_reconciled),
         ("Test namespace exists", check_test_namespace),
-        ("Worker node scheduling labels", check_node_labels),
         ("Deployed version matches requested", check_version_match),
         ("Gateway connectivity (probe)", check_gateway_connectivity),
     ]
@@ -188,25 +187,6 @@ def check_test_namespace() -> None:
             },
         )
         logger.info("  Namespace %s created", namespace)
-
-
-def check_node_labels() -> None:
-    """Ensure worker nodes carry the labels required by the scheduling config.
-
-    Reads ``infrastructure.scheduling.node_selector`` from the project config
-    and applies any missing labels to worker nodes so that test pods can be
-    scheduled.
-    """
-    node_selector = cfg.get_scheduling_config().get("node_selector")
-    if not node_selector:
-        logger.info("  No node_selector configured, skipping")
-        return
-
-    modified = ensure_node_labels(node_selector, node_role="worker")
-    if modified:
-        logger.info("  Labeled %d worker node(s): %s", len(modified), ", ".join(modified))
-    else:
-        logger.info("  All worker nodes already have required labels")
 
 
 def check_version_match() -> None:

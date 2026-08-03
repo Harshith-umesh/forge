@@ -113,7 +113,10 @@ def _load_mlflow_inputs(
             secrets_data = load_mlflow_secrets_yaml(mlflow_secrets_path)
             validate_mlflow_secrets(secrets_data)
         except (OSError, ValueError, TypeError, yaml.YAMLError) as e:
-            click.echo(f"Invalid MLflow secrets file: {e}", err=True)
+            click.echo(
+                f"Invalid MLflow secrets file: {mlflow_secrets_path} -- {e.__class__.__name__}",
+                err=True,
+            )
             return 1
 
     if mlflow_config_data is not None:
@@ -227,7 +230,10 @@ def run_artifacts_export(
             try:
                 validate_mlflow_secrets(secret_part)
             except (ValueError, TypeError) as e:
-                click.echo(f"Invalid MLflow configuration: {e}", err=True)
+                click.echo(
+                    f"Invalid MLflow configuration -- {e.__class__.__name__}",
+                    err=True,
+                )
                 return 1
         if secrets_data is not None:
             mlflow_connection = secret_part if secret_part else None
