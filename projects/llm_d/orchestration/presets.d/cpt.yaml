@@ -36,6 +36,6 @@ cpt-release-testing-gpt-oss-120b:
 
 cpt-release-testing-llama-33-70b:
   extends:
+  - llama3-70b
   - cpt-release-testing-rhoai
   runtime.selected_preset: cpt-release-testing-llama-33-70b
-  runtime.model_name: RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
