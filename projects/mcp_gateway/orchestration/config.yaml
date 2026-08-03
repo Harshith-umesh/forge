@@ -35,12 +35,9 @@ caliper:
       enabled: false
     kpi:
       enabled: true
-      generate:
       artifacts_to_kpis:
         enabled: true
         output: kpis.json
-      export:
-        output: kpis/kpis.json
       kpis_to_csv:
         enabled: true
         output: kpis/kpis.csv
