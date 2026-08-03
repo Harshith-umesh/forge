@@ -350,18 +350,28 @@ def write_mlflow_precreated_run_marker(meta: dict[str, str]) -> None:
     logger.info("Wrote MLflow pre-created run marker: %s", marker_path)
 
 
+def _read_mlflow_ids_from_marker() -> tuple[str, str]:
+    """Read run_id and experiment_id from the pre-created marker file on disk."""
+    try:
+        artifact_dir = Path(env.ARTIFACT_DIR) if env.ARTIFACT_DIR else None
+        if not artifact_dir:
+            return "", ""
+        for marker in sorted(artifact_dir.rglob(MLFLOW_PRECREATED_RUN_MARKER)):
+            data = yaml.safe_load(marker.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and data.get("run_id"):
+                return data["run_id"], data.get("experiment_id", "")
+    except Exception:
+        pass
+    return "", ""
+
+
 def build_mlflow_run_url() -> str:
-    """Construct the MLflow run URL at runtime from vault secrets and config."""
+    """Construct the MLflow run URL at runtime from vault secrets and the marker file."""
     try:
         from projects.caliper.engine.file_export.mlflow_secrets import load_mlflow_secrets_yaml
         from projects.core.library import config
 
-        run_id = config.project.get_config(
-            "caliper.export.mlflow_run_id", None, print=False, warn=False
-        )
-        experiment_id = config.project.get_config(
-            "caliper.export.mlflow_experiment_id", None, print=False, warn=False
-        )
+        run_id, experiment_id = _read_mlflow_ids_from_marker()
         if not run_id or not experiment_id:
             return ""
 
