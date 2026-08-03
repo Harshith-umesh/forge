@@ -192,7 +192,7 @@ def run_artifacts_export(
             mlflow_tracking_uri = os.environ.get("MLFLOW_TRACKING_URI")
         if not mlflow_tracking_uri:
             click.echo(
-                "MLflow backend requires a tracking URI: --mlflow-endpoint / MLFLOW_TRACKING_URI, "
+                "MLflow backend requires a tracking URI: --mlflow-tracking-uri / MLFLOW_TRACKING_URI, "
                 "or tracking_uri in --mlflow-secrets or --mlflow-config.",
                 err=True,
             )
