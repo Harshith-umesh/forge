@@ -1031,10 +1031,17 @@ def artifacts_export(
         run_artifacts_export(
             from_path=from_path,
             backend=list(backend) if backend else ["mlflow"],
+            mlflow_tracking_uri=mlflow_tracking_uri,
+            mlflow_experiment=mlflow_experiment,
+            mlflow_run_id=mlflow_run_id,
+            mlflow_run_name=mlflow_run_name,
+            mlflow_insecure_tls=mlflow_insecure_tls,
+            mlflow_secrets_path=mlflow_secrets_path,
+            mlflow_config_data=final_config,
             dry_run=dry_run,
             verbose=verbose,
             status_yaml_path=status_yaml_path,
-            mlflow_config_data=final_config,
+            upload_workers=upload_workers,
         )
     except Exception as e:  # noqa: BLE001
         import traceback
