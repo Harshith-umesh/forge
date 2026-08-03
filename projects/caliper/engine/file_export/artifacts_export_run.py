@@ -95,6 +95,78 @@ def write_artifacts_status_yaml(path: Path, results: list[FileExportBackendResul
     )
 
 
+def _load_mlflow_inputs(
+    *,
+    mlflow_secrets_path: Path | None,
+    mlflow_config_data: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None] | int:
+    """Load and validate MLflow secrets + config.
+
+    Returns ``(secrets_data, config_data)`` on success, or an int exit code on
+    validation failure.
+    """
+    secrets_data: dict[str, Any] | None = None
+    config_data: dict[str, Any] | None = None
+
+    if mlflow_secrets_path is not None:
+        try:
+            secrets_data = load_mlflow_secrets_yaml(mlflow_secrets_path)
+            validate_mlflow_secrets(secrets_data)
+        except (OSError, ValueError, TypeError, yaml.YAMLError) as e:
+            click.echo(f"Invalid MLflow secrets file: {e}", err=True)
+            return 1
+
+    if mlflow_config_data is not None:
+        try:
+            config_data = dict(mlflow_config_data)
+            validate_mlflow_config(config_data)
+        except (ValueError, TypeError) as e:
+            click.echo(f"Invalid MLflow settings dict: {e}", err=True)
+            return 1
+
+    return secrets_data, config_data
+
+
+def _resolve_tracking_uri(tracking_uri: str | None) -> str | int:
+    """Fall back to env var, validate, return URI string or int exit code."""
+    if not tracking_uri:
+        tracking_uri = os.environ.get("MLFLOW_TRACKING_URI")
+    if not tracking_uri:
+        click.echo(
+            "MLflow backend requires a tracking URI: --mlflow-endpoint / MLFLOW_TRACKING_URI, "
+            "or tracking_uri in --mlflow-secrets or --mlflow-config.",
+            err=True,
+        )
+        return 1
+    try:
+        assert_tracking_uri_has_no_userinfo(tracking_uri)
+    except ValueError as e:
+        click.echo(f"Invalid MLflow tracking URI: {e}", err=True)
+        return 1
+    return tracking_uri
+
+
+def _finalize_results(
+    results: list[FileExportBackendResult],
+    status_yaml_path: Path | None,
+) -> int:
+    """Print results, write status YAML, return exit code."""
+    for r in results:
+        click.echo(f"{r.backend}: {r.status} {r.detail}")
+
+    if status_yaml_path is not None:
+        try:
+            write_artifacts_status_yaml(status_yaml_path, results)
+            click.echo(f"Wrote status YAML to {status_yaml_path}")
+        except OSError as e:
+            click.echo(f"Failed to write status YAML ({status_yaml_path}): {e}", err=True)
+            return 4
+
+    if any(r.status == "failure" for r in results):
+        return 4
+    return 0
+
+
 def run_artifacts_export(
     *,
     from_path: Path,
@@ -131,24 +203,15 @@ def run_artifacts_export(
         )
         return 1
 
-    mlflow_connection: dict[str, Any] | None = None
-    secrets_data: dict[str, Any] | None = None
-    config_data: dict[str, Any] | None = None
-    if mlflow_secrets_path is not None:
-        try:
-            secrets_data = load_mlflow_secrets_yaml(mlflow_secrets_path)
-            validate_mlflow_secrets(secrets_data)
-        except (OSError, ValueError, TypeError, yaml.YAMLError) as e:
-            click.echo(f"Invalid MLflow secrets file: {e}", err=True)
-            return 1
-    if mlflow_config_data is not None:
-        try:
-            config_data = dict(mlflow_config_data)
-            validate_mlflow_config(config_data)
-        except (ValueError, TypeError) as e:
-            click.echo(f"Invalid MLflow settings dict: {e}", err=True)
-            return 1
+    loaded = _load_mlflow_inputs(
+        mlflow_secrets_path=mlflow_secrets_path,
+        mlflow_config_data=mlflow_config_data,
+    )
+    if isinstance(loaded, int):
+        return loaded
+    secrets_data, config_data = loaded
 
+    mlflow_connection: dict[str, Any] | None = None
     if secrets_data is not None or config_data is not None:
         merged_ml = merge_mlflow_files_with_cli(
             click_context,
@@ -179,7 +242,6 @@ def run_artifacts_export(
         mlflow_run_metadata = None
         mlflow_workspace = None
 
-    # Ensure CLI insecure TLS flag is applied to connection
     if mlflow_insecure_tls:
         if mlflow_connection is None:
             mlflow_connection = {"insecure_tls": True}
@@ -188,21 +250,17 @@ def run_artifacts_export(
             mlflow_connection["insecure_tls"] = True
 
     if "mlflow" in backends and not dry_run:
-        if not mlflow_tracking_uri:
-            mlflow_tracking_uri = os.environ.get("MLFLOW_TRACKING_URI")
-        if not mlflow_tracking_uri:
-            click.echo(
-                "MLflow backend requires a tracking URI: --mlflow-endpoint / MLFLOW_TRACKING_URI, "
-                "or tracking_uri in --mlflow-secrets or --mlflow-config.",
-                err=True,
-            )
-            return 1
-    if "mlflow" in backends and mlflow_tracking_uri:
+        resolved = _resolve_tracking_uri(mlflow_tracking_uri)
+        if isinstance(resolved, int):
+            return resolved
+        mlflow_tracking_uri = resolved
+    elif "mlflow" in backends and mlflow_tracking_uri:
         try:
             assert_tracking_uri_has_no_userinfo(mlflow_tracking_uri)
         except ValueError as e:
             click.echo(f"Invalid MLflow tracking URI: {e}", err=True)
             return 1
+
     if verbose:
         click.echo("caliper artifacts export (verbose)", err=True)
         click.echo(f"  Source: {from_path}", err=True)
@@ -220,6 +278,7 @@ def run_artifacts_export(
             ):
                 click.echo(line, err=True)
         click.echo("", err=True)
+
     try:
         results = run_file_export(
             source=from_path,
@@ -240,18 +299,8 @@ def run_artifacts_export(
         traceback.print_exception(e, file=sys.stderr)
         click.echo(f"artifacts export failed: {e}", err=True)
         return 4
-    for r in results:
-        click.echo(f"{r.backend}: {r.status} {r.detail}")
-    if status_yaml_path is not None:
-        try:
-            write_artifacts_status_yaml(status_yaml_path, results)
-            click.echo(f"Wrote status YAML to {status_yaml_path}")
-        except OSError as e:
-            click.echo(f"Failed to write status YAML ({status_yaml_path}): {e}", err=True)
-            return 4
-    if any(r.status == "failure" for r in results):
-        return 4
-    return 0
+
+    return _finalize_results(results, status_yaml_path)
 
 
 def discover_run_dirs(from_path: Path) -> list[Path]:
@@ -297,22 +346,13 @@ def run_multi_run_artifacts_export(
         )
         return 1
 
-    secrets_data: dict[str, Any] | None = None
-    config_data: dict[str, Any] | None = None
-    if mlflow_secrets_path is not None:
-        try:
-            secrets_data = load_mlflow_secrets_yaml(mlflow_secrets_path)
-            validate_mlflow_secrets(secrets_data)
-        except (OSError, ValueError, TypeError, yaml.YAMLError) as e:
-            click.echo(f"Invalid MLflow secrets file: {e}", err=True)
-            return 1
-    if mlflow_config_data is not None:
-        try:
-            config_data = dict(mlflow_config_data)
-            validate_mlflow_config(config_data)
-        except (ValueError, TypeError) as e:
-            click.echo(f"Invalid MLflow settings dict: {e}", err=True)
-            return 1
+    loaded = _load_mlflow_inputs(
+        mlflow_secrets_path=mlflow_secrets_path,
+        mlflow_config_data=mlflow_config_data,
+    )
+    if isinstance(loaded, int):
+        return loaded
+    secrets_data, config_data = loaded
 
     merged_ml = merge_mlflow_files_with_cli(
         None,
@@ -327,7 +367,11 @@ def run_multi_run_artifacts_export(
     secret_part = project_secrets_fields(merged_ml)
     mlflow_connection = secret_part if secret_part else None
 
-    tracking_uri = merged_ml.get("tracking_uri")
+    resolved = _resolve_tracking_uri(merged_ml.get("tracking_uri"))
+    if isinstance(resolved, int):
+        return resolved
+    tracking_uri = resolved
+
     experiment = merged_ml.get("experiment")
     run_name = mlflow_run_name or merged_ml.get("run_name")
     workspace = merged_ml.get("workspace")
@@ -339,17 +383,6 @@ def run_multi_run_artifacts_export(
     run_metadata = meta if meta else None
 
     insecure_tls = bool(mlflow_connection and mlflow_connection.get("insecure_tls"))
-
-    if not tracking_uri:
-        tracking_uri = os.environ.get("MLFLOW_TRACKING_URI")
-    if not tracking_uri:
-        click.echo("MLflow backend requires a tracking URI.", err=True)
-        return 1
-    try:
-        assert_tracking_uri_has_no_userinfo(tracking_uri)
-    except ValueError as e:
-        click.echo(f"Invalid MLflow tracking URI: {e}", err=True)
-        return 1
 
     all_artifact_paths = [p for p in from_path.rglob("*") if p.is_file()]
 
@@ -394,17 +427,4 @@ def run_multi_run_artifacts_export(
         click.echo(f"multi-run export failed: {e}", err=True)
         results = [FileExportBackendResult(backend="mlflow", status="failure", detail=str(e))]
 
-    for r in results:
-        click.echo(f"{r.backend}: {r.status} {r.detail}")
-
-    if status_yaml_path is not None:
-        try:
-            write_artifacts_status_yaml(status_yaml_path, results)
-            click.echo(f"Wrote status YAML to {status_yaml_path}")
-        except OSError as e:
-            click.echo(f"Failed to write status YAML ({status_yaml_path}): {e}", err=True)
-            return 4
-
-    if any(r.status == "failure" for r in results):
-        return 4
-    return 0
+    return _finalize_results(results, status_yaml_path)
