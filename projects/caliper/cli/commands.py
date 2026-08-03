@@ -478,27 +478,59 @@ def kpi_generate(
     status_data = {"success": False}
 
     try:
-        run_kpi_generate(
+        # First run parse to check test directory count
+        model = run_parse(
             base_dir=artifact_root,
             plugin_module=mod,
             plugin=plugin,
-            output=output,
             use_cache=True,
-            cache_path=None,
-            format_type=format_type,
         )
-        status_data = {"success": True, "output_file": str(output)}
-        click.echo(f"Generated {output}")
+
+        # Extract test directories from test nodes
+        test_directories = [str(node.directory) for node in model.test_nodes]
+        test_dir_count = len(test_directories)
+
+        # Check if any test directories were found
+        if test_dir_count == 0:
+            status_data = {
+                "success": False,
+                "message": "No test directories found - nothing to process for KPI generation",
+                "test_directories_count": 0,
+                "test_directories": [],
+            }
+            click.echo("❌ No test directories found - KPI generation failed", err=True)
+            click.echo("   No __test_labels__.yaml files found in artifact directory", err=True)
+
+            sys.exit(3)
+        else:
+            # Proceed with KPI generation
+            run_kpi_generate(
+                base_dir=artifact_root,
+                plugin_module=mod,
+                plugin=plugin,
+                output=output,
+                use_cache=True,
+                cache_path=None,
+                format_type=format_type,
+            )
+            status_data = {
+                "success": True,
+                "output_file": str(output),
+                "test_directories_count": test_dir_count,
+                "test_directories": test_directories,
+            }
+            click.echo(f"Generated {output}")
+            click.echo(f"📁 Processed {test_dir_count} test directories")
+
     except Exception as e:  # noqa: BLE001
         import traceback
 
         full_traceback = traceback.format_exc()
-        status_data = {"success": False, "error": str(e), "traceback": full_traceback}
+        status_data = {"success": False, "message": str(e), "traceback": full_traceback}
         click.echo(f"kpi generate failed: {e}", err=True)
         click.echo(f"Full traceback:\n{full_traceback}", err=True)
 
-        if not status_file:
-            sys.exit(3)
+        sys.exit(3)
     finally:
         # Write status file if requested
         if status_file:
