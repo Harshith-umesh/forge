@@ -15,7 +15,7 @@ nightly:
     experiment: "mcp-gw-cpt-ghcr"
     version_pattern: "-v(.+?)-\\d{8}-\\d{6}$"
     strip_prefix: "sha-"
-  cluster: "forge-smoke-testing"
+  cluster: "avis-cluster"
   version_key: "infrastructure.mcp_gateway_version"
   pipeline: "forge-full"
   preset: "demo"

@@ -89,31 +89,21 @@ def format_postprocess_status_notification(
             else:
                 step_name_display = f"**{step_name}**"
 
-            lines.append(f"- {step_emoji} {step_name_display}: `{step_result.status}`")
+            # Format step with message if available
+            if step_result.message:
+                lines.append(
+                    f"- {step_emoji} {step_name_display}: `{step_result.status}` * {step_result.message}"
+                )
+            else:
+                lines.append(f"- {step_emoji} {step_name_display}: `{step_result.status}`")
 
-            # Add step message if available (but not for warning/failed steps to avoid duplication)
-            if step_result.message and step_result.status not in ("warning", "failed", "failure"):
-                lines.append(f"  > {step_result.message}")
-
-            # Add reason for skipped steps
-            if step_result.status in ("skipped", "disabled") and step_result.reason:
+            # Add reason for skipped steps (only if no message already shown)
+            if (
+                step_result.status in ("skipped", "disabled")
+                and step_result.reason
+                and not step_result.message
+            ):
                 lines.append(f"  > {step_result.reason}")
-
-            # Add error message for failed steps
-            if (
-                step_result.status in ("failed", "failure")
-                and hasattr(step_result, "error")
-                and step_result.error
-            ):
-                lines.append(f"  > ❌ {step_result.error}")
-
-            # Add warning message for warning steps
-            if (
-                step_result.status == "warning"
-                and hasattr(step_result, "message")
-                and step_result.message
-            ):
-                lines.append(f"  > ⚠️ {step_result.message}")
 
             # Add specific file links for certain steps
             if step_result.status == "success" and get_file_link:

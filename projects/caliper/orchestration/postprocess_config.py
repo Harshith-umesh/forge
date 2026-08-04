@@ -115,6 +115,10 @@ class CaliperOrchestrationAnalyzeSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
+    current_kpis: str | None = Field(
+        default="kpis.json",
+        description="Current KPI file path (relative to postprocess output dir unless absolute).",
+    )
     historical_kpis: str | None = Field(
         default=None,
         description="Directory containing historical KPI JSON files (relative → postprocess output dir unless absolute).",
@@ -125,11 +129,16 @@ class CaliperOrchestrationAnalyzeSection(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _historical_kpis_when_enabled(self) -> Self:
-        if self.enabled and not (self.historical_kpis and str(self.historical_kpis).strip()):
-            raise ValueError(
-                "caliper.postprocess.analyze.enabled requires non-empty historical_kpis directory."
-            )
+    def _validate_when_enabled(self) -> Self:
+        if self.enabled:
+            if not (self.current_kpis and str(self.current_kpis).strip()):
+                raise ValueError(
+                    "caliper.postprocess.analyze.enabled requires non-empty current_kpis file path."
+                )
+            if not (self.historical_kpis and str(self.historical_kpis).strip()):
+                raise ValueError(
+                    "caliper.postprocess.analyze.enabled requires non-empty historical_kpis directory."
+                )
         return self
 
 

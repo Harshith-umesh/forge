@@ -147,6 +147,16 @@ def delete_llm_d_labeled_resources(args, ctx):
         "--ignore-not-found=true",
     )
     _best_effort_delete(
+        "llm_d inference services",
+        "delete",
+        "llminferenceservice",
+        "-n",
+        args.namespace,
+        "-l",
+        "forge.openshift.io/project=llm_d",
+        "--ignore-not-found=true",
+    )
+    _best_effort_delete(
         "llm_d non-preserved pvcs",
         "delete",
         "pvc",
@@ -193,7 +203,13 @@ def delete_inference_service(args, ctx):
             f"in {args.namespace} (rc={result.returncode})"
         )
 
-    return f"Deleted llminferenceservice {args.inference_service_name}"
+    # Check if something was actually deleted by looking at the output
+    if result.stdout.strip():
+        return f"Deleted llminferenceservice {args.inference_service_name}"
+    else:
+        return (
+            f"LLMInferenceService {args.inference_service_name} was not found (already cleaned up)"
+        )
 
 
 @retry(attempts=90, delay=10, backoff=1.0)

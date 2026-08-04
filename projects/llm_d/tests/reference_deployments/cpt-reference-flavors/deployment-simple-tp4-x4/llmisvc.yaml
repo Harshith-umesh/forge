@@ -49,5 +49,7 @@ spec:
         timeoutSeconds: 30
       env:
       - name: VLLM_ADDITIONAL_ARGS
-        value: --max-model-len=4096 --gpu-memory-utilization=0.92 --trust-remote-code
-          --no-enable-log-requests --enable-prefix-caching
+        value: --gpu-memory-utilization=0.92 --trust-remote-code --no-enable-log-requests
+          --enable-prefix-caching --max-model-len=4096
+  parallelism:
+    tensor: 4

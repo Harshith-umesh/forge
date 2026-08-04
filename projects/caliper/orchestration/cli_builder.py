@@ -516,9 +516,7 @@ def log_caliper_start_banner(command: list[str], script_path: Path, step_name: s
     # Log banner indicating Caliper is starting
     logger.info("=" * 60)
     logger.info("🚀 STARTING CALIPER %s (fork/exec)", step_name.upper())
-    logger.info("📄 Command:")
-    for line in formatted_command.splitlines():
-        logger.info("  %s", line)
+    logger.info(f"📄 Command:\n{formatted_command}")
     logger.info("=" * 60)
 
 
@@ -563,7 +561,7 @@ def _format_command_for_display(command: list[str]) -> str:
             lines.append(command[i])
             i += 1
 
-    return "\n".join(lines)
+    return f" \\\n{len('caliper ') * ' '}".join(lines).strip()
 
 
 def handle_caliper_output_and_completion(

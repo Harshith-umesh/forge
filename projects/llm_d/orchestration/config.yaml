@@ -59,17 +59,12 @@ caliper:
         enabled: true
         output: kpis/kpis.json
       kpis_to_csv:
-        enabled: false
+        enabled: true
         output: kpis/kpis.csv
         include_header_comments: true
       artifacts_to_ai_data:
         enabled: true
         output_dir: ai_data
-
-    analyze:
-      enabled: false
-      historical_kpis: historical_data
-      output: regression_analyze/kpi_analyze.json
 
     s3:
       bucket: psap-dashboard-data
@@ -93,9 +88,11 @@ caliper:
         include_kpis_json: true
         include_ai_data: true
 
-    analyse_kpis:
-      enabled: false
-      output: kpi_analysis.json
+    analyze:
+      enabled: true
+      current_kpis: kpis/kpis.json
+      historical_kpis: historical_data
+      output: regression_analyze/kpi_analyze.json
 
 agentic:
   enabled: true

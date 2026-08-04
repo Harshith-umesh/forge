@@ -7,11 +7,19 @@ job_name: null
 namespace: forge-llm-d
 kserve:
   dry_run: false
+  wait_readiness: true
+  wait_long_scheduling: false
+  reuse_existing: false
+  delete_all_on_start: true
 kueue:
   enabled: false
   queue_name: default-queue
+  local_queue_manifest: manifests/kueue-localqueue.yaml
+  disable_above_n_gpus: null
 router:
   template:
     file: manifests/scheduler_config/__router_template__.yaml
     placeholder: __ENDPOINT_PICKER_CONFIG__
   epp: manifests/scheduler_config
+
+run_test_finalizers: true

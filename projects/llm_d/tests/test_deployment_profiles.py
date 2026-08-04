@@ -53,6 +53,7 @@ def _test_preset_generates_expected_llmisvc(preset: str, tmp_path: Path):
         yaml.safe_dump(
             {
                 "runtime.kserve.dry_run": True,
+                "caliper.postprocess.enabled": False,
             },
             sort_keys=True,
         ),
@@ -229,7 +230,7 @@ def _find_generated_llmisvcs(artifact_dir: Path) -> list[dict[str, Path]]:
 
 
 def _find_generated_llmisvc(artifact_dir: Path) -> Path:
-    """Find the generated LLMISVC manifest in the artifact directory (legacy single deployment)."""
+    """Find the generated LLMISVC manifest in the artifact directory."""
     deployments = _find_generated_llmisvcs(artifact_dir)
 
     if len(deployments) == 1:

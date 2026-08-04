@@ -37,19 +37,3 @@ benchmark-short:
   runtime.model_name: meta-llama/Llama-3.1-8B-Instruct
   runtime.smoke_request_key: default
   runtime.benchmark_key: short
-
-gpt-oss:
-  runtime.model_name: openai/gpt-oss-120b
-  runtime.deployment_profile: distributed-default
-  runtime.smoke_request_key: default
-  model_cache.pvc.size: 300Gi
-  workloads.args:
-    request_type: text_completions
-
-gpt-oss-120b-inference-scheduling-release:
-  extends:
-    - gpt-oss
-  runtime.benchmark_key:
-    - concurrent-1k-1k
-    - heavy-heterogeneous
-    - multi-turn

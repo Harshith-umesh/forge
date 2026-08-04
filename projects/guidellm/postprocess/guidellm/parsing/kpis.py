@@ -13,7 +13,6 @@ from projects.caliper.engine.kpi import (
     LowerBetter,
     TwoDimensional,
     build_catalog_from_functions,
-    create_label_extractor,
     get_kpi_functions,
     is_2d_kpi,
 )
@@ -220,13 +219,34 @@ def guidellm_tpot_p99(unified_record) -> list[tuple[float, float]]:
 class GuideLLMKpiHandler:
     """Handles KPI catalog and computation for GuideLLM benchmarks."""
 
-    # Define label extractor for all GuideLLM test conditions
-    LABEL_EXTRACTOR = create_label_extractor(
-        {
-            "strategy": "metrics.strategy",
-            "duration": "metrics.duration",
+    # Define custom label extractor for GuideLLM with fallbacks for missing kpi_labels
+    @staticmethod
+    def _extract_labels(record) -> dict[str, Any]:
+        """Extract labels from record with fallbacks for missing kpi_labels."""
+
+        from projects.caliper.engine.kpi.decorators import _extract_value_by_path
+
+        labels = {}
+
+        # Extract artifact-based labels (graceful handling)
+        artifact_fields = {
+            "product_version": "metrics.product_version",
+            "cluster": "metrics.cluster",
+            "deployment_profile": "metrics.deployment_profile",
+            "model_name": "metrics.model_name",
+            "load_shape": "metrics.benchmark_key",
         }
-    )
+
+        for label_key, path in artifact_fields.items():
+            value = _extract_value_by_path(record, path)
+            if value is not None:
+                labels[label_key] = str(value)
+
+        labels |= record.metrics.get("kpi_labels", {}) or {}
+
+        return labels
+
+    LABEL_EXTRACTOR = type("TestLabelExtractor", (), {"extract": _extract_labels})()
 
     # Metadata fields to include in KPI records but not as labels
     @staticmethod
@@ -284,7 +304,6 @@ class GuideLLMKpiHandler:
 
         # Generate scalar KPIs for each record
         for r in valid_records:
-            base_labels = {**r.distinguishing_labels}
             test_condition_labels = GuideLLMKpiHandler.LABEL_EXTRACTOR.extract(r)
             metadata_fields = GuideLLMKpiHandler.extract_metadata(r)
 
@@ -303,9 +322,8 @@ class GuideLLMKpiHandler:
                 if value is None:
                     continue
 
-                # Merge base labels, test condition labels, and system labels
+                # Use only extracted KPI labels, not test labels
                 all_labels = {
-                    **base_labels,
                     **test_condition_labels,
                     "higher_is_better": kpi_func._kpi_higher_is_better,
                 }
@@ -338,7 +356,6 @@ class GuideLLMKpiHandler:
             if not curves or not request_rates:
                 continue
 
-            base_labels = {**r.distinguishing_labels}
             test_condition_labels = GuideLLMKpiHandler.LABEL_EXTRACTOR.extract(r)
             metadata_fields = GuideLLMKpiHandler.extract_metadata(r)
 
@@ -357,14 +374,8 @@ class GuideLLMKpiHandler:
                 if not value or value is None:
                     continue
 
-                # Remove rate-specific labels for aggregated KPIs
-                aggregated_labels = {
-                    k: v
-                    for k, v in base_labels.items()
-                    if k not in ["concurrency", "rate", "max_concurrency"]
-                }
+                # Use only extracted KPI labels, not test labels
                 all_labels = {
-                    **aggregated_labels,
                     **test_condition_labels,
                     "higher_is_better": kpi_func._kpi_higher_is_better,
                 }
