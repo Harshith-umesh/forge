@@ -33,17 +33,6 @@ def guidellm_request_concurrency(unified_record) -> float:
 # Token Count Statistics KPIs - static values
 @LowerBetter()
 @Format("{:.1f}")
-@KPIMetadata(help="Average input tokens per request", unit="tokens")
-def guidellm_input_tokens_per_request(unified_record) -> float:
-    """Input Tokens Per Request KPI."""
-    value = unified_record.metrics.get("input_tokens_per_request")
-    if value is None:
-        raise ValueError("input_tokens_per_request metric not found")
-    return float(value)
-
-
-@LowerBetter()
-@Format("{:.1f}")
 @KPIMetadata(help="Average output tokens per request", unit="tokens")
 def guidellm_output_tokens_per_request(unified_record) -> float:
     """Output Tokens Per Request KPI."""
