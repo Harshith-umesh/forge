@@ -54,6 +54,9 @@ def run(
         logger.exception("Dashboard CSV S3 sync after postprocessing failed")
         ret = 1
 
+    if ret == 0:
+        _maybe_send_success_notification(model_key, workload_keys)
+
     return ret
 
 
@@ -663,30 +666,42 @@ def _sync_postprocessed_dashboard_csv(model_key: str, workload_keys: list[str]) 
         )
         return
 
-    if config.project.get_config("tests.rhaiis.slack_notify_always", False):
-        from projects.rhaiis.postprocess.regression import send_success_notification
 
-        model_cfg = runtime_config.get_model(model_key)
-        accelerator = runtime_config.get_accelerator()
-        engine = runtime_config.get_engine()
-        engine_defaults = runtime_config.get_engine_args(engine)
-        first_workload = runtime_config.get_workload(workload_keys[0])
-        ea = runtime_config.merge_engine_args(engine_defaults, model_cfg, first_workload, engine)
-        tp = ea.get("tensor-parallel-size") or ea.get("tp-size") or ea.get("tp_size") or ""
-        dp = ea.get("data-parallel-size") or ea.get("dp-size") or ""
+def _maybe_send_success_notification(model_key: str, workload_keys: list[str]) -> None:
+    """Send a Slack success notification if slack_notify_always is set and no regression check."""
+    from projects.core.library import config
 
-        send_success_notification(
-            model=model_cfg.get("hf_model_id", ""),
-            accelerator=accelerator,
-            job_id=os.environ.get("FJOB_NAME", ""),
-            slack_user=config.project.get_config("tests.rhaiis.slack_user", ""),
-            notification_vault="psap-forge-notifications",
-            tp=str(tp),
-            dp=str(dp),
-            version=version,
-            workload_keys=workload_keys,
-            cluster=config.project.get_config("rhaiis.cluster_tag", ""),
-        )
+    compare_version = config.project.get_config("tests.rhaiis.compare_version", "")
+    if compare_version:
+        return
+
+    if not config.project.get_config("tests.rhaiis.slack_notify_always", False):
+        return
+
+    from projects.rhaiis.postprocess.regression import send_success_notification
+
+    model_cfg = runtime_config.get_model(model_key)
+    accelerator = runtime_config.get_accelerator()
+    engine = runtime_config.get_engine()
+    engine_defaults = runtime_config.get_engine_args(engine)
+    first_workload = runtime_config.get_workload(workload_keys[0])
+    ea = runtime_config.merge_engine_args(engine_defaults, model_cfg, first_workload, engine)
+    tp = ea.get("tensor-parallel-size") or ea.get("tp-size") or ea.get("tp_size") or ""
+    dp = ea.get("data-parallel-size") or ea.get("dp-size") or ""
+    version = config.project.get_config("tests.rhaiis.version", "")
+
+    send_success_notification(
+        model=model_cfg.get("hf_model_id", ""),
+        accelerator=accelerator,
+        job_id=os.environ.get("FJOB_NAME", ""),
+        slack_user=config.project.get_config("tests.rhaiis.slack_user", ""),
+        notification_vault="psap-forge-notifications",
+        tp=str(tp),
+        dp=str(dp),
+        version=version,
+        workload_keys=workload_keys,
+        cluster=config.project.get_config("rhaiis.cluster_tag", ""),
+    )
 
 
 def _upload_predictor_log(run_uuid: str) -> None:
