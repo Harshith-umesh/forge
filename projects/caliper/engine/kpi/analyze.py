@@ -9,8 +9,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 logger = logging.getLogger(__name__)
 
 
@@ -179,14 +177,14 @@ def _sort_results(results: list[KpiTestResult], sorting_keys: list[str]) -> list
     return sorted(results, key=sort_key)
 
 
-def _build_yaml_report(
+def _build_report(
     results: list[KpiTestResult],
     config: AnalysisConfig,
     current_source: str,
     baseline_sources: list[str],
     skipped: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Build the final YAML-serializable report structure."""
+    """Build the final report structure."""
     regressions = [r for r in results if r.regression]
 
     if regressions:
@@ -250,12 +248,12 @@ def run_kpi_analysis(
     output_file: Path,
     plugin_module: str,
 ) -> dict[str, Any]:
-    """Run KPI regression analysis and generate a YAML report.
+    """Run KPI regression analysis and generate a JSON report.
 
     Args:
         current_kpi_file: Path to current KPI JSON file (hierarchical schema v2)
         historical_data_dir: Directory containing historical KPI files (kpis.json)
-        output_file: Path where YAML analysis report will be written
+        output_file: Path where JSON analysis report will be written
         plugin_module: Plugin module name (for loading analysis config)
 
     Returns:
@@ -375,7 +373,7 @@ def run_kpi_analysis(
 
         # Build report
         baseline_sources = [str(p) for p in baseline_kpi_data.keys()]
-        report = _build_yaml_report(
+        report = _build_report(
             results=results,
             config=config,
             current_source=str(current_kpi_file),
@@ -383,10 +381,10 @@ def run_kpi_analysis(
             skipped=skipped,
         )
 
-        # Write YAML report
+        # Write JSON report
         output_file.parent.mkdir(parents=True, exist_ok=True)
         with open(output_file, "w") as f:
-            yaml.dump(report, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+            json.dump(report, f, indent=2, ensure_ascii=False)
 
         regressions = report["overall"]["regression_count"]
         total = report["overall"]["total_tested"]
@@ -450,7 +448,7 @@ def _write_warning_report(output_file: Path, current_kpi_file: Path, plugin_modu
     }
     output_file.parent.mkdir(parents=True, exist_ok=True)
     with open(output_file, "w") as f:
-        yaml.dump(report, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        json.dump(report, f, indent=2, ensure_ascii=False)
 
 
 def find_baseline_kpis(historical_dir: Path) -> dict[Path, dict[str, Any]]:
