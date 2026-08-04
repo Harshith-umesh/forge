@@ -41,7 +41,7 @@ def _make_test_node(base_dir: Path, name: str, stats_csv: str, labels: dict) -> 
     )
     return TestBaseNode(
         directory=node_dir,
-        labels={"version": "1", "labels": labels},
+        test_labels={"version": "1", "labels": labels},
         artifact_paths=artifact_paths,
     )
 
@@ -97,7 +97,7 @@ class TestMCPGatewayParser:
         (node_dir / "master.log").write_text("log")
         node = TestBaseNode(
             directory=node_dir,
-            labels={"version": "1", "labels": TEST_LABELS},
+            test_labels={"version": "1", "labels": TEST_LABELS},
             artifact_paths=[node_dir / "master.log"],
         )
         parser = MCPGatewayParser()

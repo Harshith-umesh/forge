@@ -52,6 +52,21 @@ def _workspace_cli_options(cmd_func):
     return cmd_func
 
 
+def _label_filter_options(cmd_func):
+    """Common include/exclude label filtering options decorator."""
+    cmd_func = click.option(
+        "--include-label",
+        multiple=True,
+        help="Include only test directories with matching labels (format: key=value).",
+    )(cmd_func)
+    cmd_func = click.option(
+        "--exclude-label",
+        multiple=True,
+        help="Exclude test directories with matching labels (format: key=value).",
+    )(cmd_func)
+    return cmd_func
+
+
 def _apply_workspace_cli_overrides(
     ctx: click.Context,
     artifacts_dir: Path | None,
@@ -92,9 +107,47 @@ def _plugin_tuple(ctx: click.Context):
     return mod, plugin
 
 
+def _parse_label_filters(
+    include_label: tuple[str, ...], exclude_label: tuple[str, ...]
+) -> tuple[list[dict[str, str]] | None, list[dict[str, str]] | None]:
+    """Parse include and exclude label CLI options into lists of filter dictionaries.
+
+    Args:
+        include_label: Tuple of include label specs in "key=value" format
+        exclude_label: Tuple of exclude label specs in "key=value" format
+
+    Returns:
+        Tuple of (list of include_filter_dicts, list of exclude_filter_dicts)
+        Each filter dict contains a single key=value pair to support multiple filters on the same key.
+
+    Raises:
+        click.BadParameter: If label format is invalid
+    """
+    from projects.caliper.engine.label_filters import parse_filter_pairs
+
+    include_filters = None
+    if include_label:
+        try:
+            include_filters = parse_filter_pairs(include_label, "include")
+        except ValueError as e:
+            # Convert to click.BadParameter for CLI error handling
+            raise click.BadParameter(str(e)) from e
+
+    exclude_filters = None
+    if exclude_label:
+        try:
+            exclude_filters = parse_filter_pairs(exclude_label, "exclude")
+        except ValueError as e:
+            # Convert to click.BadParameter for CLI error handling
+            raise click.BadParameter(str(e)) from e
+
+    return include_filters, exclude_filters
+
+
 # Main commands
 @click.command("parse")
 @_workspace_cli_options
+@_label_filter_options
 @click.option("--no-cache", is_flag=True, help="Force full parse.")
 @click.option(
     "--cache-dir",
@@ -106,11 +159,6 @@ def _plugin_tuple(ctx: click.Context):
     "--show-matrix/--no-show-matrix",
     default=True,
     help="Display parameter matrix summary after parsing (default: enabled).",
-)
-@click.option(
-    "--include-label",
-    multiple=True,
-    help="Include only test directories with matching labels (format: key=value).",
 )
 @click.option(
     "--status-file",
@@ -125,6 +173,7 @@ def parse_cmd(
     cache_dir: Path | None,
     show_matrix: bool,
     include_label: tuple[str, ...],
+    exclude_label: tuple[str, ...],
     status_file: Path | None,
     artifacts_dir: Path | None,
     postprocess_config: Path | None,
@@ -140,17 +189,8 @@ def parse_cmd(
     mod, plugin = _plugin_tuple(ctx)
     artifact_root: Path = _root_obj(ctx)["base_dir"]
 
-    # Parse include-label options into filter dict
-    label_filter = None
-    if include_label:
-        label_filter = {}
-        for label_spec in include_label:
-            if "=" not in label_spec:
-                raise click.BadParameter(
-                    f"Invalid label format '{label_spec}'. Use key=value format."
-                )
-            key, value = label_spec.split("=", 1)
-            label_filter[key.strip()] = value.strip()
+    # Parse label filters
+    include_filter, exclude_filter = _parse_label_filters(include_label, exclude_label)
 
     status = {"success": False}
 
@@ -161,11 +201,19 @@ def parse_cmd(
             plugin=plugin,
             use_cache=not no_cache,
             show_parameter_matrix=show_matrix,
-            label_filter=label_filter,
+            include_label_filter=include_filter,
+            exclude_label_filter=exclude_filter,
         )
 
-        # Extract test directories from test nodes
-        test_directories = [str(node.directory) for node in model.test_nodes]
+        # Extract test directories with labels and relative paths
+        test_directories = []
+        for node in model.test_nodes:
+            test_directories.append(
+                {
+                    "path": str(node.test_path),  # relative to artifact_dir
+                    **node.test_labels,  # spread test_labels directly into the object
+                }
+            )
 
         status.update(
             {
@@ -221,11 +269,10 @@ def parse_cmd(
 
 @click.command("visualize")
 @_workspace_cli_options
+@_label_filter_options
 @click.option("--reports", default=None, help="Comma-separated report ids.")
 @click.option("--report-group", default=None)
 @click.option("--visualize-config", type=click.Path(path_type=Path), default=None)
-@click.option("--include-label", multiple=True)
-@click.option("--exclude-label", multiple=True)
 @click.option(
     "--output-dir",
     type=click.Path(path_type=Path),
@@ -381,6 +428,7 @@ def list_reports_cmd(
 
 @click.command("ai-eval-export", hidden=True)
 @_workspace_cli_options
+@_label_filter_options
 @click.option("--output", type=click.Path(path_type=Path), required=True)
 @click.option("--no-cache", is_flag=True, help="Disable parse cache")
 @click.option(
@@ -390,6 +438,8 @@ def list_reports_cmd(
 def ai_eval_export(
     ctx: click.Context,
     output: Path,
+    include_label: tuple[str, ...],
+    exclude_label: tuple[str, ...],
     artifacts_dir: Path | None,
     postprocess_config: Path | None,
     plugin_module_override: str | None,
@@ -405,6 +455,9 @@ def ai_eval_export(
     mod, plugin = _plugin_tuple(ctx)
     artifact_root: Path = _root_obj(ctx)["base_dir"]
 
+    # Parse label filters
+    include_filter, exclude_filter = _parse_label_filters(include_label, exclude_label)
+
     status_data = {"success": False}
 
     try:
@@ -414,6 +467,8 @@ def ai_eval_export(
             plugin=plugin,
             output=output,
             use_cache=not no_cache,
+            include_label_filter=include_filter,
+            exclude_label_filter=exclude_filter,
         )
         status_data = {"success": True, "output_file": str(output)}
         click.echo(f"Exported {output}")
@@ -445,6 +500,7 @@ def ai_eval_export(
 # KPI commands
 @click.command("generate")
 @_workspace_cli_options
+@_label_filter_options
 @click.option("--output", type=click.Path(path_type=Path), required=True)
 @click.option(
     "--format",
@@ -461,6 +517,8 @@ def kpi_generate(
     ctx: click.Context,
     output: Path,
     format_type: str,
+    include_label: tuple[str, ...],
+    exclude_label: tuple[str, ...],
     artifacts_dir: Path | None,
     postprocess_config: Path | None,
     plugin_module_override: str | None,
@@ -475,6 +533,9 @@ def kpi_generate(
     mod, plugin = _plugin_tuple(ctx)
     artifact_root: Path = _root_obj(ctx)["base_dir"]
 
+    # Parse label filters
+    include_filter, exclude_filter = _parse_label_filters(include_label, exclude_label)
+
     status_data = {"success": False}
 
     try:
@@ -484,6 +545,8 @@ def kpi_generate(
             plugin_module=mod,
             plugin=plugin,
             use_cache=True,
+            include_label_filter=include_filter,
+            exclude_label_filter=exclude_filter,
         )
 
         # Extract test directories from test nodes
@@ -1024,10 +1087,17 @@ def artifacts_export(
         run_artifacts_export(
             from_path=from_path,
             backend=list(backend) if backend else ["mlflow"],
+            mlflow_tracking_uri=mlflow_tracking_uri,
+            mlflow_experiment=mlflow_experiment,
+            mlflow_run_id=mlflow_run_id,
+            mlflow_run_name=mlflow_run_name,
+            mlflow_insecure_tls=mlflow_insecure_tls,
+            mlflow_secrets_path=mlflow_secrets_path,
+            mlflow_config_data=final_config,
             dry_run=dry_run,
             verbose=verbose,
             status_yaml_path=status_yaml_path,
-            mlflow_config_data=final_config,
+            upload_workers=upload_workers,
         )
     except Exception as e:  # noqa: BLE001
         import traceback

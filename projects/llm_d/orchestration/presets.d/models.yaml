@@ -2,7 +2,6 @@ __multiple: true
 
 gpt-oss:
   runtime.model_name: openai/gpt-oss-120b
-  runtime.deployment_profile: distributed-default
   runtime.smoke_request_key: default
   model_cache.pvc.size: 300Gi
   workloads.args:

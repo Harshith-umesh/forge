@@ -11,13 +11,11 @@ janus:
   platform.gateway.status_address_name: gateway-internal
 
   cpt.kpi.labels.platform_name: OCP
-  cpt.kpi.labels.gpu_type: H200
-  cpt.kpi.labels.test_harness: xks
 
 janus-intelligent:
   extends:
   - janus
-  - cpt
+  - cpt-xks
   - llama3-70b
 
   runtime.deployment_profile:
@@ -31,7 +29,7 @@ janus-intelligent:
 janus-pd:
   extends:
   - janus
-  - cpt
+  - cpt-xks
   - gpt-oss
 
   runtime.deployment_profile:

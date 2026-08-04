@@ -18,13 +18,11 @@ cks:
     gpu.nvidia.com/class: H200
 
   cpt.kpi.labels.platform_name: CKS
-  cpt.kpi.labels.gpu_type: H200
-  cpt.kpi.labels.test_harness: xks
 
 cks-intelligent:
   extends:
   - cks
-  - cpt
+  - cpt-xks
   - llama3-70b
 
   runtime.deployment_profile:
@@ -38,7 +36,7 @@ cks-intelligent:
 cks-pd:
   extends:
   - cks
-  - cpt
+  - cpt-xks
   - gpt-oss
 
   runtime.deployment_profile:

@@ -7,7 +7,7 @@ from typing import Any
 
 import yaml
 
-from projects.caliper.engine.label_filters import filter_records, parse_filter_kv
+from projects.caliper.engine.label_filters import parse_filter_pairs
 from projects.caliper.engine.parse import run_parse
 
 
@@ -70,30 +70,25 @@ def run_visualize(
     use_cache: bool,
     cache_path: Path | None,
 ) -> list[str]:
-    # Convert include pairs to directory-level filter for discovery
-    directory_filter = None
-    if include_pairs:
-        inc = parse_filter_kv(include_pairs)
-        directory_filter = inc  # Use include filters for directory discovery
+    # Parse include and exclude filters for directory-level filtering
+    include_filters = None
+    exclude_filters = None
 
-    # Apply directory-level filtering during parsing
+    if include_pairs:
+        include_filters = parse_filter_pairs(include_pairs, "include")
+
+    if exclude_pairs:
+        exclude_filters = parse_filter_pairs(exclude_pairs, "exclude")
+
+    # Apply both include and exclude filtering during parsing
     model = run_parse(
         base_dir=base_dir,
         plugin_module=plugin_module,
         plugin=plugin,
         use_cache=use_cache,
-        label_filter=directory_filter,
+        include_label_filter=include_filters,
+        exclude_label_filter=exclude_filters,
     )
-
-    # Still apply record-level filtering for exclude filters and any remaining include filters
-    inc = parse_filter_kv(include_pairs)
-    exc = parse_filter_kv(exclude_pairs)
-    if exc:  # Only filter records if there are exclude filters
-        model.unified_result_records = filter_records(
-            model.unified_result_records,
-            include={},  # Include filtering already done at directory level
-            exclude=exc,
-        )
     cfg = resolve_visualize_config(base_dir, visualize_config_path)
     ids = resolve_report_ids(
         reports_csv=reports_csv,
