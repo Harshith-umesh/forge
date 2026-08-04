@@ -136,6 +136,10 @@ class CaliperOrchestrationAnalyzeSection(BaseModel):
         default="kpi_analyze.json",
         description="Written under post-processing artifact dir when relative.",
     )
+    fail_on_regression: bool = Field(
+        default=False,
+        description="Whether to fail (non-zero exit code) when KPI regressions are detected (default: false).",
+    )
 
     @model_validator(mode="after")
     def _validate_when_enabled(self) -> Self:
