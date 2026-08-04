@@ -415,22 +415,35 @@ def run_analyse_kpis(
             step_logs_dir=step_logs_dir,
         )
 
+        # Handle fail_on_regression logic at orchestration level
+        if (
+            hasattr(postprocess_config.analyze, "fail_on_regression")
+            and not postprocess_config.analyze.fail_on_regression
+            and result.returncode == 3
+            and status_data.get("regressions_detected")
+        ):
+            # Override exit code to 0 when fail_on_regression is False but keep regression info
+            logger.info(
+                "KPI regressions detected, but fail_on_regression=False - treating as success"
+            )
 
-        # Convert to expected format
-        if result.returncode == 0 and status_data.get("success"):
-            return {
-                "status": "success",
-                "output_file": _make_path_relative_to_base(output_file, env.ARTIFACT_DIR),
-                "completed_at": time.time(),
-                "log_file": log_file,
-            }
-        else:
+            result.returncode = 0
+            status_data["success"] = True
+
+        if not (result.returncode == 0 and status_data.get("success")):
             return {
                 "status": "failed",
                 "error": status_data.get("error", "Unknown error"),
                 "completed_at": time.time(),
                 "log_file": log_file,
             }
+
+        return {
+            "status": "success",
+            "output_file": _make_path_relative_to_base(output_file, env.ARTIFACT_DIR),
+            "completed_at": time.time(),
+            "log_file": log_file,
+        }
 
     except Exception as e:
         logger.exception("KPI analysis failed in run_analyse_kpis")
