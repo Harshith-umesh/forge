@@ -367,7 +367,7 @@ def system_prechecks() -> bool:
     artifact_path = Path(artifact_dir)
 
     # Check for existing failures
-    failures_file = artifact_path / "FAILURES"
+    failures_file = artifact_path / "FAILURES.txt"
     if failures_file.exists() and not os.environ.get("FORGE_IGNORE_FAILURES_FILE"):
         raise ValueError(
             f"File '{failures_file}' already exists, cannot continue. Set FORGE_IGNORE_FAILURES_FILE=1 to ignore this."
@@ -386,7 +386,7 @@ def system_prechecks() -> bool:
                 os.environ["FORGE_OPENSHIFT_CI_STEP_DIR"] = step_dir
 
     # Remove any old failure markers
-    old_failure = artifact_path / "FAILURE"
+    old_failure = artifact_path / "FAILURE.txt"
     if old_failure.exists():
         old_failure.unlink()
 
@@ -801,8 +801,8 @@ def postchecks(
         pass
     elif finish_reason == FinishReason.ERROR:
         # Find all FAILURE files and consolidate them
-        failure_files = list(artifact_path.glob("**/FAILURE"))
-        failures_file = artifact_path / "FAILURES"
+        failure_files = list(artifact_path.glob("**/FAILURE.txt"))
+        failures_file = artifact_path / "FAILURES.txt"
 
         with failures_file.open("w") as f:
             for failure_file in sorted(failure_files):
@@ -822,7 +822,7 @@ def postchecks(
     duration_str = generate_duration_and_timing_file(start_time, artifact_path)
 
     # Check if there were failures
-    failures_file = artifact_path / "FAILURES"
+    failures_file = artifact_path / "FAILURES.txt"
     if finish_reason != FinishReason.SUCCESS or (
         failures_file.exists() and failures_file.stat().st_size > 0
     ):

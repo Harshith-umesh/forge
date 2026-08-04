@@ -100,7 +100,7 @@ class TempArtifactDir:
 
         if ex_value:
             logging.error(f"Caught exception {ex_type.__name__}: {ex_value}")
-            with open(get_tls_artifact_dir() / "FAILURE", "a") as f:
+            with open(get_tls_artifact_dir() / "FAILURE.txt", "a") as f:
                 print(f"{ex_type.__name__}: {ex_value}", file=f)
                 print(
                     "".join(traceback.format_exception(None, value=ex_value, tb=exc_traceback)),
