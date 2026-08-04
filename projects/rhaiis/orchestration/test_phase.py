@@ -9,6 +9,7 @@ from pathlib import Path
 import yaml
 
 from projects.core.library import env
+from projects.core.library import vault as vault_lib
 from projects.core.library.postprocess import run_and_postprocess, write_test_labels
 from projects.rhaiis.orchestration import runtime_config
 
@@ -296,22 +297,43 @@ def _run_test(
                 _warnings.append("Profiler trace upload failed")
 
         # Pre-create MLflow run so its URL can be embedded in test labels / CSV
-        from projects.caliper.orchestration.export import (
-            precreate_mlflow_run,
-            write_mlflow_precreated_run_marker,
-        )
-
         mlflow_run_meta: dict[str, str] = {}
         try:
-            mlflow_run_meta = precreate_mlflow_run()
+            vault_name = config.project.get_config(
+                "caliper.export.backend.mlflow.secrets.vault.name", None, print=False, warn=False
+            )
+            vault_key = config.project.get_config(
+                "caliper.export.backend.mlflow.secrets.vault.mlflow_secret",
+                None,
+                print=False,
+                warn=False,
+            )
+            if vault_name and vault_key:
+                secrets_path = vault_lib.get_vault_content_path(vault_name, vault_key)
+                if secrets_path and secrets_path.exists():
+                    from projects.caliper.orchestration.export import precreate_mlflow_run
+
+                    mlflow_run_meta = precreate_mlflow_run(
+                        secrets_path=secrets_path,
+                        experiment=config.project.get_config(
+                            "caliper.export.backend.mlflow.config.experiment",
+                            None,
+                            print=False,
+                            warn=False,
+                        ),
+                        workspace=config.project.get_config(
+                            "caliper.export.backend.mlflow.config.workspace",
+                            None,
+                            print=False,
+                            warn=False,
+                        ),
+                    )
+                else:
+                    logger.info("MLflow secrets file not found, skipping run pre-creation")
+            else:
+                logger.info("MLflow vault not configured, skipping run pre-creation")
         except Exception:
             logger.warning("MLflow run pre-creation failed; continuing", exc_info=True)
-
-        if mlflow_run_meta.get("run_id"):
-            try:
-                write_mlflow_precreated_run_marker(mlflow_run_meta)
-            except Exception:
-                logger.warning("Failed to write MLflow marker file; continuing", exc_info=True)
 
         # Phase 2: benchmark + post-processing for ALL workloads
         trtllm_cfg = runtime_config.get_trtllm_config() if engine == "trtllm" else None
