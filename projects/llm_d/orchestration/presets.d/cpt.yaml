@@ -39,7 +39,6 @@ cpt-release-testing-rhoai:
   - heavy-heterogeneous
   - multi-turn
   model_cache.pvc.size: 300Gi
-  platform.operators.rhods-operator.channel: beta
 
 cpt-release-testing-gpt-oss-120b:
   extends:
