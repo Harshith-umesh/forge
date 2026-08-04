@@ -189,10 +189,6 @@ class GuideLLMPlugin(PostProcessingPlugin):
 
         return paths
 
-    def kpi_catalog(self) -> list[dict[str, Any]]:
-        """Return the GuideLLM KPI catalog."""
-        return self.kpi_handler.get_catalog()
-
     def compute_kpis(self, model: UnifiedRunModel) -> list[dict[str, Any]]:
         """Compute KPI values from the unified model."""
         return self.kpi_handler.compute_kpis(model)

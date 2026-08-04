@@ -63,16 +63,6 @@ class StubPlugin(PostProcessingPlugin):
         )
         return [str(html_path)]
 
-    def kpi_catalog(self) -> list[dict[str, object]]:
-        return [
-            {
-                "kpi_id": "throughput_rps",
-                "name": "Throughput",
-                "unit": "req/s",
-                "higher_is_better": True,
-            }
-        ]
-
     def compute_kpis(self, model: UnifiedRunModel) -> list[dict[str, object]]:
         ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         out: list[dict[str, object]] = []

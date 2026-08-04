@@ -97,10 +97,6 @@ class PostProcessingPlugin(ABC):
         """Write plots/HTML; return list of created file paths."""
         return []
 
-    def kpi_catalog(self) -> list[dict[str, Any]]:
-        """KPI definitions (id, name, unit, higher_is_better)."""
-        return []
-
     def compute_kpis(self, model: UnifiedRunModel) -> list[dict[str, Any]]:
         """Return canonical-shaped KPI dicts (pre-validated)."""
         return []

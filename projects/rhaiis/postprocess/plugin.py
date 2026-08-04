@@ -108,9 +108,6 @@ class RhaiisPlugin(PostProcessingPlugin):
     ) -> list[str]:
         return []
 
-    def kpi_catalog(self) -> list[dict[str, Any]]:
-        return self.kpi_handler.get_catalog()
-
     def compute_kpis(self, model: UnifiedRunModel) -> list[dict[str, Any]]:
         return self.kpi_handler.compute_kpis(model)
 

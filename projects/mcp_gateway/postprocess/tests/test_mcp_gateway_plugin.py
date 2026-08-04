@@ -133,15 +133,6 @@ class TestMCPGatewayParser:
 
 
 class TestMCPGatewayKpis:
-    def test_catalog_has_expected_kpis(self):
-        handler = MCPGatewayKpiHandler()
-        catalog = handler.get_catalog()
-        kpi_ids = {k["kpi_id"] for k in catalog}
-
-        assert "mcp_gw_requests_per_second" in kpi_ids
-        assert "mcp_gw_p95_ms" in kpi_ids
-        assert "mcp_gw_failure_rate" in kpi_ids
-
     def test_compute_kpis(self, tmp_path: Path):
         node = _make_test_node(tmp_path, "run-a", SAMPLE_STATS_CSV, TEST_LABELS)
         parser = MCPGatewayParser()
@@ -209,9 +200,6 @@ class TestMCPGatewayPlugin:
 
         kpis = plugin.compute_kpis(model)
         assert len(kpis) > 0
-
-        catalog = plugin.kpi_catalog()
-        assert len(catalog) > 0
 
     def test_visualize_returns_empty(self, tmp_path: Path):
         plugin = get_plugin()
