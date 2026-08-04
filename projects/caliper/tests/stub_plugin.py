@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
+from projects.caliper.engine.kpi.analyze import AnalysisConfig
 from projects.caliper.engine.model import (
     ParseResult,
     PostProcessingPlugin,
@@ -99,6 +100,10 @@ class StubPlugin(PostProcessingPlugin):
             "metrics": {"records": len(model.unified_result_records)},
             "optional": {},
         }
+
+
+# Analysis configuration for testing KPI regression analysis
+analysis_config = AnalysisConfig()
 
 
 def get_plugin() -> PostProcessingPlugin:
