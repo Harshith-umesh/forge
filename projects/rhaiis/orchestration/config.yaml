@@ -52,7 +52,7 @@ caliper:
     analyze:
       enabled: false
       historical_kpis: historical_kpis
-      output: regression_analysis.json
+      output: regression_analysis.yaml
 
   export:
     from: null
