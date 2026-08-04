@@ -163,6 +163,3 @@ temp/
 
 # FORGE launcher configuration (personal settings)
 projects/core/launcher/launcher_config.yaml
-
-fournos-job-*.yaml
-kubeconfig*
