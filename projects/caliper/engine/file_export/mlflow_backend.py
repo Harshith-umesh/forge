@@ -423,6 +423,8 @@ def log_artifacts(
         client = mlflow.tracking.MlflowClient()
         with mlflow.start_run(**start_kw):
             rid = mlflow.active_run().info.run_id
+            if run_id and run_name:
+                mlflow.set_tag("mlflow.runName", run_name)
             _apply_run_metadata(effective_meta)
             _apply_log_model(artifact_root, effective_meta, verbose=verbose)
 
@@ -560,6 +562,8 @@ def log_multi_run_artifacts(
 
         with mlflow.start_run(**start_kw) as parent:
             parent_rid = parent.info.run_id
+            if run_id and parent_run_name:
+                mlflow.set_tag("mlflow.runName", parent_run_name)
             _apply_run_metadata(effective_meta)
 
             _upload_mlflow_files_parallel(

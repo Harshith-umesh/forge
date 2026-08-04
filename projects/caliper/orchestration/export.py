@@ -312,24 +312,25 @@ def precreate_mlflow_run() -> dict[str, str]:
     tracking_uri = secrets_data.get("tracking_uri", "")
 
     prev_workspace = os.environ.get("MLFLOW_WORKSPACE")
-    with mlflow_connection_env(secrets_data):
-        if tracking_uri:
-            mlflow.set_tracking_uri(tracking_uri)
-        if workspace:
-            os.environ["MLFLOW_WORKSPACE"] = workspace
-        if experiment:
-            mlflow.set_experiment(experiment)
+    try:
+        with mlflow_connection_env(secrets_data):
+            if tracking_uri:
+                mlflow.set_tracking_uri(tracking_uri)
+            if workspace:
+                os.environ["MLFLOW_WORKSPACE"] = workspace
+            if experiment:
+                mlflow.set_experiment(experiment)
 
-        run_name = os.environ.get("FJOB_NAME")
-        with mlflow.start_run(run_name=run_name):
-            active = mlflow.active_run()
-            run_id = active.info.run_id
-            experiment_id = str(active.info.experiment_id)
-
-    if prev_workspace is not None:
-        os.environ["MLFLOW_WORKSPACE"] = prev_workspace
-    else:
-        os.environ.pop("MLFLOW_WORKSPACE", None)
+            run_name = os.environ.get("FJOB_NAME")
+            with mlflow.start_run(run_name=run_name):
+                active = mlflow.active_run()
+                run_id = active.info.run_id
+                experiment_id = str(active.info.experiment_id)
+    finally:
+        if prev_workspace is not None:
+            os.environ["MLFLOW_WORKSPACE"] = prev_workspace
+        else:
+            os.environ.pop("MLFLOW_WORKSPACE", None)
 
     logger.info("Pre-created MLflow run %s (experiment=%s)", run_id, experiment_id)
 
@@ -368,7 +369,9 @@ def _read_mlflow_ids_from_marker() -> tuple[str, str]:
 def build_mlflow_run_url() -> str:
     """Construct the MLflow run URL at runtime from vault secrets and the marker file."""
     try:
-        from projects.caliper.engine.file_export.mlflow_secrets import load_mlflow_secrets_yaml
+        from projects.caliper.engine.file_export.mlflow_secrets import (
+            load_mlflow_secrets_yaml,
+        )
         from projects.core.library import config
 
         run_id, experiment_id = _read_mlflow_ids_from_marker()
@@ -395,6 +398,7 @@ def build_mlflow_run_url() -> str:
         tracking_uri = secrets_data.get("tracking_uri", "").rstrip("/")
         if not tracking_uri.startswith(("http://", "https://")):
             return ""
+        assert_tracking_uri_has_no_userinfo(tracking_uri)
 
         workspace = config.project.get_config(
             "caliper.export.backend.mlflow.config.workspace", None, print=False, warn=False
