@@ -94,4 +94,4 @@ profiler:
 agent_analysis:
   enabled: false
   severity_threshold: 10
-  url: ""
+  url: "http://agent-gateway.psap-ai-analysis-agent-gateway.svc.cluster.local:8443/v1/stream"
