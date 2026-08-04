@@ -603,7 +603,7 @@ def send_success_notification(
             )
             dashboard_line = f"*Dashboard:* <{dashboard_url}|View Dashboard>\n"
     except Exception:
-        pass
+        logger.warning("Failed to build dashboard URL for notification", exc_info=True)
 
     mlflow_url = _build_mlflow_run_url()
     mlflow_line = f"*MLflow:* <{mlflow_url}|View Run>\n" if mlflow_url else ""
