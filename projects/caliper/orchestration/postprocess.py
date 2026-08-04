@@ -761,11 +761,12 @@ class CaliperPostprocessOrchestrator:
         if not self.config.parse.enabled:
             return
 
-        import tempfile
+        # Create automatic status file path
+        from projects.caliper.orchestration.caliper_invocation import (
+            _generate_automatic_status_file_path,
+        )
 
-        # Create status file for CLI output
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as status_f:
-            status_file = Path(status_f.name)
+        status_file = _generate_automatic_status_file_path(self.tree_root, "parse")
 
         try:
             # Build CLI command
@@ -843,11 +844,12 @@ class CaliperPostprocessOrchestrator:
         if not self.config.visualize.enabled:
             return
 
-        import tempfile
+        # Create automatic status file path
+        from projects.caliper.orchestration.caliper_invocation import (
+            _generate_automatic_status_file_path,
+        )
 
-        # Create status file for CLI output
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as status_f:
-            status_file = Path(status_f.name)
+        status_file = _generate_automatic_status_file_path(self.tree_root, "visualize")
 
         try:
             # Resolve visualize output directory

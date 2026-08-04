@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import subprocess
-import tempfile
 import time
 import traceback
 from pathlib import Path
@@ -31,6 +30,29 @@ from projects.caliper.orchestration.postprocess_config import (
 from projects.core.library import env
 
 logger = logging.getLogger(__name__)
+
+
+def _generate_automatic_status_file_path(artifacts_dir: Path, operation: str) -> Path:
+    """Generate automatic status file path in format: <artifacts_dir>/status_files/<idx>__<operation>.yaml"""
+    status_dir = artifacts_dir / "status_files"
+    status_dir.mkdir(parents=True, exist_ok=True)
+
+    # Find next available index
+    existing_files = list(status_dir.glob(f"*__{operation}.yaml"))
+    if existing_files:
+        # Extract indices from existing files
+        indices = []
+        for f in existing_files:
+            try:
+                idx_str = f.name.split("__")[0]
+                indices.append(int(idx_str))
+            except (ValueError, IndexError):
+                continue
+        next_idx = max(indices) + 1 if indices else 0
+    else:
+        next_idx = 0
+
+    return status_dir / f"{next_idx:03d}__{operation}.yaml"
 
 
 def _make_path_relative_to_base(file_path: str | Path, base_dir: Path) -> str:
@@ -152,8 +174,8 @@ def run_artifacts_to_kpis(
         output_file = output_dir / postprocess_config.kpi.artifacts_to_kpis.output
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
-        # Create temporary status file for subprocess communication
-        status_file = output_dir / "kpi_generate_status.yaml"
+        # Create automatic status file path
+        status_file = _generate_automatic_status_file_path(output_dir, "kpi_generate")
 
         # Build CLI command
         command = build_kpi_generate_command(
@@ -171,12 +193,6 @@ def run_artifacts_to_kpis(
             status_file=status_file,
             step_logs_dir=step_logs_dir,
         )
-
-        # Clean up temporary status file
-        try:
-            status_file.unlink()
-        except FileNotFoundError:
-            pass
 
         # Convert to expected format
         if result.returncode == 0 and status_data.get("success"):
@@ -231,8 +247,8 @@ def run_artifacts_to_ai_data(
         output_file = output_dir / postprocess_config.kpi.artifacts_to_ai_data.output_dir
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
-        # Create temporary status file for subprocess communication
-        status_file = output_dir / "ai_eval_export_status.yaml"
+        # Create automatic status file path
+        status_file = _generate_automatic_status_file_path(output_dir, "ai_eval_export")
 
         # Build CLI command
         command = build_ai_eval_export_command(
@@ -250,12 +266,6 @@ def run_artifacts_to_ai_data(
             status_file=status_file,
             step_logs_dir=step_logs_dir,
         )
-
-        # Clean up temporary status file
-        try:
-            status_file.unlink()
-        except FileNotFoundError:
-            pass
 
         # Convert to expected format
         if result.returncode == 0 and status_data.get("success"):
@@ -308,8 +318,8 @@ def run_kpis_to_csv(
         output_file = output_dir / postprocess_config.kpi.csv.output
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
-        # Create temporary status file for subprocess communication
-        status_file = output_dir / "kpi_csv_export_status.yaml"
+        # Create automatic status file path
+        status_file = _generate_automatic_status_file_path(output_dir, "kpi_csv_export")
 
         # Build CLI command
         command = build_kpi_csv_export_command(
@@ -328,12 +338,6 @@ def run_kpis_to_csv(
             status_file=status_file,
             step_logs_dir=step_logs_dir,
         )
-
-        # Clean up temporary status file
-        try:
-            status_file.unlink()
-        except FileNotFoundError:
-            pass
 
         # Convert to expected format
         if result.returncode == 0 and status_data.get("success"):
@@ -389,8 +393,8 @@ def run_analyse_kpis(
         if not historical_kpis_dir.is_absolute():
             historical_kpis_dir = output_dir / historical_kpis_dir
 
-        # Create temporary status file for subprocess communication
-        status_file = output_dir / "analyse_kpis_status.yaml"
+        # Create automatic status file path
+        status_file = _generate_automatic_status_file_path(output_dir, "analyse_kpis")
 
         # Build CLI command
         command = build_analyse_kpis_command(
@@ -411,11 +415,6 @@ def run_analyse_kpis(
             step_logs_dir=step_logs_dir,
         )
 
-        # Clean up temporary status file
-        try:
-            status_file.unlink()
-        except FileNotFoundError:
-            pass
 
         # Convert to expected format
         if result.returncode == 0 and status_data.get("success"):
@@ -452,9 +451,8 @@ def run_parse_step(
     if not config.parse.enabled:
         return True, {"status": "disabled", "reason": "parse disabled", "completed_at": time.time()}
 
-    # Create status file for CLI output
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as status_f:
-        status_file = Path(status_f.name)
+    # Create automatic status file path
+    status_file = _generate_automatic_status_file_path(tree_root, "parse")
 
     try:
         # Build CLI command
@@ -503,12 +501,6 @@ def run_parse_step(
             "detail": f"Exception during parse: {str(e)}",
             "completed_at": time.time(),
         }
-    finally:
-        # Clean up temporary status file
-        try:
-            status_file.unlink()
-        except FileNotFoundError:
-            pass
 
 
 def run_visualize_step(
@@ -530,9 +522,8 @@ def run_visualize_step(
             "completed_at": time.time(),
         }
 
-    # Create status file for CLI output
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as status_f:
-        status_file = Path(status_f.name)
+    # Create automatic status file path
+    status_file = _generate_automatic_status_file_path(tree_root, "visualize")
 
     try:
         # Build CLI command
@@ -581,12 +572,6 @@ def run_visualize_step(
             "detail": f"Exception during visualize: {str(e)}",
             "completed_at": time.time(),
         }
-    finally:
-        # Clean up temporary status file
-        try:
-            status_file.unlink()
-        except FileNotFoundError:
-            pass
 
 
 def run_s3_import_step(
@@ -606,9 +591,8 @@ def run_s3_import_step(
             "completed_at": time.time(),
         }
 
-    # Create status file for CLI output
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as status_f:
-        status_file = Path(status_f.name)
+    # Create automatic status file path
+    status_file = _generate_automatic_status_file_path(output_dir, "s3_import")
 
     try:
         # Build CLI command
@@ -654,12 +638,6 @@ def run_s3_import_step(
             "detail": f"Exception during s3-import: {str(e)}",
             "completed_at": time.time(),
         }
-    finally:
-        # Clean up temporary status file
-        try:
-            status_file.unlink()
-        except FileNotFoundError:
-            pass
 
 
 def run_s3_export_step(
@@ -682,9 +660,8 @@ def run_s3_export_step(
             "completed_at": time.time(),
         }
 
-    # Create status file for CLI output
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as status_f:
-        status_file = Path(status_f.name)
+    # Create automatic status file path (use step_logs_dir.parent as base artifacts dir)
+    status_file = _generate_automatic_status_file_path(step_logs_dir.parent, "s3_export")
 
     try:
         # Build CLI command
@@ -733,9 +710,3 @@ def run_s3_export_step(
             "detail": f"Exception during s3-export: {str(e)}",
             "completed_at": time.time(),
         }
-    finally:
-        # Clean up temporary status file
-        try:
-            status_file.unlink()
-        except FileNotFoundError:
-            pass
