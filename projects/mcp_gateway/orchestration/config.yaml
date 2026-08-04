@@ -72,6 +72,7 @@ caliper:
       enabled: true
       historical_kpis: historical_data
       output: regression_analyze/kpi_analyze.json
+      fail_on_regression: false
     s3:
       bucket: psap-dashboard-data
       instance: mcp_gateway

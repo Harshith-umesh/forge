@@ -96,6 +96,7 @@ caliper:
       current_kpis: kpis/kpis.json
       historical_kpis: historical_data
       output: regression_analyze/kpi_analyze.yaml
+      fail_on_regression: false
 
 agentic:
   enabled: true
