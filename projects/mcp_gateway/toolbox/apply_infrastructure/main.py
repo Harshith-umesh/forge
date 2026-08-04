@@ -11,13 +11,12 @@ the MCP Gateway product (MCPServerRegistration, etc).
 from __future__ import annotations
 
 import logging
-import tempfile
 from pathlib import Path
 
 import yaml
 
 from projects.agentic_tools.mcp.toolbox.deploy_mock_servers.main import MOCK_MCP_LABEL
-from projects.core.dsl import always, entrypoint, execute_tasks, retry, task
+from projects.core.dsl import always, entrypoint, execute_tasks, retry, shell, task
 from projects.core.dsl.utils.k8s import oc
 
 logger = logging.getLogger(__name__)
@@ -38,6 +37,16 @@ def run(
     """Apply MCP Gateway infrastructure and wait for registrations."""
     execute_tasks(locals())
     return 0
+
+
+@task
+def setup_directories(args, ctx):
+    """Create command source and artifact directories"""
+
+    shell.mkdir("src")
+    shell.mkdir("artifacts")
+
+    return "Prepared src and artifacts directories"
 
 
 @task
@@ -69,19 +78,16 @@ def apply_manifests(args, ctx):
     combined_yaml = "---\n".join(all_manifests)
 
     src_dir = args.artifact_dir / "src"
-    src_dir.mkdir(parents=True, exist_ok=True)
-    (src_dir / "infrastructure.yaml").write_text(combined_yaml, encoding="utf-8")
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as tmp:
-        tmp.write(combined_yaml)
-        tmp_path = tmp.name
-    oc("apply", "-f", tmp_path)
-    Path(tmp_path).unlink(missing_ok=True)
+    infra_manifest = src_dir / "infrastructure.yaml"
+    infra_manifest.write_text(combined_yaml, encoding="utf-8")
+
+    oc("apply", "-f", infra_manifest, log_stdout=False)
 
     return f"Infrastructure applied for {args.count} server(s)"
 
 
-@retry(attempts=60, delay=5, backoff=1.0)
+@retry(attempts=60, delay=15, backoff=1.0)
 @task
 def wait_for_registrations(args, ctx):
     """Wait until all N MCPServerRegistrations report Ready."""
@@ -90,7 +96,7 @@ def wait_for_registrations(args, ctx):
     if ready_count >= args.count:
         return f"All {args.count} registrations are Ready"
 
-    return (False, f"registrations ready: {ready_count}/{args.count}")
+    return False, f"registrations ready: {ready_count}/{args.count}"
 
 
 @always
@@ -98,7 +104,6 @@ def wait_for_registrations(args, ctx):
 def capture_artifacts(args, ctx):
     """Capture infrastructure resource state for post-mortem diagnostics."""
     artifacts_dir = args.artifact_dir / "artifacts"
-    artifacts_dir.mkdir(parents=True, exist_ok=True)
 
     _capture_to_file(
         artifacts_dir / "mcpserverregistrations.yaml",
@@ -162,6 +167,7 @@ def _count_ready_registrations(*, namespace: str, api_group: str = DEFAULT_API_G
         "-o",
         'jsonpath={range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\\n"}{end}',
         check=False,
+        log_stdout=False,
     )
     if result.returncode != 0 or not result.stdout.strip():
         return 0
