@@ -368,6 +368,7 @@ def build_mlflow_run_url() -> str:
     """Construct the MLflow run URL at runtime from vault secrets and the marker file."""
     try:
         from projects.caliper.engine.file_export.mlflow_secrets import (
+            assert_tracking_uri_has_no_userinfo,
             load_mlflow_secrets_yaml,
         )
         from projects.core.library import config
