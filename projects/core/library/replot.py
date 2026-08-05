@@ -159,7 +159,7 @@ def caliper_replot_entrypoint(
     if replot_url is not None:
         config.project.set_config("caliper.replot.url", replot_url)
 
-    status = run_replot(artifact_directory=artifact_directory, keep_download_dir=keep_download)
+    status = run_replot(artifact_directory=artifact_directory, keep_download_dir=keep_download or None)
 
     # Log the status
     import yaml
