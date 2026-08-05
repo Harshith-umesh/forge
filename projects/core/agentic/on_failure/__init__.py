@@ -427,7 +427,7 @@ def analyze_single_failure_multi_query(
         file_lower = file_path.lower()
 
         # Skip the main failure file and task.log as they're already included
-        if file_path.endswith("FAILURE") or file_path.endswith("task.log"):
+        if file_path.endswith("FAILURE.txt") or file_path.endswith("task.log"):
             continue
 
         if any(pattern in file_lower for pattern in high_priority_patterns):

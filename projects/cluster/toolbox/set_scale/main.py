@@ -431,7 +431,7 @@ def wait_for_compute_nodes_ready(args, ctx):
                 failure_content += f"**Parent:** machineset/{ctx.target_machineset}\n"
                 failure_content += f"**Error:** {detail['error']}\n\n"
 
-            failure_file = args.artifact_dir / "FAILURE"
+            failure_file = args.artifact_dir / "FAILURE.txt"
             with open(failure_file, "w") as f:
                 f.write(failure_content)
 
