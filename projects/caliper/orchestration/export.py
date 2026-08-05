@@ -206,8 +206,19 @@ def run_from_orchestration_config(
 
     run_dirs = discover_run_dirs(from_path)
 
-    # Resume a pre-created MLflow run if the test step left a marker or test labels
-    mlflow_run_id = export_cfg.mlflow_run_id or _discover_precreated_mlflow_run_id(from_path)
+    # Resume a pre-created MLflow run if the test step left mlflow_destination in test labels
+    discovered_run_id = _discover_precreated_mlflow_run_id(from_path)
+    if (
+        export_cfg.mlflow_run_id
+        and discovered_run_id
+        and export_cfg.mlflow_run_id != discovered_run_id
+    ):
+        logger.error(
+            "Conflicting MLflow run_ids: export config has %s, test labels have %s. Using export config.",
+            export_cfg.mlflow_run_id,
+            discovered_run_id,
+        )
+    mlflow_run_id = export_cfg.mlflow_run_id or discovered_run_id
 
     # Resolve descriptive run names from labels + run_naming config
     naming = resolve_run_names(
@@ -266,20 +277,7 @@ def run_from_orchestration_config(
         return yaml.safe_load(f.read())
 
 
-MLFLOW_PRECREATED_RUN_MARKER = "__mlflow_precreated_run__.yaml"
-"""Marker file written by the test step to communicate the pre-created MLflow
-run ID and experiment ID to the export step.
-
-The test step pre-creates an MLflow run (immediately ended) so that the
-``run_id`` and ``experiment_id`` are known *before* CSV generation.  These IDs
-are embedded in test labels and flow into the dashboard CSV.  The export step
-later discovers the marker via :func:`_discover_precreated_mlflow_run_id` and
-resumes the same run (``mlflow.start_run(run_id=...)``) to upload artifacts,
-avoiding a duplicate run.
-
-The marker is a YAML file with keys ``run_id`` and ``experiment_id``, written
-to ``ARTIFACT_DIR`` by :func:`precreate_mlflow_run`.
-"""
+TEST_LABELS_FILENAME = "__test_labels__.yaml"
 
 
 def precreate_mlflow_run(
@@ -288,13 +286,13 @@ def precreate_mlflow_run(
     experiment: str | None = None,
     workspace: str | None = None,
 ) -> dict[str, str]:
-    """Pre-create an MLflow run and write the marker file to ``ARTIFACT_DIR``.
+    """Pre-create an MLflow run so the export step can resume it.
 
     The run is created and immediately ended (status FINISHED).  The export step
     will resume it via ``mlflow.start_run(run_id=...)`` to upload artifacts.
 
-    The caller (test harness) is responsible for reading config and vault paths;
-    this function does not access the project config directly.
+    The caller is responsible for persisting the returned IDs (e.g. via the
+    ``mlflow_destination`` section of ``__test_labels__.yaml``).
 
     Returns a dict with ``run_id`` and ``experiment_id``.
     """
@@ -333,35 +331,30 @@ def precreate_mlflow_run(
 
     meta = {"run_id": run_id, "experiment_id": experiment_id}
 
-    marker_path = env.ARTIFACT_DIR / MLFLOW_PRECREATED_RUN_MARKER
-    marker_path.parent.mkdir(parents=True, exist_ok=True)
-    marker_path.write_text(yaml.safe_dump(meta, sort_keys=False), encoding="utf-8")
-    logger.info(
-        "Pre-created MLflow run %s (experiment=%s), marker: %s",
-        run_id,
-        experiment_id,
-        marker_path,
-    )
+    logger.info("Pre-created MLflow run %s (experiment=%s)", run_id, experiment_id)
 
     return meta
 
 
-def _read_mlflow_ids_from_marker() -> tuple[str, str]:
-    """Read run_id and experiment_id from the pre-created marker file on disk."""
+def _read_mlflow_ids_from_test_labels() -> tuple[str, str]:
+    """Read run_id and experiment_id from ``mlflow_destination`` in test labels."""
     artifact_dir = Path(env.ARTIFACT_DIR) if env.ARTIFACT_DIR else None
     if not artifact_dir:
-        logger.warning("ARTIFACT_DIR not set, cannot read MLflow marker")
+        logger.warning("ARTIFACT_DIR not set, cannot read MLflow destination from test labels")
         return "", ""
-    for marker in sorted(artifact_dir.rglob(MLFLOW_PRECREATED_RUN_MARKER)):
-        data = yaml.safe_load(marker.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            logger.warning(
-                "MLflow marker %s has unexpected type %s, skipping", marker, type(data).__name__
-            )
-            continue
-        if data.get("run_id"):
-            return data["run_id"], data.get("experiment_id", "")
-    logger.warning("No valid MLflow marker found under %s", artifact_dir)
+    for labels_file in sorted(artifact_dir.rglob(TEST_LABELS_FILENAME)):
+        try:
+            data = yaml.safe_load(labels_file.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                continue
+            dest = data.get("mlflow_destination")
+            if not isinstance(dest, dict):
+                continue
+            run_id = dest.get("run_id", "")
+            if run_id:
+                return run_id, dest.get("experiment_id", "")
+        except (OSError, yaml.YAMLError) as e:
+            logger.warning("Failed to read test labels %s: %s", labels_file, e)
     return "", ""
 
 
@@ -382,9 +375,9 @@ def build_mlflow_run_url(
         load_mlflow_secrets_yaml,
     )
 
-    run_id, experiment_id = _read_mlflow_ids_from_marker()
+    run_id, experiment_id = _read_mlflow_ids_from_test_labels()
     if not run_id or not experiment_id:
-        logger.warning("Cannot build MLflow URL: run_id or experiment_id missing from marker")
+        logger.warning("Cannot build MLflow URL: run_id or experiment_id missing from test labels")
         return ""
 
     if not secrets_path.exists():
@@ -403,22 +396,20 @@ def build_mlflow_run_url(
 
 
 def _discover_precreated_mlflow_run_id(from_path: Path) -> str | None:
-    """Find a pre-created MLflow run_id from the marker file."""
-    for marker in sorted(from_path.rglob(MLFLOW_PRECREATED_RUN_MARKER)):
+    """Find a pre-created MLflow run_id from ``mlflow_destination`` in test labels."""
+    for labels_file in sorted(from_path.rglob(TEST_LABELS_FILENAME)):
         try:
-            data = yaml.safe_load(marker.read_text(encoding="utf-8"))
+            data = yaml.safe_load(labels_file.read_text(encoding="utf-8"))
             if not isinstance(data, dict):
-                logger.warning(
-                    "MLflow marker %s has unexpected type %s, skipping",
-                    marker,
-                    type(data).__name__,
-                )
                 continue
-            run_id = data.get("run_id")
+            dest = data.get("mlflow_destination")
+            if not isinstance(dest, dict):
+                continue
+            run_id = dest.get("run_id")
             if run_id:
-                logger.info("Found pre-created MLflow run_id: %s (from marker %s)", run_id, marker)
+                logger.info("Found pre-created MLflow run_id: %s (from %s)", run_id, labels_file)
                 return run_id
         except (OSError, yaml.YAMLError) as e:
-            logger.warning("Failed to read MLflow pre-created run marker %s: %s", marker, e)
+            logger.warning("Failed to read test labels %s: %s", labels_file, e)
 
     return None

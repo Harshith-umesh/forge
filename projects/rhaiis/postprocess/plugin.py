@@ -18,6 +18,30 @@ from .parser import RhaiisParser
 
 logger = logging.getLogger(__name__)
 
+
+def _read_mlflow_destination_from_test_labels(kpi_records: list[dict]) -> dict[str, str]:
+    """Extract mlflow_destination from __test_labels__.yaml near the first KPI run_path."""
+    import yaml
+
+    for kpi in kpi_records:
+        run_path = kpi.get("run_path", "")
+        if not run_path:
+            continue
+        labels_file = Path(run_path) / "__test_labels__.yaml"
+        if not labels_file.exists():
+            labels_file = Path(run_path).parent / "__test_labels__.yaml"
+        if not labels_file.exists():
+            continue
+        try:
+            data = yaml.safe_load(labels_file.read_text(encoding="utf-8"))
+            dest = data.get("mlflow_destination") if isinstance(data, dict) else None
+            if isinstance(dest, dict) and dest.get("run_id"):
+                return dest
+        except (OSError, yaml.YAMLError):
+            pass
+    return {}
+
+
 # CSV columns whose KPI values are in seconds but the dashboard expects milliseconds.
 # GuideLLM parser converts `*_ms` metrics to seconds; the old CSV pipeline kept them in ms.
 _SECONDS_TO_MS_COLUMNS = frozenset(
@@ -128,6 +152,8 @@ class RhaiisPlugin(PostProcessingPlugin):
         """
         from projects.rhaiis.postprocess.csv_export import FIELDNAMES
 
+        mlflow_dest = _read_mlflow_destination_from_test_labels(kpi_records)
+
         # Group KPIs by (run_path, rate_index)
         groups: dict[tuple[str, str], dict[str, Any]] = defaultdict(dict)
         group_labels: dict[tuple[str, str], dict[str, Any]] = {}
@@ -191,8 +217,8 @@ class RhaiisPlugin(PostProcessingPlugin):
             row["guidellm_start_time_ms"] = labels.get("guidellm_start_time_ms", "")
             row["guidellm_end_time_ms"] = labels.get("guidellm_end_time_ms", "")
             row["guidellm_version"] = labels.get("guidellm_version", "")
-            row["mlflow_run_id"] = labels.get("mlflow_run_id", "")
-            row["mlflow_experiment_id"] = labels.get("mlflow_experiment_id", "")
+            row["mlflow_run_id"] = mlflow_dest.get("run_id", "")
+            row["mlflow_experiment_id"] = mlflow_dest.get("experiment_id", "")
             rows.append(row)
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
