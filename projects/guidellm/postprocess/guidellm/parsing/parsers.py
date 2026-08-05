@@ -343,7 +343,7 @@ class GuideLLMParser:
             cooldown_time=0.0,  # Not available in JSON format
             # Request metrics
             request_rate=request_rate,
-            request_concurrency=intended_concurrency,  # For now, effective = intended
+            request_concurrency=intended_concurrency,
             intended_concurrency=int(intended_concurrency),
             completed_requests=completed_requests,
             failed_requests=0,  # Could extract from unsuccessful metrics if needed
@@ -452,8 +452,8 @@ class GuideLLMParser:
         if not benchmark_group:
             return {}
 
-        # Sort benchmarks by request rate for consistent curve ordering
-        sorted_benchmarks = sorted(benchmark_group, key=lambda b: b.request_rate)
+        # Sort benchmarks by intended concurrency for consistent curve ordering
+        sorted_benchmarks = sorted(benchmark_group, key=lambda b: b.intended_concurrency)
 
         # Use the first benchmark for static characteristics
         representative = sorted_benchmarks[0]
