@@ -45,6 +45,7 @@ class KpiTestResult:
     higher_is_better: bool
     regression: bool
     baseline_count: int
+    baseline_values: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -204,6 +205,22 @@ def _run_regression_test(
     baseline_values = [float(b["value"]) for b in baselines if b.get("value") is not None]
     baseline_mean = sum(baseline_values) / len(baseline_values)
 
+    # Build baseline values mapping by comparison flags
+    baseline_values_by_comparison = {}
+    for baseline in baselines:
+        if baseline.get("value") is not None:
+            baseline_value = float(baseline["value"])
+            baseline_labels = baseline.get("labels", {})
+
+            # Create comparison flag from comparison_keys
+            comparison_parts = []
+            for key in config.comparison_keys:
+                if key in baseline_labels:
+                    comparison_parts.append(f"{key}={baseline_labels[key]}")
+
+            comparison_flag = ", ".join(comparison_parts) if comparison_parts else "default"
+            baseline_values_by_comparison[comparison_flag] = baseline_value
+
     if baseline_mean == 0:
         relative_change = 0.0
     else:
@@ -225,6 +242,7 @@ def _run_regression_test(
         higher_is_better=higher_is_better,
         regression=regression,
         baseline_count=len(baseline_values),
+        baseline_values=baseline_values_by_comparison,
     )
 
 
@@ -286,6 +304,7 @@ def _build_report(
                 "higher_is_better": r.higher_is_better,
                 "verdict": "REGRESSION" if r.regression else "PASS",
                 "baseline_count": r.baseline_count,
+                "baseline_values": r.baseline_values,
             }
             for r in results
         ],
