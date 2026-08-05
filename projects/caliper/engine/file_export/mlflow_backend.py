@@ -467,23 +467,40 @@ def _log_2d_metrics(metrics_2d: dict[str, Any]) -> None:
     Each key maps to a list of ``{"x": ..., "y": ...}`` dicts (already
     sorted by x in ``metrics_from_kpis``).  Each data point is logged
     with ``step=int(x)`` so MLflow renders the curve.
+
+    Raises:
+        ValueError: If a data point has a non-integer x value (MLflow
+            steps must be integers) or if x/y are not numeric.
     """
     import mlflow
 
     for metric_name, data_points in metrics_2d.items():
         if not isinstance(data_points, list):
             continue
-        for pt in data_points:
-            if isinstance(pt, dict):
-                x = pt.get("x")
-                y = pt.get("y")
-                if (
-                    isinstance(x, int | float)
-                    and not isinstance(x, bool)
-                    and isinstance(y, int | float)
-                    and not isinstance(y, bool)
-                ):
-                    mlflow.log_metric(str(metric_name), float(y), step=int(x))
+        for i, pt in enumerate(data_points):
+            if not isinstance(pt, dict):
+                raise ValueError(
+                    f"2D metric {metric_name!r}: data_points[{i}] is {type(pt).__name__}, "
+                    f"expected dict with 'x' and 'y' keys"
+                )
+            x = pt.get("x")
+            y = pt.get("y")
+            if (
+                not isinstance(x, int | float)
+                or isinstance(x, bool)
+                or not isinstance(y, int | float)
+                or isinstance(y, bool)
+            ):
+                raise ValueError(
+                    f"2D metric {metric_name!r}: data_points[{i}] has non-numeric "
+                    f"x={x!r} or y={y!r}"
+                )
+            if x != int(x):
+                raise ValueError(
+                    f"2D metric {metric_name!r}: data_points[{i}] has non-integer "
+                    f"step x={x!r} (MLflow steps must be integers)"
+                )
+            mlflow.log_metric(str(metric_name), float(y), step=int(x))
 
 
 def _log_metrics_and_params_from_tree(artifact_root: Path) -> None:
