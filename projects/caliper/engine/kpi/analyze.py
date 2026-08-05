@@ -59,29 +59,51 @@ class AnalysisReport:
 
 
 def _load_analysis_config(plugin_module: str) -> AnalysisConfig:
-    """Load analysis config from plugin module if available, else use defaults.
+    """Load analysis config from plugin module.
 
-    Plugins can expose an `analysis_config` dict or `get_analysis_config()` callable.
+    Plugins must expose an `analysis_config` dict or `get_analysis_config()` callable.
+    Raises ValueError if config is not available.
     """
     try:
         mod = __import__(plugin_module, fromlist=[""])
-        if hasattr(mod, "get_analysis_config"):
-            raw = mod.get_analysis_config()
-        elif hasattr(mod, "analysis_config"):
-            raw = mod.analysis_config
-        else:
-            return AnalysisConfig()
+    except ImportError as exc:
+        raise ValueError(
+            f"Failed to import plugin module '{plugin_module}': {exc}. "
+            f"Check that the plugin module exists and is importable."
+        ) from exc
 
-        if isinstance(raw, AnalysisConfig):
-            return raw
-        if isinstance(raw, dict):
+    if hasattr(mod, "get_analysis_config"):
+        try:
+            raw = mod.get_analysis_config()
+        except Exception as exc:
+            raise ValueError(
+                f"Plugin module '{plugin_module}' has get_analysis_config() but calling it failed: {exc}"
+            ) from exc
+    elif hasattr(mod, "analysis_config"):
+        raw = mod.analysis_config
+    else:
+        raise ValueError(
+            f"Plugin module '{plugin_module}' is missing required analysis configuration. "
+            f"Plugin must provide either 'analysis_config' attribute or 'get_analysis_config()' function."
+        )
+
+    if isinstance(raw, AnalysisConfig):
+        return raw
+    if isinstance(raw, dict):
+        try:
             return AnalysisConfig(
                 **{k: v for k, v in raw.items() if k in AnalysisConfig.__dataclass_fields__}
             )
-    except (ImportError, Exception) as exc:
-        logger.debug("Could not load analysis config from plugin %s: %s", plugin_module, exc)
-
-    return AnalysisConfig()
+        except Exception as exc:
+            raise ValueError(
+                f"Plugin module '{plugin_module}' analysis config has invalid format: {exc}. "
+                f"Config must be a dict with valid AnalysisConfig fields or an AnalysisConfig instance."
+            ) from exc
+    else:
+        raise ValueError(
+            f"Plugin module '{plugin_module}' analysis config has unsupported type '{type(raw).__name__}'. "
+            f"Must be a dict or AnalysisConfig instance."
+        )
 
 
 def _match_key(
@@ -286,7 +308,18 @@ def run_kpi_analysis(
                 "completed_at": time.time(),
             }
 
-        config = _load_analysis_config(plugin_module)
+        try:
+            config = _load_analysis_config(plugin_module)
+        except ValueError as exc:
+            logger.error("Failed to load analysis config: %s", exc)
+            return {
+                "status": "failed",
+                "success": False,
+                "error": f"Analysis configuration error: {exc}",
+                "exit_code": 1,
+                "completed_at": time.time(),
+            }
+
         logger.info(
             "  config: comparison_keys=%s, ignored_keys=%s",
             config.comparison_keys,

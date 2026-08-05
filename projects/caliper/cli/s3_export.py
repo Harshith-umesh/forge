@@ -86,63 +86,104 @@ def list_ai_data_files(ai_data_dir: Path) -> list[Path]:
     return files
 
 
-def list_csv_files(output_dir: Path) -> list[Path]:
+def list_csv_files(output_dir: Path, postprocess_config=None) -> list[Path]:
     """List CSV files in the postprocess output directory.
 
     Args:
         output_dir: Path to postprocess output directory
+        postprocess_config: Postprocess configuration to determine CSV file path
 
     Returns:
         List of CSV file paths to upload
     """
-    csv_files = list(output_dir.glob("*.csv"))
+    csv_files = []
 
-    logger.info(f"Found {len(csv_files)} CSV files in output directory: {output_dir}")
-    for csv_file in csv_files:
-        logger.info(f"  - {csv_file.name} ({csv_file.stat().st_size} bytes)")
+    if postprocess_config and postprocess_config.kpi.csv.enabled:
+        # Use configured CSV file path
+        csv_file_path = output_dir / postprocess_config.kpi.csv.output
+        if csv_file_path.exists():
+            csv_files.append(csv_file_path)
+            logger.info(
+                f"Found configured CSV file: {csv_file_path.name} ({csv_file_path.stat().st_size} bytes)"
+            )
+        else:
+            logger.warning(f"Configured CSV file not found: {csv_file_path}")
+    else:
+        # Fallback to glob pattern for backward compatibility
+        csv_files = list(output_dir.glob("*.csv"))
+        logger.info(f"Found {len(csv_files)} CSV files in output directory: {output_dir}")
+        for csv_file in csv_files:
+            logger.info(f"  - {csv_file.name} ({csv_file.stat().st_size} bytes)")
 
     return csv_files
 
 
-def list_kpi_json_files(output_dir: Path) -> list[Path]:
+def list_kpi_json_files(output_dir: Path, postprocess_config=None) -> list[Path]:
     """List KPI JSON files in the postprocess output directory.
 
     Args:
         output_dir: Path to postprocess output directory
+        postprocess_config: Postprocess configuration to determine KPI JSON file path
 
     Returns:
         List of KPI JSON file paths to upload
     """
-    kpi_json_files = list(output_dir.glob("kpis.json"))
+    kpi_json_files = []
 
-    logger.info(f"Found {len(kpi_json_files)} KPI JSON files in output directory: {output_dir}")
-    for kpi_file in kpi_json_files:
-        logger.info(f"  - {kpi_file.name} ({kpi_file.stat().st_size} bytes)")
+    if postprocess_config and postprocess_config.kpi.artifacts_to_kpis.enabled:
+        # Use configured KPI JSON file path
+        kpi_file_path = output_dir / postprocess_config.kpi.artifacts_to_kpis.output
+        if kpi_file_path.exists():
+            kpi_json_files.append(kpi_file_path)
+            logger.info(
+                f"Found configured KPI JSON file: {kpi_file_path.name} ({kpi_file_path.stat().st_size} bytes)"
+            )
+        else:
+            logger.warning(f"Configured KPI JSON file not found: {kpi_file_path}")
+    else:
+        # Fallback to glob pattern for backward compatibility
+        kpi_json_files = list(output_dir.glob("kpis.json"))
+        logger.info(f"Found {len(kpi_json_files)} KPI JSON files in output directory: {output_dir}")
+        for kpi_file in kpi_json_files:
+            logger.info(f"  - {kpi_file.name} ({kpi_file.stat().st_size} bytes)")
 
     return kpi_json_files
 
 
-def list_analysis_files(output_dir: Path) -> list[Path]:
+def list_analysis_files(output_dir: Path, postprocess_config=None) -> list[Path]:
     """List all analysis output files in the output directory.
 
     Args:
         output_dir: Path to search for analysis files
+        postprocess_config: Postprocess configuration to determine analysis file path
 
     Returns:
         List of analysis file paths to upload
     """
     files = []
-    # Look for analysis output files (kpi_analyze.json is the most common)
-    analysis_patterns = ["kpi_analyze.json", "kpi_analysis.json", "*analyze*.json"]
 
-    for pattern in analysis_patterns:
-        for file_path in output_dir.glob(pattern):
-            if file_path.is_file():
-                files.append(file_path)
+    if postprocess_config and postprocess_config.analyze.enabled:
+        # Use configured analysis file path
+        analysis_file_path = output_dir / postprocess_config.analyze.output
+        if analysis_file_path.exists():
+            files.append(analysis_file_path)
+            logger.info(
+                f"Found configured analysis file: {analysis_file_path.name} ({analysis_file_path.stat().st_size} bytes)"
+            )
+        else:
+            logger.warning(f"Configured analysis file not found: {analysis_file_path}")
+    else:
+        # Fallback to glob patterns for backward compatibility
+        analysis_patterns = ["kpi_analyze.json", "kpi_analysis.json", "*analyze*.json"]
 
-    logger.info(f"Found {len(files)} analysis files in output directory: {output_dir}")
-    for file_path in files:
-        logger.info(f"  - {file_path.name} ({file_path.stat().st_size} bytes)")
+        for pattern in analysis_patterns:
+            for file_path in output_dir.glob(pattern):
+                if file_path.is_file():
+                    files.append(file_path)
+
+        logger.info(f"Found {len(files)} analysis files in output directory: {output_dir}")
+        for file_path in files:
+            logger.info(f"  - {file_path.name} ({file_path.stat().st_size} bytes)")
 
     return files
 
@@ -659,10 +700,14 @@ def run_s3_export(
         # List local files to upload
         upload_files = []
 
-        # Use directory searching as fallback for legacy orchestration calls
-        csv_files = list_csv_files(output_dir) if s3_config.include_csv else []
-        kpi_json_files = list_kpi_json_files(output_dir) if s3_config.include_kpis_json else []
-        analysis_files = list_analysis_files(output_dir)
+        # Use postprocess config to determine file locations
+        csv_files = list_csv_files(output_dir, postprocess_config) if s3_config.include_csv else []
+        kpi_json_files = (
+            list_kpi_json_files(output_dir, postprocess_config)
+            if s3_config.include_kpis_json
+            else []
+        )
+        analysis_files = list_analysis_files(output_dir, postprocess_config)
 
         upload_files.extend(csv_files)
         upload_files.extend(kpi_json_files)
@@ -775,7 +820,7 @@ def run_s3_export(
 
             # Collect KPI JSON file details
             if s3_config.include_kpis_json:
-                kpi_json_files = list_kpi_json_files(output_dir)
+                kpi_json_files = list_kpi_json_files(output_dir, postprocess_config)
                 for kpi_file in kpi_json_files:
                     try:
                         relative_kpi_path = str(kpi_file.relative_to(artifact_dir))

@@ -19,6 +19,8 @@ def run_kpi_generate(
     use_cache: bool,
     cache_path: Path | None,
     format_type: str = "hierarchical",
+    include_label_filter: list[tuple[str, str]] | None = None,
+    exclude_label_filter: list[tuple[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Generate KPI output in specified format.
 
@@ -30,6 +32,8 @@ def run_kpi_generate(
         use_cache: Whether to use cached parse results
         cache_path: Path to cache file (not used currently)
         format_type: Output format - "hierarchical" (default) or "jsonl"
+        include_label_filter: Include only directories matching these label filters
+        exclude_label_filter: Exclude directories matching these label filters
 
     Returns:
         List of KPI records
@@ -39,6 +43,8 @@ def run_kpi_generate(
         plugin_module=plugin_module,
         plugin=plugin,
         use_cache=use_cache,
+        include_label_filter=include_label_filter,
+        exclude_label_filter=exclude_label_filter,
     )
     compute = plugin.compute_kpis
     rows: list[dict[str, Any]] = compute(model)

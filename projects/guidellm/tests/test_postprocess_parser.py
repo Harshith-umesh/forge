@@ -73,9 +73,13 @@ def test_parser_accepts_rate_split_benchmark_files(tmp_path: Path) -> None:
         artifact_paths=[file_b, file_a],
     )
 
-    result = parser.parse(tmp_path, [node])
+    result = parser.parse([node])
 
     assert result.warnings == []
-    assert len(result.records) == 2
-    assert [record.metrics["request_concurrency"] for record in result.records] == [32.0, 64.0]
-    assert all(record.run_identity == {"guidellm": True} for record in result.records)
+    assert len(result.records) == 1
+
+    # Check that both rate configurations are present in the performance curves
+    record = result.records[0]
+    curves = record.metrics["performance_curves"]
+    assert curves["intended_concurrency"] == [32, 64]
+    assert record.run_identity == {"guidellm": True}

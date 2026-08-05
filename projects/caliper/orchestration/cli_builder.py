@@ -452,6 +452,13 @@ def build_s3_export_command(
     if analysis_file:
         cmd.extend(["--analysis-file", str(analysis_file)])
 
+    # S3 export options
+    if s3_config.export.upload_id:
+        cmd.extend(["--upload-id", s3_config.export.upload_id])
+
+    if s3_config.export.dry_run:
+        cmd.append("--dry-run")
+
     # Vault configuration
     cmd.extend(["--vault", s3_config.vault.name])
     cmd.extend(["--aws-credentials-file", s3_config.vault.aws_credentials_file])
