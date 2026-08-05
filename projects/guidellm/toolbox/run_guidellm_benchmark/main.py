@@ -6,9 +6,10 @@ import gzip
 import json
 import logging
 import subprocess
+import time
 from pathlib import Path
 
-from projects.core.dsl import entrypoint, execute_tasks, retry, task
+from projects.core.dsl import always, entrypoint, execute_tasks, retry, task
 from projects.core.dsl.utils import write_json, write_text
 from projects.core.dsl.utils.k8s import (
     oc,
@@ -23,6 +24,8 @@ from projects.guidellm.toolbox.run_guidellm_benchmark.utils import (
 )
 
 logger = logging.getLogger(__name__)
+WAIT_POLL_INTERVAL_SECONDS = 10
+JOB_COMPLETION_GRACE_SECONDS = 60
 
 
 def trim_benchmark_json(obj):
@@ -64,13 +67,16 @@ def run(
         name: Name of the benchmark job
         namespace: Namespace to run the benchmark job in (empty string auto-detects current namespace)
         image: Full container image reference for the benchmark
-        timeout: Timeout in seconds to wait for job completion
+        timeout: Active deadline for the Job and timeout in seconds to wait for completion
         pvc_size: Size of the PersistentVolumeClaim for storing results
         guidellm_args: List of additional guidellm arguments (e.g., ["--rate=10", "--max-seconds=30"])
         hf_token_secret: Name of the K8s secret containing HF_TOKEN. If empty, HF_TOKEN is not injected.
         fs_group: If set, adds securityContext.fsGroup to the GuideLLM job pod.
         keep_full_benchmark_file: Whether to keep the full untrimmed benchmark JSON files alongside trimmed ones (default: False)
     """
+
+    if timeout <= 0:
+        raise ValueError("timeout must be greater than zero")
 
     execute_tasks(locals())
     return 0
@@ -157,6 +163,7 @@ def create_guidellm_resources_task(args, ctx):
             image=ctx.image,
             endpoint_url=args.endpoint_url,
             guidellm_args=ctx.guidellm_args,
+            timeout_seconds=args.timeout,
             hf_token_secret=args.hf_token_secret,
             fs_group=args.fs_group,
         ),
@@ -186,10 +193,12 @@ def create_guidellm_resources_task(args, ctx):
         ),
     )
 
+    ctx.wait_deadline = time.monotonic() + args.timeout + JOB_COMPLETION_GRACE_SECONDS
     return f"GuideLLM benchmark {ctx.benchmark_name} created with job as PVC owner"
 
 
-@retry(attempts=360, delay=30, backoff=1.0)
+# An upper safety bound only; ctx.wait_deadline enforces the per-run timeout.
+@retry(attempts=1080, delay=WAIT_POLL_INTERVAL_SECONDS, backoff=1.0)
 @task
 def wait_guidellm_benchmark_task(args, ctx):
     """Wait for the GuideLLM benchmark job to complete"""
@@ -209,6 +218,10 @@ def wait_guidellm_benchmark_task(args, ctx):
     active = active_result.stdout.strip() == "1" if active_result.returncode == 0 else False
 
     if active:
+        if time.monotonic() >= ctx.wait_deadline:
+            raise TimeoutError(
+                f"GuideLLM benchmark {ctx.benchmark_name} did not complete within {args.timeout}s"
+            )
         logger.info("Job %s is still active, retrying...", ctx.benchmark_name)
         return False  # Retry immediately
 
@@ -246,15 +259,8 @@ def wait_guidellm_benchmark_task(args, ctx):
     if succeeded:
         return f"GuideLLM benchmark {ctx.benchmark_name} completed"
     if failed:
-        # Capture state and generate failure file before raising exception
-        capture_guidellm_state(
-            artifact_dir=args.artifact_dir,
-            namespace=ctx.target_namespace,
-            benchmark_name=ctx.benchmark_name,
-        )
-
         # Write failure file
-        failure_file = args.artifact_dir / "FAILURE"
+        failure_file = args.artifact_dir / "FAILURE.txt"
         failure_message = f"""GuideLLM benchmark job '{ctx.benchmark_name}' failed.
 
 Check the job logs for detailed error information:
@@ -268,9 +274,14 @@ Check the job logs for detailed error information:
         )
 
         raise RuntimeError(f"GuideLLM job {ctx.benchmark_name} failed")
+    if time.monotonic() >= ctx.wait_deadline:
+        raise TimeoutError(
+            f"GuideLLM benchmark {ctx.benchmark_name} did not complete within {args.timeout}s"
+        )
     return False  # Retry
 
 
+@always
 @task
 def capture_guidellm_state_task(args, ctx):
     """Capture GuideLLM benchmark job state and logs"""

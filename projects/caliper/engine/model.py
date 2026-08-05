@@ -13,7 +13,7 @@ class TestBaseNode:
     """Directory containing __test_labels__.yaml or MatrixBenchmarking settings.yaml."""
 
     directory: Path
-    labels: dict[str, Any]
+    test_labels: dict[str, Any]
     artifact_paths: list[Path] = field(default_factory=list)
     test_path: Path = field(default_factory=lambda: Path(""))  # Path relative to base_dir
 

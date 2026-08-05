@@ -15,7 +15,7 @@ from projects.caliper.engine.model import (
 
 def _labels_from_node(node: TestBaseNode) -> dict[str, Any]:
     """Extract labels from a test node."""
-    raw = node.labels
+    raw = node.test_labels
     inner = raw.get("labels")
     if isinstance(inner, dict):
         return dict(inner)

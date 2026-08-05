@@ -126,7 +126,7 @@ def run_benchmark(args, dry_run=False):
     except Exception:
         msg = "MatrixBenchmark benchmark failed."
         logging.error(msg)
-        with open(env.ARTIFACT_DIR / "FAILURE", "w") as f:
+        with open(env.ARTIFACT_DIR / "FAILURE.txt", "w") as f:
             print(msg, file=f)
 
         return True  # failed

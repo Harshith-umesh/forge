@@ -20,9 +20,9 @@ class StubPlugin(PostProcessingPlugin):
         warnings: list[str] = []
         for node in nodes:
             labels = (
-                node.labels.get("labels")
-                if isinstance(node.labels.get("labels"), dict)
-                else node.labels
+                node.test_labels.get("labels")
+                if isinstance(node.test_labels.get("labels"), dict)
+                else node.test_labels
             )
             raw = {}
             for p in node.artifact_paths:

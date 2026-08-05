@@ -34,7 +34,7 @@ def model_to_jsonable(model: UnifiedRunModel) -> dict[str, Any]:
     def node_to_dict(n: Any) -> dict[str, Any]:
         return {
             "directory": str(n.directory),
-            "labels": n.labels,
+            "labels": n.test_labels,
             "artifact_paths": [str(p) for p in n.artifact_paths],
             "test_path": str(n.test_path),
         }
@@ -67,7 +67,7 @@ def model_from_jsonable(data: dict[str, Any]) -> UnifiedRunModel:
     nodes = [
         TestBaseNode(
             directory=Path(n["directory"]),
-            labels=n["labels"],
+            test_labels=n["labels"],
             artifact_paths=[Path(p) for p in n.get("artifact_paths", [])],
             test_path=Path(n.get("test_path", str(Path(n["directory"]).relative_to(base_dir)))),
         )

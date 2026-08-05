@@ -18,6 +18,15 @@ class CaliperOrchestrationParseSection(BaseModel):
     no_cache: bool = False
 
 
+class CaliperOrchestrationFilteringSection(BaseModel):
+    """``caliper.postprocess.filtering`` — label-based test directory filtering applied across all steps."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    include_labels: list[str] | None = Field(default=None)
+    exclude_labels: list[str] | None = Field(default=None)
+
+
 class CaliperOrchestrationVisualizeSection(BaseModel):
     """``caliper.postprocess.visualize`` — same semantics as ``caliper visualize``."""
 
@@ -126,6 +135,10 @@ class CaliperOrchestrationAnalyzeSection(BaseModel):
     output: str | None = Field(
         default="kpi_analyze.json",
         description="Written under post-processing artifact dir when relative.",
+    )
+    fail_on_regression: bool = Field(
+        default=False,
+        description="Whether to fail (non-zero exit code) when KPI regressions are detected (default: false).",
     )
 
     @model_validator(mode="after")
@@ -281,6 +294,9 @@ class CaliperOrchestrationPostprocessConfig(BaseModel):
     postprocess_config: str | None = Field(
         default=None,
         description="Explicit path to caliper.yaml manifest.",
+    )
+    filtering: CaliperOrchestrationFilteringSection = Field(
+        default_factory=CaliperOrchestrationFilteringSection
     )
     parse: CaliperOrchestrationParseSection = Field(
         default_factory=CaliperOrchestrationParseSection

@@ -3,10 +3,6 @@
 llm_d Project PR Arguments Parser
 
 Parses llm_d-specific directives from PR trigger comments.
-
-Supported syntax::
-
-    /rhoai.rc-image quay.io/rhoai/rhoai-fbc-fragment@sha256:abc123
 """
 
 from __future__ import annotations

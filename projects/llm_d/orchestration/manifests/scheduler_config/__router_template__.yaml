@@ -2,6 +2,10 @@ scheduler:
   template:
     containers:
       - name: main
+        ports:
+          - name: zmq
+            containerPort: 5557
+            protocol: TCP
         env:
           - name: TOKENIZER_CACHE_DIR
             value: /tmp/tokenizer-cache

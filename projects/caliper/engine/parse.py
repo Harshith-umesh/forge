@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import time
 from pathlib import Path
-from typing import Any
 
 from projects.caliper.engine.cache import (
     cache_path_for_test_base,
@@ -34,7 +33,8 @@ def run_parse(
     use_cache: bool,
     force_report_partial: bool = True,
     show_parameter_matrix: bool = True,
-    label_filter: dict[str, Any] | None = None,
+    include_label_filter: list[dict[str, str]] | None = None,
+    exclude_label_filter: list[dict[str, str]] | None = None,
 ) -> UnifiedRunModel:
     """
     Run full parse or load valid cache.
@@ -44,7 +44,11 @@ def run_parse(
     base_dir = base_dir.resolve()
 
     # Discover test bases
-    nodes = discover_test_bases(base_dir, label_filter=label_filter)
+    nodes = discover_test_bases(
+        base_dir,
+        include_label_filter=include_label_filter,
+        exclude_label_filter=exclude_label_filter,
+    )
 
     # Always use per-test-base caching
     all_records = []

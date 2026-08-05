@@ -15,6 +15,8 @@ def run_ai_eval_export(
     plugin: object,
     output: Path,
     use_cache: bool,
+    include_label_filter: list[dict[str, str]] | None = None,
+    exclude_label_filter: list[dict[str, str]] | None = None,
 ) -> dict[str, object]:
     """Export AI evaluation payload with structured directories and copied artifacts."""
     import json  # noqa: PLC0415
@@ -24,6 +26,8 @@ def run_ai_eval_export(
         plugin_module=plugin_module,
         plugin=plugin,
         use_cache=use_cache,
+        include_label_filter=include_label_filter,
+        exclude_label_filter=exclude_label_filter,
     )
 
     # Build base payload from plugin

@@ -761,11 +761,12 @@ class CaliperPostprocessOrchestrator:
         if not self.config.parse.enabled:
             return
 
-        import tempfile
+        # Create automatic status file path
+        from projects.caliper.orchestration.caliper_invocation import (
+            _generate_automatic_status_file_path,
+        )
 
-        # Create status file for CLI output
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as status_f:
-            status_file = Path(status_f.name)
+        status_file = _generate_automatic_status_file_path(self.tree_root, "parse")
 
         try:
             # Build CLI command
@@ -786,20 +787,33 @@ class CaliperPostprocessOrchestrator:
             )
 
             if result.returncode == 0 and status_data and status_data.get("success", False):
-                self.parse_failed = False
-                self._add_step(
-                    "parse",
-                    {
-                        "status": "success",
-                        "plugin_module": status_data.get("plugin_module", "unknown"),
-                        "record_count": status_data.get("parsed_records", 0),
-                        "test_directories": status_data.get("test_directories", []),
-                        "test_directories_count": status_data.get("test_directories_count", 0),
-                        "parse_cache_ref": status_data.get("cache_ref"),
-                        "completed_at": time.time(),
-                    },
-                    log_file,
-                )
+                record_count = status_data.get("parsed_records", 0)
+
+                # Build common step data
+                step_data = {
+                    "plugin_module": status_data.get("plugin_module", "unknown"),
+                    "record_count": record_count,
+                    "test_directories": status_data.get("test_directories", []),
+                    "test_directories_count": status_data.get("test_directories_count", 0),
+                    "parse_cache_ref": status_data.get("cache_ref"),
+                    "completed_at": time.time(),
+                }
+
+                # Check if any records were parsed - fail if none found
+                if record_count == 0:
+                    self.parse_failed = True
+                    logger.error("Caliper parse completed but found no records to process")
+                    step_data.update(
+                        {
+                            "status": "failed",
+                            "message": "No records found - parsing completed successfully but no test data was extracted",
+                        }
+                    )
+                else:
+                    self.parse_failed = False
+                    step_data["status"] = "success"
+
+                self._add_step("parse", step_data, log_file)
             else:
                 self.parse_failed = True
                 error_msg = (status_data or {}).get(
@@ -843,11 +857,12 @@ class CaliperPostprocessOrchestrator:
         if not self.config.visualize.enabled:
             return
 
-        import tempfile
+        # Create automatic status file path
+        from projects.caliper.orchestration.caliper_invocation import (
+            _generate_automatic_status_file_path,
+        )
 
-        # Create status file for CLI output
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as status_f:
-            status_file = Path(status_f.name)
+        status_file = _generate_automatic_status_file_path(self.tree_root, "visualize")
 
         try:
             # Resolve visualize output directory

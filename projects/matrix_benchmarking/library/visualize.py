@@ -328,7 +328,7 @@ def log_has_errors(log_file):
             if not has_errors:
                 continue
 
-            with open(env.ARTIFACT_DIR / "FAILURE", "a") as fail_f:
+            with open(env.ARTIFACT_DIR / "FAILURE.txt", "a") as fail_f:
                 print(line, end="", file=fail_f)
                 logging.error(line.strip())
 
@@ -389,7 +389,7 @@ def generate_visualization(
 
     if fatal_errors:
         msg = f"A fatal error happened during the results parsing, aborting the visualization ({', '.join(fatal_errors)})."
-        with open(env.ARTIFACT_DIR / "FAILURE", "w") as f:
+        with open(env.ARTIFACT_DIR / "FAILURE.txt", "w") as f:
             print(msg, file=f)
         logging.error(msg)
         raise RuntimeError(msg)
@@ -543,7 +543,7 @@ def generate_visualization(
         # if None, ignore
 
         logging.error(msg)
-        with open(env.ARTIFACT_DIR / "FAILURE", "w") as f:
+        with open(env.ARTIFACT_DIR / "FAILURE.txt", "w") as f:
             print(msg, file=f)
         raise RuntimeError(msg)
 

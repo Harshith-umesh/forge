@@ -40,8 +40,8 @@ def setup_directories(args, ctx):
 
     shell.mkdir("src")
     shell.mkdir("artifacts")
-    ctx.display_name = args.display_name or args.catalog_source_name
-    return f"Prepared directories for {ctx.display_name}"
+
+    return "Prepared src and artifacts directories"
 
 
 @task

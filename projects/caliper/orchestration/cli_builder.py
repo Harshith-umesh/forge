@@ -56,6 +56,15 @@ def build_parse_command(
     # Enable detailed parameter matrix output
     cmd.append("--show-matrix")
 
+    # Include/exclude labels
+    if config.filtering.include_labels:
+        for label in config.filtering.include_labels:
+            cmd.extend(["--include-label", label])
+
+    if config.filtering.exclude_labels:
+        for label in config.filtering.exclude_labels:
+            cmd.extend(["--exclude-label", label])
+
     # Status file for orchestration
     cmd.extend(["--status-file", str(status_file)])
 
@@ -94,6 +103,15 @@ def build_kpi_generate_command(
 
     # Generate-specific options
     cmd.extend(["--output", str(output_file)])
+
+    # Include/exclude labels (parent-level filtering)
+    if config.filtering.include_labels:
+        for label in config.filtering.include_labels:
+            cmd.extend(["--include-label", label])
+
+    if config.filtering.exclude_labels:
+        for label in config.filtering.exclude_labels:
+            cmd.extend(["--exclude-label", label])
 
     # Status file for orchestration
     cmd.extend(["--status-file", str(status_file)])
@@ -154,11 +172,25 @@ def build_visualize_command(
                 viz_path = env.FORGE_HOME / viz_path
             cmd.extend(["--visualize-config", str(viz_path.resolve())])
 
-    # Include/exclude labels
-    for label in config.visualize.include_labels:
+    # Include/exclude labels (parent-level filtering + visualize-specific)
+    all_include_labels = []
+    all_exclude_labels = []
+
+    # Add parent-level filtering
+    if config.filtering.include_labels:
+        all_include_labels.extend(config.filtering.include_labels)
+    if config.filtering.exclude_labels:
+        all_exclude_labels.extend(config.filtering.exclude_labels)
+
+    # Add visualize-specific filtering
+    all_include_labels.extend(config.visualize.include_labels)
+    all_exclude_labels.extend(config.visualize.exclude_labels)
+
+    # Apply all filters
+    for label in all_include_labels:
         cmd.extend(["--include-label", label])
 
-    for label in config.visualize.exclude_labels:
+    for label in all_exclude_labels:
         cmd.extend(["--exclude-label", label])
 
     if not use_cache:
@@ -251,6 +283,15 @@ def build_ai_eval_export_command(
 
     if not use_cache:
         cmd.append("--no-cache")
+
+    # Include/exclude labels (parent-level filtering)
+    if config.filtering.include_labels:
+        for label in config.filtering.include_labels:
+            cmd.extend(["--include-label", label])
+
+    if config.filtering.exclude_labels:
+        for label in config.filtering.exclude_labels:
+            cmd.extend(["--exclude-label", label])
 
     # Status file for orchestration
     cmd.extend(["--status-file", str(status_file)])
