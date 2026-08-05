@@ -19,17 +19,6 @@ from projects.caliper.engine.kpi import (
 from projects.caliper.engine.model import UnifiedRunModel
 
 
-@HigherBetter()
-@Format("{:.1f}")
-@KPIMetadata(help="Request concurrency level", unit="connections")
-def guidellm_request_concurrency(unified_record) -> float:
-    """Request Concurrency KPI."""
-    value = unified_record.metrics.get("request_concurrency")
-    if value is None:
-        raise ValueError("request_concurrency metric not found")
-    return float(value)
-
-
 # Token Count Statistics KPIs - static values
 @LowerBetter()
 @Format("{:.1f}")
