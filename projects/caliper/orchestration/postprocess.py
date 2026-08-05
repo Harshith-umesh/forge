@@ -1075,7 +1075,7 @@ class CaliperPostprocessOrchestrator:
             return
 
         try:
-            from projects.caliper.engine.kpi.metrics_from_kpis import generate_metrics_from_kpis
+            from projects.caliper.engine.kpi.kpis_to_mlflow import generate_metrics_from_kpis
 
             result = generate_metrics_from_kpis(kpis_json_path, self.tree_root)
             status = result.get("status", "unknown")
