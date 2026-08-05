@@ -119,10 +119,13 @@ def transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
         kpi_record: dict[str, Any] = {
             "id": kpi_id,
             "value": final_value,
-            "unit": kpi.get("unit"),
             "higher_is_better": kpi_labels.get("higher_is_better", True),
             "is_2d": is_2d,
         }
+
+        # Only add unit field for non-2D KPIs
+        if not is_2d:
+            kpi_record["unit"] = kpi.get("unit")
         if kpi_specific_labels:
             kpi_record["labels"] = kpi_specific_labels
 
@@ -146,7 +149,8 @@ def transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
                     {
                         "x_unit": getattr(func, "_kpi_x_unit", ""),
                         "x_help": getattr(func, "_kpi_x_help", ""),
-                        "y_unit": getattr(func, "_kpi_y_unit", None) or kpi_record["unit"],
+                        "y_unit": getattr(func, "_kpi_y_unit", None)
+                        or getattr(func, "_kpi_unit", ""),
                         "y_help": getattr(func, "_kpi_y_help", None)
                         or getattr(func, "_kpi_help", ""),
                     }
@@ -163,6 +167,17 @@ def transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
                     "help": f"KPI: {kpi_id}",
                 }
             )
+
+            # Add 2D-specific fallback metadata if this is a 2D KPI
+            if is_2d:
+                kpi_record.update(
+                    {
+                        "x_unit": kpi.get("x_unit", ""),
+                        "x_help": kpi.get("x_help", ""),
+                        "y_unit": kpi.get("y_unit", kpi.get("unit", "")),
+                        "y_help": kpi.get("y_help", ""),
+                    }
+                )
 
         test_data["kpis"].append(kpi_record)
 
