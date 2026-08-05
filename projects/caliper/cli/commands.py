@@ -575,6 +575,8 @@ def kpi_generate(
                 use_cache=True,
                 cache_path=None,
                 format_type=format_type,
+                include_label_filter=include_filter,
+                exclude_label_filter=exclude_filter,
             )
             status_data = {
                 "success": True,

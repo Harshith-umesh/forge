@@ -401,6 +401,7 @@ def _run_workload_benchmark(
     workload = runtime_config.get_workload(workload_key)
     rates = workload.get("rates", [1])
     max_seconds = workload.get("max_seconds", 180)
+    rampup = workload.get("rampup")
 
     from projects.core.library import config
     from projects.guidellm.toolbox.run_guidellm_benchmark.main import (
@@ -451,6 +452,7 @@ def _run_workload_benchmark(
                 data=workload["data"],
                 rates=rates,
                 max_seconds=max_seconds,
+                rampup=rampup,
             )
 
             run_guidellm_benchmark(

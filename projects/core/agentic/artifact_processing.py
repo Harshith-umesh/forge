@@ -144,7 +144,7 @@ def find_failure_files(base_artifact_dir: Path) -> list[Path]:
     """
     failure_files = []
 
-    for failure_file in base_artifact_dir.rglob("FAILURE"):
+    for failure_file in base_artifact_dir.rglob("FAILURE.txt"):
         if not failure_file.exists():
             continue
         if failure_file.parent == base_artifact_dir:
@@ -153,7 +153,7 @@ def find_failure_files(base_artifact_dir: Path) -> list[Path]:
         logger.debug(f"Found FAILURE file: {failure_file}")
 
     if not failure_files:
-        base_failure = base_artifact_dir / "FAILURE"
+        base_failure = base_artifact_dir / "FAILURE.txt"
         if base_failure.exists():
             failure_files.append(base_failure)
 

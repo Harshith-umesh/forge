@@ -214,7 +214,7 @@ def _get_notification_content(artifact_dir: pathlib.Path, get_link, get_bold) ->
         Formatted notification content string
     """
     notifications_dir = ci_lib.get_ci_metadata_dir() / "notifications"
-    failures_file = artifact_dir / "FAILURES"
+    failures_file = artifact_dir / "FAILURES.txt"
 
     # Guard: Check if notifications directory exists
     if not notifications_dir.exists():
@@ -279,7 +279,7 @@ def _get_notification_content(artifact_dir: pathlib.Path, get_link, get_bold) ->
     # Add link to FAILURES file if it exists (but don't include content)
     if failures_file.exists():
         content += f"""
-• {get_link("Raw failure details", "FAILURES", is_raw_file=True)}
+• {get_link("Raw failure details", "FAILURES.txt", is_raw_file=True)}
 """
 
     return content
@@ -318,7 +318,7 @@ def _get_fallback_failure_content(failures_file: pathlib.Path, get_link, get_bol
             head = DEFAULT_HEAD
 
         return f"""
-• {get_link("Failure indicator", "FAILURES", is_raw_file=True)}:
+• {get_link("Failure indicator", "FAILURES.txt", is_raw_file=True)}:
 ```
 {"".join(lines[:head])}
 {"[...]" if len(lines) > head else ""}

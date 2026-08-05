@@ -260,7 +260,7 @@ def wait_guidellm_benchmark_task(args, ctx):
         return f"GuideLLM benchmark {ctx.benchmark_name} completed"
     if failed:
         # Write failure file
-        failure_file = args.artifact_dir / "FAILURE"
+        failure_file = args.artifact_dir / "FAILURE.txt"
         failure_message = f"""GuideLLM benchmark job '{ctx.benchmark_name}' failed.
 
 Check the job logs for detailed error information:
