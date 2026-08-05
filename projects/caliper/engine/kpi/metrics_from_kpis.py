@@ -44,6 +44,27 @@ def _is_scalar(value: Any) -> bool:
     return isinstance(value, int | float) and not isinstance(value, bool)
 
 
+def _extract_2d_points(value: Any) -> list[dict[str, float]] | None:
+    """Extract sorted (x, y) data points from a 2D KPI value.
+
+    Returns a list of ``{"x": ..., "y": ...}`` dicts sorted by x,
+    or ``None`` if the value is not a valid 2D structure.
+    """
+    if not isinstance(value, dict):
+        return None
+    data_points = value.get("data_points")
+    if not isinstance(data_points, list) or not data_points:
+        return None
+    points = []
+    for pt in data_points:
+        if isinstance(pt, dict) and _is_scalar(pt.get("x")) and _is_scalar(pt.get("y")):
+            points.append({"x": float(pt["x"]), "y": float(pt["y"])})
+    if not points:
+        return None
+    points.sort(key=lambda p: p["x"])
+    return points
+
+
 def _write_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
@@ -108,11 +129,18 @@ def generate_metrics_from_kpis(
             continue
 
         kpis = test_entry.get("kpis", [])
-        metrics: dict[str, float] = {}
+        metrics: dict[str, Any] = {}
         for kpi in kpis:
             kpi_id = kpi.get("id", "")
+            if not kpi_id:
+                continue
             value = kpi.get("value")
-            if kpi_id and _is_scalar(value):
+            is_2d = kpi.get("is_2d", False)
+            if is_2d:
+                points = _extract_2d_points(value)
+                if points:
+                    metrics[kpi_id] = points
+            elif _is_scalar(value):
                 metrics[kpi_id] = value
 
         if metrics:

@@ -461,6 +461,31 @@ def _load_json_file(path: Path) -> dict[str, Any]:
         return {}
 
 
+def _log_2d_metrics(metrics_2d: dict[str, Any]) -> None:
+    """Log 2D metrics as stepped MLflow metrics.
+
+    Each key maps to a list of ``{"x": ..., "y": ...}`` dicts (already
+    sorted by x in ``metrics_from_kpis``).  Each data point is logged
+    with ``step=int(x)`` so MLflow renders the curve.
+    """
+    import mlflow
+
+    for metric_name, data_points in metrics_2d.items():
+        if not isinstance(data_points, list):
+            continue
+        for pt in data_points:
+            if isinstance(pt, dict):
+                x = pt.get("x")
+                y = pt.get("y")
+                if (
+                    isinstance(x, int | float)
+                    and not isinstance(x, bool)
+                    and isinstance(y, int | float)
+                    and not isinstance(y, bool)
+                ):
+                    mlflow.log_metric(str(metric_name), float(y), step=int(x))
+
+
 def _log_metrics_and_params_from_tree(artifact_root: Path) -> None:
     """Find metrics.json/parameters.json under __test_labels__.yaml-marked dirs and log them."""
     import mlflow
@@ -473,7 +498,9 @@ def _log_metrics_and_params_from_tree(artifact_root: Path) -> None:
         mf = run_dir / "metrics.json"
         if mf.is_file():
             for k, v in _load_json_file(mf).items():
-                if isinstance(v, int | float) and not isinstance(v, bool):
+                if isinstance(v, list):
+                    _log_2d_metrics({k: v})
+                elif isinstance(v, int | float) and not isinstance(v, bool):
                     mlflow.log_metric(str(k), float(v))
 
         pf = run_dir / "parameters.json"
@@ -593,7 +620,9 @@ def log_multi_run_artifacts(
                     mf = run_dir / metrics_file
                     if mf.is_file():
                         for k, v in _load_json_file(mf).items():
-                            if isinstance(v, int | float) and not isinstance(v, bool):
+                            if isinstance(v, list):
+                                _log_2d_metrics({k: v})
+                            elif isinstance(v, int | float) and not isinstance(v, bool):
                                 mlflow.log_metric(str(k), float(v))
 
                     pf = run_dir / parameters_file
