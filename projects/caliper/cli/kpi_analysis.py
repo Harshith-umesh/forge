@@ -34,13 +34,13 @@ import click
 def analyze_cli(current: Path, historical_dir: Path, output: Path, plugin_module: str) -> None:
     """CLI entrypoint for KPI analysis."""
     from projects.caliper.engine.kpi.analyze import (
-        analyze_kpis_with_format_conversion,
+        analyze_kpis,
         status_dict_to_exit_code,
     )
 
     try:
         # Call the core analysis function from engine (returns status dict)
-        result = analyze_kpis_with_format_conversion(
+        result = analyze_kpis(
             current_kpis_file=current,
             historical_kpis_dir=historical_dir,
             output_file=output,

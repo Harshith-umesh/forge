@@ -13,7 +13,7 @@ class TestBaseNode:
     """Directory containing __test_labels__.yaml or MatrixBenchmarking settings.yaml."""
 
     directory: Path
-    labels: dict[str, Any]
+    test_labels: dict[str, Any]
     artifact_paths: list[Path] = field(default_factory=list)
     test_path: Path = field(default_factory=lambda: Path(""))  # Path relative to base_dir
 
@@ -95,10 +95,6 @@ class PostProcessingPlugin(ABC):
         visualize_config: dict[str, Any] | None,
     ) -> list[str]:
         """Write plots/HTML; return list of created file paths."""
-        return []
-
-    def kpi_catalog(self) -> list[dict[str, Any]]:
-        """KPI definitions (id, name, unit, higher_is_better)."""
         return []
 
     def compute_kpis(self, model: UnifiedRunModel) -> list[dict[str, Any]]:

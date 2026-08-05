@@ -99,7 +99,7 @@ def main(
 
             logging.info(f"The regression analyze finished with code {failures}.")
         except Exception as e:
-            with open(store_dir / "FAILURE", "a") as f:
+            with open(store_dir / "FAILURE.txt", "a") as f:
                 print(str(e), file=f)
                 import traceback
 

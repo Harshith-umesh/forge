@@ -21,7 +21,7 @@ from .models import GuideLLMBenchmark, GuideLLMConfiguration
 
 def _labels_from_node(node: TestBaseNode) -> dict[str, Any]:
     """Extract labels from a test node."""
-    raw = node.labels
+    raw = node.test_labels
     inner = raw.get("labels")
     if isinstance(inner, dict):
         return dict(inner)
@@ -32,7 +32,7 @@ def _labels_from_node(node: TestBaseNode) -> dict[str, Any]:
 
 def _kpi_labels_from_node(node: TestBaseNode) -> dict[str, Any]:
     """Extract kpi_labels from a test node."""
-    raw = node.labels
+    raw = node.test_labels
     kpi_labels = raw.get("kpi_labels")
     if isinstance(kpi_labels, dict):
         return dict(kpi_labels)
@@ -257,7 +257,7 @@ class GuideLLMParser:
         strategy = strategy_info.get("type_", "unknown")
 
         # Extract concurrency (streams) with multiple fallback paths
-        concurrency = self._extract_concurrency(strategy_info, scheduler)
+        intended_concurrency = self._extract_concurrency(strategy_info, scheduler)
 
         # Extract timing info
         state = scheduler.get("state", {})
@@ -343,7 +343,8 @@ class GuideLLMParser:
             cooldown_time=0.0,  # Not available in JSON format
             # Request metrics
             request_rate=request_rate,
-            request_concurrency=concurrency,
+            request_concurrency=intended_concurrency,  # For now, effective = intended
+            intended_concurrency=int(intended_concurrency),
             completed_requests=completed_requests,
             failed_requests=0,  # Could extract from unsuccessful metrics if needed
             # Token metrics per request
@@ -485,7 +486,8 @@ class GuideLLMParser:
             "request_latency_p95": [],
             "completed_requests": [],
             "failed_requests": [],
-            "request_concurrency": [],  # Add concurrency to curves
+            "request_concurrency": [],  # Effective concurrency to curves
+            "intended_concurrency": [],  # Intended concurrency to curves
         }
 
         for benchmark in sorted_benchmarks:
@@ -508,7 +510,10 @@ class GuideLLMParser:
             curves["failed_requests"].append(benchmark.failed_requests)
             curves["request_concurrency"].append(
                 benchmark.request_concurrency
-            )  # Add concurrency per rate point
+            )  # Add effective concurrency per rate point
+            curves["intended_concurrency"].append(
+                benchmark.intended_concurrency
+            )  # Add intended concurrency per rate point
 
         # Add request_rate and performance curves to metrics
         metrics["request_rate"] = request_rates

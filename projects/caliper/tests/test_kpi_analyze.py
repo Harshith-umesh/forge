@@ -201,7 +201,7 @@ class TestEndToEnd:
             current_kpi_file=current_dir / "kpis.json",
             historical_data_dir=historical_dir,
             output_file=output_file,
-            plugin_module="nonexistent_plugin",
+            plugin_module="projects.caliper.tests.stub_plugin",
         )
 
         assert test_status["exit_code"] == 0
@@ -251,7 +251,7 @@ class TestEndToEnd:
             current_kpi_file=current_dir / "kpis.json",
             historical_data_dir=historical_dir,
             output_file=output_file,
-            plugin_module="nonexistent_plugin",
+            plugin_module="projects.caliper.tests.stub_plugin",
         )
 
         assert test_status["exit_code"] == 3
@@ -286,7 +286,7 @@ class TestEndToEnd:
             current_kpi_file=current_dir / "kpis.json",
             historical_data_dir=historical_dir,
             output_file=output_file,
-            plugin_module="nonexistent_plugin",
+            plugin_module="projects.caliper.tests.stub_plugin",
         )
 
         assert test_status["exit_code"] == 2
@@ -331,7 +331,7 @@ class TestEndToEnd:
             current_kpi_file=current_dir / "kpis.json",
             historical_data_dir=historical_dir,
             output_file=output_file,
-            plugin_module="nonexistent_plugin",
+            plugin_module="projects.caliper.tests.stub_plugin",
         )
 
         assert test_status["exit_code"] == 3
@@ -380,7 +380,7 @@ class TestEndToEnd:
             current_kpi_file=current_dir / "kpis.json",
             historical_data_dir=historical_dir,
             output_file=output_file,
-            plugin_module="nonexistent_plugin",
+            plugin_module="projects.caliper.tests.stub_plugin",
         )
 
         assert test_status["exit_code"] == 0
@@ -430,7 +430,7 @@ class TestEndToEnd:
             current_kpi_file=current_dir / "kpis.json",
             historical_data_dir=historical_dir,
             output_file=output_file,
-            plugin_module="nonexistent_plugin",
+            plugin_module="projects.caliper.tests.stub_plugin",
         )
 
         # Without plugin config, default AnalysisConfig has no comparison_keys,

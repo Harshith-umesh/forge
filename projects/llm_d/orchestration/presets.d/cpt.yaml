@@ -11,11 +11,24 @@ cpt-reference-flavors:
 
 cpt:
   caliper.export.backend.mlflow.config.experiment: cpt-llm-d
+  caliper.postprocess.s3.instance: forge-cpt
+  caliper.postprocess.s3.directory: llm-d/default
+
+cpt-xks:
+  extends:
+  - cpt
+  cpt.kpi.labels.test_harness: xks
+  caliper.postprocess.s3.directory: llm-d/xks
+
+cpt-rhoai-release:
+  extends:
+  - cpt
   cpt.kpi.labels.test_harness: rhoai-release
+  caliper.postprocess.s3.directory: llm-d/release
 
 cpt-release-testing-rhoai:
   extends:
-  - cpt
+  - cpt-rhoai-release
   runtime.deployment_profile:
   - release-distributed-default
   - release-precise-prefix-cache
@@ -26,16 +39,15 @@ cpt-release-testing-rhoai:
   - heavy-heterogeneous
   - multi-turn
   model_cache.pvc.size: 300Gi
-  platform.operators.rhods-operator.channel: beta
 
 cpt-release-testing-gpt-oss-120b:
   extends:
-  - gpt-oss
   - cpt-release-testing-rhoai
+  - gpt-oss
   runtime.selected_preset: cpt-release-testing-gpt-oss-120b
 
 cpt-release-testing-llama-33-70b:
   extends:
-  - llama3-70b
   - cpt-release-testing-rhoai
+  - llama3-70b
   runtime.selected_preset: cpt-release-testing-llama-33-70b

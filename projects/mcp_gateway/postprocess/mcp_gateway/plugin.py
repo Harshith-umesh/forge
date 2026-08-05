@@ -27,9 +27,6 @@ class MCPGatewayPlugin(PostProcessingPlugin):
     def parse(self, nodes: list[TestBaseNode]) -> ParseResult:
         return self.parser.parse(nodes)
 
-    def kpi_catalog(self) -> list[dict[str, Any]]:
-        return self.kpi_handler.get_catalog()
-
     def compute_kpis(self, model: UnifiedRunModel) -> list[dict[str, Any]]:
         return self.kpi_handler.compute_kpis(model)
 

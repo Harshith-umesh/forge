@@ -124,7 +124,7 @@ def _display_error_summary(e: Exception) -> None:
 
 def _write_error_summary_to_file(summary_lines: list) -> None:
     """Write the error summary to FAILURE file."""
-    failures_file = env.ARTIFACT_DIR / "FAILURE"
+    failures_file = env.ARTIFACT_DIR / "FAILURE.txt"
 
     try:
         content = "\n".join(summary_lines)
