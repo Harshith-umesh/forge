@@ -99,15 +99,20 @@ def list_csv_files(output_dir: Path, postprocess_config=None) -> list[Path]:
     csv_files = []
 
     if postprocess_config and postprocess_config.kpi.csv.enabled:
-        # Use configured CSV file path
-        csv_file_path = output_dir / postprocess_config.kpi.csv.output
-        if csv_file_path.exists():
-            csv_files.append(csv_file_path)
-            logger.info(
-                f"Found configured CSV file: {csv_file_path.name} ({csv_file_path.stat().st_size} bytes)"
-            )
+        # Validate configured CSV output is non-empty
+        csv_output = postprocess_config.kpi.csv.output
+        if not csv_output or not csv_output.strip():
+            logger.warning("CSV producer enabled but output path is empty, skipping")
         else:
-            logger.warning(f"Configured CSV file not found: {csv_file_path}")
+            # Use configured CSV file path
+            csv_file_path = output_dir / csv_output
+            if csv_file_path.exists():
+                csv_files.append(csv_file_path)
+                logger.info(
+                    f"Found configured CSV file: {csv_file_path.name} ({csv_file_path.stat().st_size} bytes)"
+                )
+            else:
+                logger.warning(f"Configured CSV file not found: {csv_file_path}")
     else:
         # Fallback to glob pattern for backward compatibility
         csv_files = list(output_dir.glob("*.csv"))
@@ -131,15 +136,20 @@ def list_kpi_json_files(output_dir: Path, postprocess_config=None) -> list[Path]
     kpi_json_files = []
 
     if postprocess_config and postprocess_config.kpi.artifacts_to_kpis.enabled:
-        # Use configured KPI JSON file path
-        kpi_file_path = output_dir / postprocess_config.kpi.artifacts_to_kpis.output
-        if kpi_file_path.exists():
-            kpi_json_files.append(kpi_file_path)
-            logger.info(
-                f"Found configured KPI JSON file: {kpi_file_path.name} ({kpi_file_path.stat().st_size} bytes)"
-            )
+        # Validate configured KPI JSON output is non-empty
+        kpi_output = postprocess_config.kpi.artifacts_to_kpis.output
+        if not kpi_output or not kpi_output.strip():
+            logger.warning("KPI JSON producer enabled but output path is empty, skipping")
         else:
-            logger.warning(f"Configured KPI JSON file not found: {kpi_file_path}")
+            # Use configured KPI JSON file path
+            kpi_file_path = output_dir / kpi_output
+            if kpi_file_path.exists():
+                kpi_json_files.append(kpi_file_path)
+                logger.info(
+                    f"Found configured KPI JSON file: {kpi_file_path.name} ({kpi_file_path.stat().st_size} bytes)"
+                )
+            else:
+                logger.warning(f"Configured KPI JSON file not found: {kpi_file_path}")
     else:
         # Fallback to glob pattern for backward compatibility
         kpi_json_files = list(output_dir.glob("kpis.json"))
@@ -163,15 +173,20 @@ def list_analysis_files(output_dir: Path, postprocess_config=None) -> list[Path]
     files = []
 
     if postprocess_config and postprocess_config.analyze.enabled:
-        # Use configured analysis file path
-        analysis_file_path = output_dir / postprocess_config.analyze.output
-        if analysis_file_path.exists():
-            files.append(analysis_file_path)
-            logger.info(
-                f"Found configured analysis file: {analysis_file_path.name} ({analysis_file_path.stat().st_size} bytes)"
-            )
+        # Validate configured analysis output is non-empty
+        analysis_output = postprocess_config.analyze.output
+        if not analysis_output or not analysis_output.strip():
+            logger.warning("Analysis producer enabled but output path is empty, skipping")
         else:
-            logger.warning(f"Configured analysis file not found: {analysis_file_path}")
+            # Use configured analysis file path
+            analysis_file_path = output_dir / analysis_output
+            if analysis_file_path.exists():
+                files.append(analysis_file_path)
+                logger.info(
+                    f"Found configured analysis file: {analysis_file_path.name} ({analysis_file_path.stat().st_size} bytes)"
+                )
+            else:
+                logger.warning(f"Configured analysis file not found: {analysis_file_path}")
     else:
         # Fallback to glob patterns for backward compatibility
         analysis_patterns = ["kpi_analyze.json", "kpi_analysis.json", "*analyze*.json"]
@@ -739,19 +754,23 @@ def run_s3_export(
         upload_plan = []
 
         for file_path in upload_files:
-            # Determine S3 key based on file type
+            # Determine S3 key and type based on file membership in discovered file lists
             s3_key = None
+            file_type = None
 
             if s3_config.include_ai_data and ai_data_dir and ai_data_dir in file_path.parents:
                 relative_path = file_path.relative_to(ai_data_dir)
                 s3_key = f"{export_s3_prefix}ai_data/{relative_path}"
-            elif s3_config.include_csv and file_path.suffix == ".csv":
+                file_type = "ai_data"
+            elif file_path in csv_files:
                 s3_key = f"{export_s3_prefix}{file_path.name}"
-            elif s3_config.include_kpis_json and file_path.name == "kpis.json":
+                file_type = "csv"
+            elif file_path in kpi_json_files:
                 s3_key = f"{export_s3_prefix}{file_path.name}"
-            elif file_path.name.endswith("analyze.json") or "analyze" in file_path.name:
-                # Include analysis files (e.g., kpi_analyze.json)
+                file_type = "kpis_json"
+            elif file_path in analysis_files:
                 s3_key = f"{export_s3_prefix}{file_path.name}"
+                file_type = "analysis"
 
             if s3_key:
                 file_size = file_path.stat().st_size
@@ -766,6 +785,7 @@ def run_s3_export(
                     {
                         "local_path": relative_local_path,
                         "s3_key": s3_key,
+                        "file_type": file_type,
                     }
                 )
                 logger.info(f"  - {file_path.name} → s3://{bucket}/{s3_key} ({file_size} bytes)")

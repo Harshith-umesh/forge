@@ -88,10 +88,10 @@ def _load_analysis_config(plugin_module: str) -> AnalysisConfig:
         )
 
     if isinstance(raw, AnalysisConfig):
-        return raw
-    if isinstance(raw, dict):
+        config = raw
+    elif isinstance(raw, dict):
         try:
-            return AnalysisConfig(
+            config = AnalysisConfig(
                 **{k: v for k, v in raw.items() if k in AnalysisConfig.__dataclass_fields__}
             )
         except Exception as exc:
@@ -103,6 +103,45 @@ def _load_analysis_config(plugin_module: str) -> AnalysisConfig:
         raise ValueError(
             f"Plugin module '{plugin_module}' analysis config has unsupported type '{type(raw).__name__}'. "
             f"Must be a dict or AnalysisConfig instance."
+        )
+
+    # Validate the configuration fields
+    try:
+        _validate_analysis_config(config, plugin_module)
+        return config
+    except ValueError:
+        raise
+
+
+def _validate_analysis_config(config: AnalysisConfig, plugin_module: str) -> None:
+    """Validate AnalysisConfig fields and raise ValueError for invalid values."""
+    # Validate list fields contain only strings
+    for field_name in ["comparison_keys", "ignored_keys", "sorting_keys"]:
+        field_value = getattr(config, field_name)
+        if not isinstance(field_value, list):
+            raise ValueError(
+                f"Plugin module '{plugin_module}' analysis config field '{field_name}' must be a list, "
+                f"got {type(field_value).__name__}: {field_value}"
+            )
+        for i, item in enumerate(field_value):
+            if not isinstance(item, str):
+                raise ValueError(
+                    f"Plugin module '{plugin_module}' analysis config field '{field_name}' "
+                    f"must contain only strings, got {type(item).__name__} at index {i}: {item}"
+                )
+
+    # Validate max_relative_regression is numeric
+    if not isinstance(config.max_relative_regression, (int, float)):
+        raise ValueError(
+            f"Plugin module '{plugin_module}' analysis config field 'max_relative_regression' "
+            f"must be numeric, got {type(config.max_relative_regression).__name__}: {config.max_relative_regression}"
+        )
+
+    # Validate min_baseline_points is at least 1
+    if not isinstance(config.min_baseline_points, int) or config.min_baseline_points < 1:
+        raise ValueError(
+            f"Plugin module '{plugin_module}' analysis config field 'min_baseline_points' "
+            f"must be an integer >= 1, got {type(config.min_baseline_points).__name__}: {config.min_baseline_points}"
         )
 
 
@@ -421,6 +460,7 @@ def run_kpi_analysis(
 
         regressions = report["overall"]["regression_count"]
         total = report["overall"]["total_tested"]
+
         logger.info(
             "Analysis complete: %d/%d KPIs tested, %d regressions",
             total,
