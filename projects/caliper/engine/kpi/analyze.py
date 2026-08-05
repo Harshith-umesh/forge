@@ -412,7 +412,7 @@ def run_kpi_analysis(
         # Load baseline KPIs
         baseline_kpi_data = find_baseline_kpis(historical_data_dir)
         if not baseline_kpi_data:
-            _write_warning_report(output_file, current_kpi_file, plugin_module)
+            _write_no_baseline_report(output_file, current_kpi_file, plugin_module)
             return {
                 "status": "warning",
                 "success": True,
@@ -479,7 +479,7 @@ def run_kpi_analysis(
 
         regressions = report["overall"]["regression_count"]
         total = report["overall"]["total_tested"]
-
+        overall_verdict = report["overall"]["verdict"]
         logger.info(
             "Analysis complete: %d/%d KPIs tested, %d regressions",
             total,
@@ -487,16 +487,17 @@ def run_kpi_analysis(
             regressions,
         )
 
-        if regressions > 0:
+        # Return status based on the overall verdict from the report
+        if overall_verdict == "REGRESSION_DETECTED":
             return {
                 "status": "regression_detected",
-                "success": True,
-                "regressions_detected": True,
+                "success": False,
+                "regressions_detected": True,  # For orchestration compatibility
                 "output_file": str(output_file),
                 "exit_code": 3,
                 "completed_at": time.time(),
             }
-        else:
+        else:  # "PASS"
             return {
                 "status": "success",
                 "success": True,
@@ -516,7 +517,9 @@ def run_kpi_analysis(
         }
 
 
-def _write_warning_report(output_file: Path, current_kpi_file: Path, plugin_module: str) -> None:
+def _write_no_baseline_report(
+    output_file: Path, current_kpi_file: Path, plugin_module: str
+) -> None:
     """Write a warning-level report when no baselines are available."""
     report = {
         "analysis": {
@@ -804,74 +807,15 @@ def analyze_kpis(
             plugin_module=plugin_module,
         )
 
-        # Convert to the expected format for orchestration and CLI
-        if result.get("status") == "success":
-            return {
-                "status": "success",
-                "success": True,
-                "output_file": result.get("output_file"),
-                "completed_at": result.get("completed_at"),
-            }
-        elif result.get("status") == "warning":
-            return {
-                "status": "warning",
-                "success": True,  # Warning is still success
-                "message": result.get("message"),
-                "output_file": result.get("output_file"),
-                "completed_at": result.get("completed_at"),
-            }
-        elif result.get("status") == "regression_detected":
-            return {
-                "status": "regression_detected",
-                "success": True,  # Regression detection is successful analysis
-                "regressions_detected": True,
-                "output_file": result.get("output_file"),
-                "completed_at": result.get("completed_at"),
-            }
-        else:
-            return {
-                "status": "failed",
-                "success": False,
-                "error": result.get("error", "Analysis failed"),
-                "completed_at": result.get("completed_at"),
-            }
+        # Return result directly since run_kpi_analysis now returns final status values
+        return result
 
     except Exception as e:
         logger.exception("KPI analysis with format conversion failed")
         return {
+            "status": "failed",
             "success": False,
             "error": str(e),
+            "exit_code": 1,
             "completed_at": time.time(),
         }
-
-
-def status_dict_to_exit_code(status_dict: dict[str, Any]) -> int:
-    """Convert a status dictionary to an exit code for CLI use.
-
-    Args:
-        status_dict: Status dictionary from engine analysis functions
-
-    Returns:
-        Exit code: 0=success, 1=error, 2=warning (no baseline), 3=regression detected
-    """
-    # If the status dict includes an explicit exit_code, use it
-    if "exit_code" in status_dict:
-        return status_dict["exit_code"]
-
-    # Otherwise, determine exit code from status fields
-    if not status_dict.get("success", False):
-        return 1  # General error
-
-    status = status_dict.get("status", "")
-
-    if status == "success":
-        return 0
-    elif status == "warning" or "no baseline" in status_dict.get("message", "").lower():
-        return 2  # Warning (no baseline data)
-    elif status == "regression_detected" or status_dict.get("regressions_detected"):
-        return 3  # Regression detected
-    else:
-        return 0  # Default to success if unclear
-
-
-# EOF
