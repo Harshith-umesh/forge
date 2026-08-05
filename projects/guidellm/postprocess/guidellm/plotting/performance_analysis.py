@@ -22,6 +22,18 @@ from projects.caliper.postprocess.helpers.visualization_utils import (
 logger = logging.getLogger(__name__)
 
 
+# Filesystem-unsafe characters for path sanitization
+_PATH_UNSAFE_CHARS = ["/", "\\", ":", "*", "?", "|", "<", ">", '"']
+
+
+def sanitize_for_path(text: str) -> str:
+    """Replace filesystem-unsafe characters in label values."""
+    result = str(text)
+    for char in _PATH_UNSAFE_CHARS:
+        result = result.replace(char, "_")
+    return result
+
+
 def _safe_get_curve_value(curves: dict, metric_name: str, index: int, default: Any = 0.0) -> Any:
     """
     Safely extract a value from a performance curve at a specific index.
@@ -273,7 +285,7 @@ def create_dataframe_from_records(records: list[UnifiedResultRecord]) -> pd.Data
             if rate_points > 1
             else f"{config_data['request_rate'].iloc[0]:.1f} req/s"
         )
-        logger.info(f"   • {config}: {rate_points} rate points ({rate_range})")
+        logger.info(f"   - {config}: {rate_points} rate points ({rate_range})")
 
     return df
 
@@ -629,6 +641,548 @@ def generate_token_throughput_percentiles_analysis(
     )
 
 
+def generate_deployment_profile_report(
+    records: list[UnifiedResultRecord],
+    output_dir: Path,
+    title_context: str = "",
+    report_number: int | None = None,
+    report_title: str = "GuideLLM Deployment Profile Analysis",
+) -> str | None:
+    """
+    Generate performance analysis report with separate plots for comparison groups.
+
+    Groups records by identical test conditions (all labels except the version key) and only
+    creates plots for groups that have records with different version values.
+    This enables comparing different versions under identical test conditions.
+
+    Args:
+        records: List of unified result records
+        output_dir: Directory to save files
+        title_context: Additional context for titles
+        report_number: Optional report number for file naming (e.g., 0 for "Report 00:")
+        report_title: Title for the report (used in filename and HTML title)
+    """
+    try:
+        # Create report identifier using core utilities
+        display_title = create_report_title_display(report_title, report_number)
+
+        logger.info(f"\n🚀 Starting {display_title} generation...")
+        logger.info("=" * 70)
+
+        # Use version as the comparison key to distinguish results
+        comparison_keys = {"version"}
+
+        # First, analyze what keys are actually available in the data
+        all_keys = set()
+        comparison_key_values = {key: set() for key in comparison_keys}
+
+        for record in records:
+            # Use distinguishing labels directly for analysis
+            labels = record.distinguishing_labels
+
+            # Debug: Print version values found
+            if "version" in labels:
+                logger.debug(
+                    f"🐛 DEBUG: Found version='{labels['version']}' in record {record.test_base_path}"
+                )
+            else:
+                logger.debug(
+                    f"🐛 DEBUG: No 'version' key found in record {record.test_base_path}, keys: {list(labels.keys())}"
+                )
+
+            all_keys.update(labels.keys())
+            for key in comparison_keys:
+                if key in labels:
+                    comparison_key_values[key].add(labels[key])
+
+        logger.info("\n📊 Data analysis for comparison report:")
+        logger.info(f"   Total records: {len(records)}")
+        logger.info(f"   Available label keys: {sorted(all_keys)}")
+        logger.info("   Comparison key availability:")
+        for key in comparison_keys:
+            values = comparison_key_values[key]
+            logger.info(
+                f"      {key}: {len(values)} unique values: {sorted(values) if values else 'NOT FOUND'}"
+            )
+
+        # If version key has multiple values, use it; otherwise try deployment_profile fallback
+        active_comparison_keys = []
+        for key in comparison_keys:
+            if len(comparison_key_values[key]) > 1:
+                active_comparison_keys.append(key)
+
+        if not active_comparison_keys:
+            logger.info("⚠️  No version key with multiple values found, trying fallback keys...")
+            fallback_keys = ["deployment_profile", "guidellm_loadshape"]
+            fallback_values = {}
+
+            for record in records:
+                # Use distinguishing labels directly for fallback logic
+                labels = record.distinguishing_labels
+
+                for key in fallback_keys:
+                    if key not in fallback_values:
+                        fallback_values[key] = set()
+
+                    # Use distinguishing labels directly
+                    value = labels.get(key, "default")
+
+                    fallback_values[key].add(value)
+
+            logger.info("   Fallback key availability:")
+            for key in fallback_keys:
+                values = fallback_values[key]
+                logger.info(f"      {key}: {len(values)} unique values: {sorted(values)}")
+                if len(values) > 1:
+                    active_comparison_keys.append(key)
+
+        if not active_comparison_keys:
+            logger.info("⚠️  No suitable version values found for comparison")
+            logger.info("   📊 Generating single-dataset report...")
+
+            # Use a placeholder comparison key set for single-group analysis
+            active_comparison_keys = ["dataset"]
+            comparison_keys = {"dataset"}
+
+        logger.info(f"   Using comparison keys: {active_comparison_keys}")
+        comparison_keys = set(active_comparison_keys)
+
+        # Create one unified group for version comparison across all test configurations
+        core_labels = all_keys
+
+        comparison_groups = {}
+
+        for record in records:
+            # Create a group key from only core distinguishing labels (not version or config details)
+            group_labels = {}
+            for k, v in record.distinguishing_labels.items():
+                if k not in comparison_keys and k in core_labels:
+                    group_labels[k] = v
+
+            # Convert to a sortable tuple for grouping - if no core labels, use a single group
+            if group_labels:
+                group_key = tuple(sorted(group_labels.items()))
+            else:
+                group_key = ("unified_comparison",)
+
+            if group_key not in comparison_groups:
+                comparison_groups[group_key] = []
+            comparison_groups[group_key].append(record)
+
+        # Filter to only groups that have records with different comparison key values
+        valid_groups = {}
+        for group_key, group_records in comparison_groups.items():
+            # Extract comparison key values for this group
+            comparison_values = set()
+            for record in group_records:
+                # Use distinguishing labels directly for comparison key evaluation
+                comp_values = []
+                for key in comparison_keys:
+                    value = record.distinguishing_labels.get(key, "unknown")
+                    comp_values.append(value)
+                comparison_values.add(tuple(comp_values))
+
+            # Only include groups with multiple comparison key values
+            if len(comparison_values) > 1:
+                valid_groups[group_key] = group_records
+
+        if not valid_groups:
+            logger.info(
+                f"⚠️  No comparison groups found - all records have identical values for keys: {active_comparison_keys}"
+            )
+            logger.info("   📊 Generating single-group report with all data...")
+
+            # Create a single group with all records and include warning in the description
+            warning_message = f"No comparisons possible - all records have identical {', '.join(active_comparison_keys)} values"
+            single_group_key = ("all_data", warning_message)
+            valid_groups = {single_group_key: records}
+
+        logger.info(
+            f"\n🔍 Found {len(valid_groups)} comparison groups with varying {active_comparison_keys}:"
+        )
+        for i, (group_key, group_records) in enumerate(valid_groups.items(), 1):
+            # Handle special case for warning message
+            if len(group_key) == 2 and group_key[0] == "all_data":
+                group_desc = "All Available Data"
+            else:
+                group_desc = ", ".join(f"{k}={v}" for k, v in group_key)
+            comp_values = set()
+            for record in group_records:
+                # Use distinguishing labels directly for comparison key evaluation
+                comp_vals = []
+                for key in comparison_keys:
+                    value = record.distinguishing_labels.get(key, "unknown")
+                    comp_vals.append(value)
+                comp_values.add(tuple(comp_vals))
+            comp_desc = " vs ".join(f"{':'.join(cv)}" for cv in sorted(comp_values))
+            logger.info(f"   📋 Group {i}: [{group_desc}] comparing [{comp_desc}]")
+
+        # Generate all the plots as figures
+        plot_functions = [
+            ("Token Throughput vs Concurrency", create_token_throughput_vs_concurrency_plot),
+            ("TTFT Analysis", create_ttft_analysis_plot),
+            ("Token Throughput Percentiles", create_token_throughput_percentiles_plot),
+            ("Throughput Scaling", create_throughput_scaling_plot),
+            ("Latency vs Throughput", create_latency_vs_throughput_plot),
+        ]
+
+        # Create dedicated directory for this report
+        if report_number is not None:
+            report_dir_name = f"report_{report_number:02d}_comparison_analysis"
+        else:
+            report_dir_name = "comparison_analysis"
+
+        report_dir = output_dir / report_dir_name
+        report_dir.mkdir(exist_ok=True)
+        logger.info(f"\n📁 Created report directory: {report_dir_name}")
+
+        all_plots_data = []
+
+        # Process each comparison group separately
+        for group_key, group_records in valid_groups.items():
+            # Create group description for display and directory naming
+            # Handle special case for warning message
+            if len(group_key) == 2 and group_key[0] == "all_data":
+                group_desc = "All Available Data"
+                group_name = "all_data"
+                warning_msg = group_key[1]  # Extract warning message
+            else:
+                group_desc = ", ".join(f"{k}={v}" for k, v in group_key)
+                group_name = "__".join(f"{k}_{sanitize_for_path(v)}" for k, v in group_key)
+                warning_msg = None
+
+            logger.info(f"\n📊 Processing comparison group: {group_desc}")
+            logger.info(f"   Records: {len(group_records)}")
+
+            # Create DataFrame for this comparison group
+            df = create_dataframe_from_records(group_records)
+            if df.empty:
+                logger.info(f"   ⚠️  No data available for group: {group_desc}")
+                continue
+
+            logger.info(f"   📈 Generating {len(plot_functions)} plots for {group_desc}...")
+
+            # Create subdirectory for this comparison group
+            group_dir = report_dir / group_name
+            group_dir.mkdir(exist_ok=True)
+
+            # Extract metadata for this group
+            comp_values = set()
+            for r in group_records:
+                comp_tuple = tuple(
+                    r.distinguishing_labels.get(key, "unknown") for key in comparison_keys
+                )
+                comp_values.add(comp_tuple)
+            comp_desc = " vs ".join(f"{':'.join(cv)}" for cv in sorted(comp_values))
+
+            group_plots = []
+            for i, (plot_name, plot_func) in enumerate(plot_functions, 1):
+                logger.info(
+                    f"   📊 [{i}/{len(plot_functions)}] Creating {plot_name} for comparison group..."
+                )
+                try:
+                    # Create subtitle with group description and comparison info
+                    if warning_msg:
+                        # Show warning message instead of comparison info
+                        subtitle = f"{group_desc} - ⚠️ {warning_msg}"
+                    else:
+                        subtitle = f"Comparison Group: {group_desc} | Comparing: {comp_desc}"
+
+                    # Add original title context if provided
+                    if title_context:
+                        group_title_context = f"{title_context}<br><sub>{subtitle}</sub>"
+                    else:
+                        group_title_context = f"<br><sub>{subtitle}</sub>"
+
+                    fig = plot_func(df, group_title_context)
+                    if fig:
+                        # Save as both PNG and HTML in the group directory
+                        filename = f"{group_name}_{plot_name.lower().replace(' ', '_')}"
+
+                        # Save PNG image
+                        width = 900 if "Percentiles" in plot_name else 800
+                        height = 600 if "Percentiles" in plot_name else 500
+                        png_path = save_figure(
+                            fig, group_dir, filename, as_image=True, width=width, height=height
+                        )
+
+                        # Save HTML version
+                        html_path = save_figure(fig, group_dir, filename, as_image=False)
+
+                        if png_path and html_path:
+                            # Store relative paths for linking
+                            group_plots.append(
+                                (
+                                    plot_name,
+                                    f"{report_dir_name}/{group_name}/{Path(png_path).name}",  # PNG path
+                                    f"{report_dir_name}/{group_name}/{Path(html_path).name}",  # HTML path
+                                )
+                            )
+                            logger.info(f"   ✅ {plot_name} saved for comparison group")
+                    else:
+                        logger.info(
+                            f"   ⚠️  {plot_name} could not be created for comparison group (no figure returned)"
+                        )
+
+                except Exception as e:
+                    logger.info(f"   ❌ Failed to generate {plot_name} for comparison group: {e}")
+
+            # Store group plots data if any plots were created
+            if group_plots:
+                # Include group_key for displaying identical labels
+                group_labels_dict = dict(group_key) if group_key != ("unified_comparison",) else {}
+                all_plots_data.append((group_desc, group_plots, group_labels_dict))
+
+        if not all_plots_data:
+            logger.info("❌ No plots were successfully generated")
+            return None
+
+        logger.info(
+            f"\n✅ Successfully generated plots for {len(all_plots_data)} comparison group(s)!"
+        )
+
+        # Create comprehensive HTML report with sections for each comparison group
+        logger.info("\n📝 Assembling comprehensive HTML report...")
+        logger.info(
+            "   🔗 Creating report with comparison group sections and interactive HTML links..."
+        )
+
+        html_content = f"""
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+    <meta charset='UTF-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+    <title>{display_title}</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 40px; }}
+        .header {{ text-align: center; margin-bottom: 30px; }}
+        .profile-section {{ margin: 40px 0; }}
+        .profile-title {{ color: #333; font-size: 24px; margin-bottom: 20px; border-bottom: 2px solid #007acc; padding-bottom: 10px; }}
+        .navigation {{ background-color: #f5f5f5; padding: 15px; border-radius: 4px; margin-bottom: 20px; }}
+        .navigation ul {{ list-style: none; padding: 0; margin: 0; }}
+        .navigation li {{ display: inline-block; margin-right: 20px; }}
+        .navigation a {{ color: #007acc; text-decoration: none; font-weight: bold; }}
+        .navigation a:hover {{ text-decoration: underline; }}
+
+        .tabs-container {{
+            margin: 20px 0;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background-color: #f9f9f9;
+        }}
+
+        .tab-headers {{
+            display: flex;
+            background-color: #f1f1f1;
+            border-bottom: 1px solid #ddd;
+            border-top-left-radius: 8px;
+            border-top-right-radius: 8px;
+            flex-wrap: wrap;
+        }}
+
+        .tab-header {{
+            background-color: #e1e1e1;
+            color: #333;
+            padding: 15px 20px;
+            cursor: pointer;
+            border: none;
+            border-right: 1px solid #ddd;
+            font-family: Arial, sans-serif;
+            font-size: 16px;
+            font-weight: bold;
+            transition: background-color 0.3s;
+            flex: 1;
+            min-width: 150px;
+        }}
+
+        .tab-header:hover {{
+            background-color: #d1d1d1;
+        }}
+
+        .tab-header.active {{
+            background-color: #4CAF50;
+            color: white;
+        }}
+
+        .tab-header:first-child {{
+            border-top-left-radius: 8px;
+        }}
+
+        .tab-header:last-child {{
+            border-right: none;
+            border-top-right-radius: 8px;
+        }}
+
+        .tab-content {{
+            padding: 20px;
+            background-color: white;
+            display: none;
+            border-bottom-left-radius: 8px;
+            border-bottom-right-radius: 8px;
+        }}
+
+        .tab-content.active {{
+            display: block;
+        }}
+
+        .performance-insights {{
+            border-radius: 5px;
+            padding: 0.5em;
+            background-color: lightgray;
+            margin-top: 15px;
+        }}
+
+        .plot-container {{
+            text-align: center;
+        }}
+
+        .plot-container img {{
+            max-width: 100%;
+            height: auto;
+            cursor: pointer;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }}
+    </style>
+
+    <script>
+    function showTab(containerId, tabId, buttonElement) {{
+        // Get the specific container
+        var container = document.getElementById(containerId);
+
+        // Hide all tab contents within this container
+        var contents = container.querySelectorAll('.tab-content');
+        for (var i = 0; i < contents.length; i++) {{
+            contents[i].classList.remove('active');
+        }}
+
+        // Remove active class from all headers within this container
+        var headers = container.querySelectorAll('.tab-header');
+        for (var i = 0; i < headers.length; i++) {{
+            headers[i].classList.remove('active');
+        }}
+
+        // Show selected tab content and mark header as active
+        document.getElementById(tabId).classList.add('active');
+        buttonElement.classList.add('active');
+    }}
+    </script>
+</head>
+<body>
+    <p><i>Click on the image to open the interactive full-size view of the plot.</i><br/>
+    <i>In the interactive view, click in the legend to hide a line, double click to see only this line.</i></p>
+
+    <div class="header">
+        <h1>{display_title}</h1>
+        <p>Generated performance analysis with separate visualizations for each comparison group</p>
+    </div>
+
+    <div class="navigation">
+        <h3>Quick Navigation:</h3>
+        <ul>"""
+
+        # Add navigation links for each comparison group
+        for group_desc, _, _ in all_plots_data:
+            group_id = group_desc.replace(" ", "_").replace("=", "_").replace(",", "_")
+            html_content += f'\n            <li><a href="#{group_id}">{group_desc}</a></li>'
+
+        html_content += """
+        </ul>
+    </div>
+"""
+        # Add sections for each comparison group
+        for group_desc, plots, group_labels in all_plots_data:
+            group_id = group_desc.replace(" ", "_").replace("=", "_").replace(",", "_")
+
+            # Handle special warning case
+            if group_desc == "All Available Data":
+                title_prefix = "Dataset:"
+                explanation = (
+                    "⚠️ No comparisons possible - all records have identical version values"
+                )
+            else:
+                title_prefix = "Comparison Group:"
+                explanation = f"Comparing different values of {active_comparison_keys} across identical test conditions"
+
+            # Generate display text for all identical labels
+            if group_labels:
+                labels_html = (
+                    "<ul style='margin: 5px 0; padding-left: 20px;'>"
+                    + "".join(
+                        f"<li><strong>{k}</strong>: {v}</li>"
+                        for k, v in sorted(group_labels.items())
+                    )
+                    + "</ul>"
+                )
+            else:
+                labels_html = "<p>All data (no grouping constraints)</p>"
+
+            html_content += f"""
+    <div class="profile-section" id="{group_id}">
+        <h2 class="profile-title">{title_prefix} {group_desc}</h2>
+        <p style="color: #666; font-size: 16px; margin: -10px 0 20px 0; font-style: italic;">
+            {explanation}
+        </p>
+
+        <div style="background-color: #f8f9fa; padding: 12px; margin: 10px 0 20px 0; border-left: 4px solid #007acc; font-size: 14px; color: #495057;">
+            <strong>Identical labels:</strong>
+            {labels_html}
+        </div>
+
+        """
+
+            # Find only the throughput plot
+            throughput_plot = None
+            for plot_name, png_path, html_path in plots:
+                if plot_name == "Token Throughput vs Concurrency":
+                    throughput_plot = (plot_name, png_path, html_path)
+                    break
+
+            if throughput_plot:
+                plot_name, png_path, html_path = throughput_plot
+                html_content += f"""
+        <div style='padding:20px;'>
+            <h4>🚀 {plot_name}</h4>
+            <p>Token generation throughput scaling analysis across different concurrency levels.</p>
+            <p><a href='{html_path}' target='_blank' title='Click to access the full-size interactive version.'><img src='{png_path}' alt='{plot_name}'/></a></p>
+        </div>
+    </div>"""
+            else:
+                html_content += """
+        <div style='padding:20px;'>
+            <p>⚠️ No throughput plot available for this group.</p>
+        </div>
+    </div>"""
+
+        # Close the HTML after all groups are processed
+        html_content += """
+</body>
+</html>"""
+
+        # Save the main HTML report
+        main_html_filename = create_report_filename(
+            "comparison_analysis", report_number, report_title, "html"
+        )
+        main_html_path = output_dir / main_html_filename
+
+        with open(main_html_path, "w", encoding="utf-8") as f:
+            f.write(html_content)
+
+        logger.info(f"✅ Comparison analysis report saved as: {main_html_filename}")
+        logger.info(f"📁 Individual plots organized in subdirectories under: {report_dir_name}/")
+
+        logger.info("=" * 70)
+        logger.info(f"🎉 {display_title} ready: {main_html_path.name}")
+
+        return str(main_html_path)
+
+    except Exception:
+        logger.exception("❌ Failed to generate deployment profile report")
+        # Re-raise for debugging - this error should not be silently ignored
+        raise
+
+
 def generate_comprehensive_performance_report(
     records: list[UnifiedResultRecord],
     output_dir: Path,
@@ -704,7 +1258,7 @@ def generate_comprehensive_performance_report(
             logger.info(f"   📈 Generating {len(plot_functions)} plots for {loadshape}...")
 
             # Create subdirectory for this loadshape
-            loadshape_dir = report_dir / loadshape
+            loadshape_dir = report_dir / sanitize_for_path(loadshape)
             loadshape_dir.mkdir(exist_ok=True)
 
             # Extract model information for this loadshape
@@ -727,7 +1281,7 @@ def generate_comprehensive_performance_report(
                 )
                 try:
                     # Create subtitle with model and loadshape info
-                    subtitle = f"Model: {model_info} • Load Shape: {loadshape}"
+                    subtitle = f"Model: {model_info} | Load Shape: {loadshape}"
 
                     # Add original title context if provided
                     if title_context:
@@ -790,15 +1344,15 @@ def generate_comprehensive_performance_report(
     <meta name='viewport' content='width=device-width, initial-scale=1.0'>
     <title>{display_title}</title>
     <style>
-        body {{ font-family: Arial, sans-serif; margin: 40px; }}
-        .header {{ text-align: center; margin-bottom: 30px; }}
-        .loadshape-section {{ margin: 40px 0; }}
-        .loadshape-title {{ color: #333; font-size: 24px; margin-bottom: 20px; border-bottom: 2px solid #007acc; padding-bottom: 10px; }}
-        .navigation {{ background-color: #f5f5f5; padding: 15px; border-radius: 4px; margin-bottom: 20px; }}
-        .navigation ul {{ list-style: none; padding: 0; margin: 0; }}
-        .navigation li {{ display: inline-block; margin-right: 20px; }}
-        .navigation a {{ color: #007acc; text-decoration: none; font-weight: bold; }}
-        .navigation a:hover {{ text-decoration: underline; }}
+        body {{font-family: Arial, sans-serif; margin: 40px; }}
+        .header {{text-align: center; margin-bottom: 30px; }}
+        .loadshape-section {{margin: 40px 0; }}
+        .loadshape-title {{color: #333; font-size: 24px; margin-bottom: 20px; border-bottom: 2px solid #007acc; padding-bottom: 10px; }}
+        .navigation {{background-color: #f5f5f5; padding: 15px; border-radius: 4px; margin-bottom: 20px; }}
+        .navigation ul {{list-style: none; padding: 0; margin: 0; }}
+        .navigation li {{display: inline-block; margin-right: 20px; }}
+        .navigation a {{color: #007acc; text-decoration: none; font-weight: bold; }}
+        .navigation a:hover {{text-decoration: underline; }}
 
         .tabs-container {{
             margin: 20px 0;
@@ -947,7 +1501,7 @@ def generate_comprehensive_performance_report(
     <div class="loadshape-section" id="{loadshape}">
         <h2 class="loadshape-title">Loadshape: {loadshape}</h2>
         <p style="color: #666; font-size: 16px; margin: -10px 0 20px 0; font-style: italic;">
-            Model: {model_info} • Load Shape: {loadshape}
+            Model: {model_info} | Load Shape: {loadshape}
         </p>
 
         <div id='tabs-container-{container_id}' class='tabs-container'>
@@ -973,18 +1527,16 @@ def generate_comprehensive_performance_report(
             </div>"""
 
             # Create tab contents
+            descriptions = {
+                "Token Throughput vs Concurrency": "Token generation throughput scaling analysis across different concurrency levels.",
+                "TTFT Analysis": "Time To First Token analysis - measuring responsiveness and initial latency.",
+                "Token Throughput Percentiles": "Complete token throughput percentile distribution analysis.",
+                "Throughput Scaling": "Throughput scaling behavior and efficiency analysis.",
+                "Latency vs Throughput": "Trade-off analysis between latency and throughput performance.",
+            }
+
             for tab_idx, (plot_name, png_path, html_path) in enumerate(plots):
                 active_class = " active" if tab_idx == 0 else ""
-
-                # Create descriptions for each plot type
-                descriptions = {
-                    "Token Throughput vs Concurrency": "Token generation throughput scaling analysis across different concurrency levels.",
-                    "TTFT Analysis": "Time To First Token analysis - measuring responsiveness and initial latency.",
-                    "Token Throughput Percentiles": "Complete token throughput percentile distribution analysis.",
-                    "Throughput Scaling": "Throughput scaling behavior and efficiency analysis.",
-                    "Latency vs Throughput": "Trade-off analysis between latency and throughput performance.",
-                }
-
                 description = descriptions.get(plot_name, f"{plot_name} performance analysis.")
 
                 html_content += f"""
@@ -1022,9 +1574,10 @@ def generate_comprehensive_performance_report(
 
         return str(main_html_path)
 
-    except Exception as e:
-        logger.info(f"❌ Failed to generate comprehensive performance report: {e}")
-        return None
+    except Exception:
+        logger.exception("❌ Failed to generate comprehensive performance report")
+        # Re-raise for debugging - this error should not be silently ignored
+        raise
 
 
 def _generate_performance_summary(df: pd.DataFrame) -> dict[str, Any]:
