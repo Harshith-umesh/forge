@@ -18,6 +18,8 @@ from projects.caliper.engine.model import (
 
 from .models import GuideLLMBenchmark, GuideLLMConfiguration
 
+logger = logging.getLogger(__name__)
+
 
 def _labels_from_node(node: TestBaseNode) -> dict[str, Any]:
     """Extract labels from a test node."""
@@ -147,7 +149,7 @@ class GuideLLMParser:
                 product_version = parse_product_version_from_annotation(annotation_value)
                 if product_version:
                     result["product_version"] = product_version
-                    logging.info(f"Extracted product_version '{product_version}' from {file_path}")
+                    logger.info(f"Extracted product_version '{product_version}' from {file_path}")
 
             # Extract deployment profile from forge annotation
             deployment_profile = extract_field_by_jsonpath(
@@ -155,18 +157,16 @@ class GuideLLMParser:
             )
             if deployment_profile:
                 result["deployment_profile"] = deployment_profile
-                logging.info(
-                    f"Extracted deployment_profile '{deployment_profile}' from {file_path}"
-                )
+                logger.info(f"Extracted deployment_profile '{deployment_profile}' from {file_path}")
 
             # Extract model name from spec
             model_name = extract_field_by_jsonpath(yaml_data, "spec.model.name")
             if model_name:
                 result["model_name"] = model_name
-                logging.info(f"Extracted model_name '{model_name}' from {file_path}")
+                logger.info(f"Extracted model_name '{model_name}' from {file_path}")
 
         except Exception as e:
-            logging.warning(f"Failed to extract fields from {file_path}: {e}")
+            logger.warning(f"Failed to extract fields from {file_path}: {e}")
 
         return result
 
@@ -190,16 +190,16 @@ class GuideLLMParser:
             cluster = extract_field_by_jsonpath(yaml_data, "ci_job.cluster")
             if cluster:
                 result["cluster"] = cluster
-                logging.info(f"Extracted cluster '{cluster}' from {file_path}")
+                logger.info(f"Extracted cluster '{cluster}' from {file_path}")
 
             # Extract benchmark key
             benchmark_key = extract_field_by_jsonpath(yaml_data, "runtime.benchmark_key")
             if benchmark_key:
                 result["benchmark_key"] = benchmark_key
-                logging.info(f"Extracted benchmark_key '{benchmark_key}' from {file_path}")
+                logger.info(f"Extracted benchmark_key '{benchmark_key}' from {file_path}")
 
         except Exception as e:
-            logging.warning(f"Failed to extract fields from {file_path}: {e}")
+            logger.warning(f"Failed to extract fields from {file_path}: {e}")
 
         return result
 
@@ -235,10 +235,10 @@ class GuideLLMParser:
                     benchmarks.append(benchmark)
                 except Exception as e:
                     warnings.append(f"Failed to parse benchmark in {file_path}: {e}")
-                    logging.warning(f"Failed to parse benchmark data: {e}")
+                    logger.warning(f"Failed to parse benchmark data: {e}")
                     continue
 
-            logging.info(f"Parsed {len(benchmarks)} GuideLLM benchmarks from {file_path}")
+            logger.info(f"Parsed {len(benchmarks)} GuideLLM benchmarks from {file_path}")
             return benchmarks, configuration, warnings
 
         except json.JSONDecodeError as e:
@@ -407,7 +407,7 @@ class GuideLLMParser:
         except (ValueError, TypeError):
             pass
 
-        logging.warning(
+        logger.warning(
             "Could not find concurrency 'streams' for benchmark. Using default value 1.0"
         )
         return 1.0
@@ -613,5 +613,5 @@ class GuideLLMParser:
                     )
                 )
 
-        logging.info(f"GuideLLM parser created {len(records)} unified result records")
+        logger.info(f"GuideLLM parser created {len(records)} unified result records")
         return ParseResult(records=records, warnings=warnings)
