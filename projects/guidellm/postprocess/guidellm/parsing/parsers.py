@@ -15,6 +15,10 @@ from projects.caliper.engine.model import (
     TestBaseNode,
     UnifiedResultRecord,
 )
+from projects.guidellm.postprocess.guidellm.dashboard import (
+    canonical_json,
+    normalize_product_version,
+)
 
 from .models import GuideLLMBenchmark, GuideLLMConfiguration
 
@@ -118,14 +122,15 @@ class GuideLLMParser:
         return path.name in [
             "llminferenceservice.yaml",
             "llminferenceservice.yml",
-        ] and "__capture_llmisvc_state" in str(path)
+            "llminferenceservice.json",
+        ]
 
     @staticmethod
     def _is_config_artifact(path: Path) -> bool:
         """Check if path is a config.yaml artifact."""
         return path.name == "config.yaml"
 
-    def extract_fields_from_llmisvc(self, file_path: Path) -> dict[str, str]:
+    def extract_fields_from_llmisvc(self, file_path: Path) -> dict[str, Any]:
         """
         Extract multiple fields from LLMInferenceService YAML file.
 
@@ -148,7 +153,7 @@ class GuideLLMParser:
             if annotation_value:
                 product_version = parse_product_version_from_annotation(annotation_value)
                 if product_version:
-                    result["product_version"] = product_version
+                    result["product_version"] = normalize_product_version(product_version)
                     logger.info(f"Extracted product_version '{product_version}' from {file_path}")
 
             # Extract deployment profile from forge annotation
@@ -164,6 +169,30 @@ class GuideLLMParser:
             if model_name:
                 result["model_name"] = model_name
                 logger.info(f"Extracted model_name '{model_name}' from {file_path}")
+
+            replicas = extract_field_by_jsonpath(yaml_data, "spec.replicas")
+            if replicas is not None:
+                result["replicas"] = replicas
+
+            tensor_parallel_size = extract_field_by_jsonpath(yaml_data, "spec.parallelism.tensor")
+            if tensor_parallel_size is not None:
+                result["tensor_parallel_size"] = tensor_parallel_size
+
+            router_config = extract_field_by_jsonpath(yaml_data, "spec.router.scheduler")
+            if router_config is not None:
+                result["router_config"] = canonical_json(router_config)
+
+            serving_container = extract_field_by_jsonpath(
+                yaml_data, "spec.template.containers[0]", {}
+            )
+            if isinstance(serving_container, dict):
+                image = serving_container.get("image")
+                if image:
+                    result["image_tag"] = image
+                for env_var in serving_container.get("env", []):
+                    if env_var.get("name") == "VLLM_ADDITIONAL_ARGS":
+                        result["runtime_args"] = env_var.get("value", "")
+                        break
 
         except Exception as e:
             logger.warning(f"Failed to extract fields from {file_path}: {e}")
@@ -550,6 +579,7 @@ class GuideLLMParser:
 
             # Also look for LLMInferenceService YAML files and config.yaml files for system information
             llmisvc_files = [p for p in node.artifact_paths if self._is_llmisvc_artifact(p)]
+            llmisvc_files.sort(key=lambda path: "__capture_llmisvc_state" not in str(path))
             config_files = [p for p in node.artifact_paths if self._is_config_artifact(p)]
 
             if not benchmarks_files:

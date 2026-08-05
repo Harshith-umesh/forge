@@ -41,7 +41,7 @@ caliper:
   postprocess:
     enabled: true
     artifacts_dir: null
-    plugin_module: projects.guidellm.postprocess.guidellm.plugin
+    plugin_module: projects.llm_d.postprocess.plugin
     postprocess_config: null
     filtering:
       include_labels: []
@@ -63,8 +63,8 @@ caliper:
         output: kpis/kpis.json
       kpis_to_csv:
         enabled: true
-        output: kpis/kpis.csv
-        include_header_comments: true
+        output: kpis/dashboard.csv
+        include_header_comments: false
       artifacts_to_ai_data:
         enabled: true
         output_dir: ai_data
