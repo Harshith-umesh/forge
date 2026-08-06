@@ -416,33 +416,59 @@ def run_analyse_kpis(
         )
 
         # Handle fail_on_regression logic at orchestration level
+        regression_override = False
         if (
-            hasattr(postprocess_config.analyze, "fail_on_regression")
+            status_data.get("regressions_detected")
             and not postprocess_config.analyze.fail_on_regression
-            and result.returncode == 3
-            and status_data.get("regressions_detected")
+            and result.returncode == 3  # Only override if failure was due to regressions
         ):
-            # Override exit code to 0 when fail_on_regression is False but keep regression info
+            # Override exit code to 0 when fail_on_regression is False but preserve status data
             logger.info(
-                "KPI regressions detected, but fail_on_regression=False - treating as success"
+                "KPI regressions detected, but fail_on_regression=False - overriding exit code"
             )
-
             result.returncode = 0
-            status_data["success"] = True
+            regression_override = True
 
-        if not (result.returncode == 0 and status_data.get("success")):
+        # Check success condition, accounting for regression override
+        orchestration_success = (
+            result.returncode == 0 and status_data.get("success")
+        ) or regression_override
+
+        if not orchestration_success:
+            # Include only summary data in failure case too
+            summary_fields = [
+                "success",
+                "regressions_detected",
+                "baseline_source_count",
+                "tested",
+                "overall",
+            ]
+            analysis_summary = {k: v for k, v in status_data.items() if k in summary_fields}
+
             return {
                 "status": "failed",
                 "error": status_data.get("error", "Unknown error"),
                 "completed_at": time.time(),
                 "log_file": log_file,
+                **analysis_summary,
             }
+
+        # Include only summary data, not detailed results
+        summary_fields = [
+            "success",
+            "regressions_detected",
+            "baseline_source_count",
+            "tested",
+            "overall",
+        ]
+        analysis_summary = {k: v for k, v in status_data.items() if k in summary_fields}
 
         return {
             "status": "success",
             "output_file": _make_path_relative_to_base(output_file, env.ARTIFACT_DIR),
             "completed_at": time.time(),
             "log_file": log_file,
+            **analysis_summary,
         }
 
     except Exception as e:
