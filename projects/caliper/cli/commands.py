@@ -891,73 +891,18 @@ def analyse_kpis_cmd(
     # Delegate to engine layer
     from projects.caliper.engine.kpi.analyze import analyze_kpis
 
-    result = analyze_kpis(
+    status_data, report = analyze_kpis(
         current_kpis_file=current_kpis_file,
         historical_kpis_dir=historical_kpis_dir,
         output_file=output,
         plugin_module=plugin_module,
     )
 
-    # Format status data for CLI
-    status_data = {
-        "success": result.get("success", False),
-        "completed_at": result.get("completed_at"),
-    }
-
-    if result.get("output_file"):
-        status_data["output_file"] = result["output_file"]
-
-    if result.get("error"):
-        status_data["error"] = result["error"]
-
-    # Extract detailed analysis results for status file
-    if result.get("success") and result.get("output_file"):
-        try:
-            import yaml
-
-            with open(result["output_file"]) as f:
-                analysis_report = yaml.safe_load(f)
-
-            # Extract key fields from the analysis report
-            if analysis_report:
-                processed = analysis_report.get("processed", {})
-                tested = analysis_report.get("tested", {})
-                overall = analysis_report.get("overall", {})
-
-                # Derive regressions_detected flag from analysis results
-                regression_count = overall.get("regression_count", 0)
-                regressions_detected = regression_count > 0
-
-                status_data.update(
-                    {
-                        "baseline_source_count": processed.get("baseline_source_count", 0),
-                        "regressions_detected": regressions_detected,
-                        "tested": {
-                            "total_kpis": tested.get("total_kpis", 0),
-                            "regressions": tested.get("regressions", 0),
-                            "passes": tested.get("passes", 0),
-                            "skipped": tested.get("skipped", 0),
-                        },
-                        "overall": {
-                            "verdict": overall.get("verdict", "UNKNOWN"),
-                            "regression_count": overall.get("regression_count", 0),
-                            "total_tested": overall.get("total_tested", 0),
-                            "total_skipped": overall.get("total_skipped", 0),
-                        },
-                    }
-                )
-        except Exception as e:
-            # If we can't read the analysis report, just include basic info
-            status_data["analysis_report_error"] = f"Could not read analysis report: {e}"
-
-    if result.get("result"):
-        status_data.update(result["result"])  # Include analysis result for debugging
-
     # Display result
-    if result.get("success"):
-        click.echo(f"✅ KPI analysis completed: {result.get('output_file')}")
+    if status_data.get("success"):
+        click.echo("✅ KPI analysis completed with success")
     else:
-        error_msg = result.get("error", "Unknown error")
+        error_msg = status_data.get("status", "Unknown error")
         click.echo(f"❌ KPI analysis failed: {error_msg}", err=True)
 
     # Write status file if requested
@@ -970,7 +915,7 @@ def analyse_kpis_cmd(
             sys.exit(4)
 
     # Use exit code directly from analysis result
-    exit_code = result.get("exit_code", 1)
+    exit_code = status_data.get("exit_code", 1)
     sys.exit(exit_code)
 
 

@@ -1290,6 +1290,16 @@ class CaliperPostprocessOrchestrator:
         logger.info("KPI analysis result:")
         logger.info(json.dumps(result, indent=2, default=str))
 
+        if result.get("regressions_detected"):
+            logger.info("Regression detected!")
+            if self.config.analyze.fail_on_regression:
+                result["status"] = "failed"
+                logger.info("fail_on_regression is set, setting the status to 'failure'")
+                result["error"] = "regression detected"
+            else:
+                result["status"] = "success"
+                logger.info("fail_on_regression is not set, setting the status to 'success'")
+
         self._check_step_result_and_set_failure("analyse_kpis", result)
 
     def _run_s3_export_step(self, output_dir: Path) -> None:

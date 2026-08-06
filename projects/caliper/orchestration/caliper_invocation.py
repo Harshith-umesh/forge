@@ -415,20 +415,6 @@ def run_analyse_kpis(
             step_logs_dir=step_logs_dir,
         )
 
-        # Handle fail_on_regression logic at orchestration level
-        regression_override = False
-        if (
-            status_data.get("regressions_detected")
-            and not postprocess_config.analyze.fail_on_regression
-            and result.returncode == 3  # Only override if failure was due to regressions
-        ):
-            # Override exit code to 0 when fail_on_regression is False but preserve status data
-            logger.info(
-                "KPI regressions detected, but fail_on_regression=False - overriding exit code"
-            )
-            result.returncode = 0
-            regression_override = True
-
         # Check success condition, accounting for regression override
         # Regression detection with exit code 3 is considered successful analysis
         regression_analysis_success = (
@@ -438,10 +424,8 @@ def run_analyse_kpis(
         )
 
         orchestration_success = (
-            (result.returncode == 0 and status_data.get("success"))
-            or regression_override
-            or regression_analysis_success
-        )
+            result.returncode == 0 and status_data.get("success")
+        ) or regression_analysis_success
 
         if not orchestration_success:
             # Include only summary data in failure case too

@@ -354,7 +354,7 @@ def run_kpi_analysis(
                 "error": f"Current KPI file not found: {current_kpi_file}",
                 "exit_code": 1,
                 "completed_at": time.time(),
-            }
+            }, None
 
         if not historical_data_dir.exists():
             logger.error("Historical data directory not found: %s", historical_data_dir)
@@ -364,7 +364,7 @@ def run_kpi_analysis(
                 "error": f"Historical data directory not found: {historical_data_dir}",
                 "exit_code": 1,
                 "completed_at": time.time(),
-            }
+            }, None
 
         try:
             config = _load_analysis_config(plugin_module)
@@ -376,7 +376,7 @@ def run_kpi_analysis(
                 "error": f"Analysis configuration error: {exc}",
                 "exit_code": 1,
                 "completed_at": time.time(),
-            }
+            }, None
 
         logger.info(
             "  config: comparison_keys=%s, ignored_keys=%s",
@@ -396,7 +396,7 @@ def run_kpi_analysis(
                 "error": "Current KPI file must be schema_version 2 (hierarchical)",
                 "exit_code": 1,
                 "completed_at": time.time(),
-            }
+            }, None
 
         current_records = _extract_kpi_records_from_hierarchical(current_data)
         if not current_records:
@@ -407,7 +407,7 @@ def run_kpi_analysis(
                 "error": "No KPI records found in current file",
                 "exit_code": 1,
                 "completed_at": time.time(),
-            }
+            }, None
 
         # Load baseline KPIs
         baseline_kpi_data = find_baseline_kpis(historical_data_dir)
@@ -420,7 +420,7 @@ def run_kpi_analysis(
                 "output_file": str(output_file),
                 "exit_code": 2,
                 "completed_at": time.time(),
-            }
+            }, None
 
         # Build baseline index
         baseline_index = _build_baseline_index(baseline_kpi_data, config)
@@ -496,7 +496,7 @@ def run_kpi_analysis(
                 "output_file": str(output_file),
                 "exit_code": 3,
                 "completed_at": time.time(),
-            }
+            }, report
         else:  # "PASS"
             return {
                 "status": "success",
@@ -504,7 +504,7 @@ def run_kpi_analysis(
                 "output_file": str(output_file),
                 "exit_code": 0,
                 "completed_at": time.time(),
-            }
+            }, report
 
     except Exception as e:
         logger.exception("KPI analysis failed")
@@ -514,7 +514,7 @@ def run_kpi_analysis(
             "error": f"KPI analysis failed: {e}",
             "exit_code": 1,
             "completed_at": time.time(),
-        }
+        }, None
 
 
 def _write_no_baseline_report(
@@ -617,19 +617,12 @@ def run_analyze(
 
     plugin_module = getattr(plugin, "__module__", "unknown") if plugin else "unknown"
 
-    result = run_kpi_analysis(
+    return run_kpi_analysis(
         current_kpi_file=Path(current_path),
         historical_data_dir=historical_dir,
         output_file=Path(output_path),
         plugin_module=plugin_module,
     )
-
-    # Extract just the relevant fields for this legacy interface
-    return {
-        "status": result.get("status"),
-        "message": result.get("message"),
-        "completed_at": result.get("completed_at"),
-    }
 
 
 def _convert_v1_to_v2(v1_records: list[dict]) -> dict:
@@ -775,7 +768,7 @@ def analyze_kpis(
     historical_kpis_dir: Path,
     output_file: Path,
     plugin_module: str,
-) -> dict[str, Any]:
+):
     """Analyze KPIs with automatic v1/v2 format conversion.
 
     This function handles:
@@ -799,16 +792,12 @@ def analyze_kpis(
     """
 
     try:
-        # Use directory-based analysis (supports multiple baseline files)
-        result = run_kpi_analysis(
+        return run_kpi_analysis(
             current_kpi_file=current_kpis_file,
             historical_data_dir=historical_kpis_dir,
             output_file=output_file,
             plugin_module=plugin_module,
         )
-
-        # Return result directly since run_kpi_analysis now returns final status values
-        return result
 
     except Exception as e:
         logger.exception("KPI analysis with format conversion failed")
@@ -818,4 +807,4 @@ def analyze_kpis(
             "error": str(e),
             "exit_code": 1,
             "completed_at": time.time(),
-        }
+        }, {}
