@@ -695,6 +695,76 @@ def kpi_csv_export(
         sys.exit(3)
 
 
+@click.command("kpis-to-mlflow")
+@click.option(
+    "--input",
+    "input_file",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Input KPI JSON file (schema v2 hierarchical format)",
+)
+@click.option(
+    "--artifacts-dir",
+    "artifacts_dir",
+    type=click.Path(path_type=Path, exists=True),
+    required=True,
+    help="Root of the artifact tree containing __test_labels__.yaml markers",
+)
+@click.option(
+    "--status-file", type=click.Path(path_type=Path), help="YAML file to write operation status"
+)
+def kpis_to_mlflow_cmd(
+    input_file: Path,
+    artifacts_dir: Path,
+    status_file: Path | None,
+) -> None:
+    """Convert kpis.json into per-run metrics.json + parameters.json for MLflow."""
+    from projects.caliper.engine.kpi.kpis_to_mlflow import generate_metrics_from_kpis
+
+    status_data: dict = {"success": False}
+
+    try:
+        result = generate_metrics_from_kpis(input_file, artifacts_dir)
+        status = result.get("status", "unknown")
+        if status == "success":
+            status_data = {
+                "success": True,
+                "tests_processed": result.get("tests_processed", 0),
+                "total_tests": result.get("total_tests", 0),
+            }
+            click.echo(
+                f"Generated metrics.json for {result.get('tests_processed', 0)}/"
+                f"{result.get('total_tests', 0)} test(s)"
+            )
+        elif status == "skipped":
+            status_data = {"success": True, "skipped": True, "reason": result.get("reason", "")}
+            click.echo(f"Skipped: {result.get('reason', '')}")
+        else:
+            status_data = {"success": False, "error": result.get("error", "unknown error")}
+            click.echo(f"kpis-to-mlflow failed: {result.get('error', 'unknown')}", err=True)
+    except Exception as e:  # noqa: BLE001
+        import traceback
+
+        full_traceback = traceback.format_exc()
+        status_data = {"success": False, "error": str(e), "traceback": full_traceback}
+        click.echo(f"kpis-to-mlflow failed: {e}", err=True)
+        click.echo(f"Full traceback:\n{full_traceback}", err=True)
+
+        if not status_file:
+            sys.exit(3)
+    finally:
+        if status_file:
+            try:
+                with open(status_file, "w", encoding="utf-8") as f:
+                    yaml.dump(status_data, f, default_flow_style=False)
+            except Exception as status_err:
+                click.echo(f"Failed to write status file {status_file}: {status_err}", err=True)
+                sys.exit(4)
+
+    if not status_data.get("success", False):
+        sys.exit(3)
+
+
 @click.command("import")
 @click.option("--snapshot", type=click.Path(path_type=Path), required=True)
 @click.pass_context

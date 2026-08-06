@@ -93,14 +93,10 @@ def generate_metrics_from_kpis(
         Status dict with counts and any warnings.
     """
     if not kpis_json_path.is_file():
-        return {"status": "skipped", "reason": f"kpis.json not found: {kpis_json_path}"}
+        raise FileNotFoundError(f"kpis.json not found: {kpis_json_path}")
 
-    try:
-        with kpis_json_path.open(encoding="utf-8") as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        logger.warning("Failed to read kpis.json at %s: %s", kpis_json_path, e)
-        return {"status": "failed", "error": str(e)}
+    with kpis_json_path.open(encoding="utf-8") as f:
+        data = json.load(f)
 
     if not isinstance(data, dict) or data.get("schema_version") != "2":
         return {"status": "skipped", "reason": "Not a schema v2 kpis.json"}

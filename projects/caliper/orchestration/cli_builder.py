@@ -299,6 +299,30 @@ def build_ai_eval_export_command(
     return cmd
 
 
+def build_kpis_to_mlflow_command(
+    tree_root: Path,
+    status_file: Path,
+    input_file: Path,
+) -> list[str]:
+    """Build CLI command for caliper kpi kpis-to-mlflow.
+
+    Args:
+        tree_root: Root of the artifact tree with __test_labels__.yaml markers
+        status_file: Where to write status YAML
+        input_file: Input kpis.json file (schema v2)
+
+    Returns:
+        List of command arguments for subprocess
+    """
+    cmd = _CALIPER_BASE_CMD + ["kpi", "kpis-to-mlflow"]
+
+    cmd.extend(["--input", str(input_file)])
+    cmd.extend(["--artifacts-dir", str(tree_root)])
+    cmd.extend(["--status-file", str(status_file)])
+
+    return cmd
+
+
 def build_s3_import_command(
     config: CaliperOrchestrationPostprocessConfig,
     status_file: Path,
