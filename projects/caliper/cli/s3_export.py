@@ -8,8 +8,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 try:
     import boto3
     import botocore.session
@@ -102,7 +100,7 @@ def list_csv_files(output_dir: Path, postprocess_config=None) -> list[Path]:
         # Validate configured CSV output is non-empty
         csv_output = postprocess_config.kpi.csv.output
         if not csv_output or not csv_output.strip():
-            logger.warning("CSV producer enabled but output path is empty, skipping")
+            logger.error("CSV producer enabled but output path is empty - skipping CSV export")
         else:
             # Use configured CSV file path
             csv_file_path = output_dir / csv_output
@@ -112,7 +110,9 @@ def list_csv_files(output_dir: Path, postprocess_config=None) -> list[Path]:
                     f"Found configured CSV file: {csv_file_path.name} ({csv_file_path.stat().st_size} bytes)"
                 )
             else:
-                logger.warning(f"Configured CSV file not found: {csv_file_path}")
+                logger.error(
+                    f"Configured CSV file not found: {csv_file_path} - skipping CSV export"
+                )
     else:
         # Fallback to glob pattern for backward compatibility
         csv_files = list(output_dir.glob("*.csv"))
@@ -139,7 +139,9 @@ def list_kpi_json_files(output_dir: Path, postprocess_config=None) -> list[Path]
         # Validate configured KPI JSON output is non-empty
         kpi_output = postprocess_config.kpi.artifacts_to_kpis.output
         if not kpi_output or not kpi_output.strip():
-            logger.warning("KPI JSON producer enabled but output path is empty, skipping")
+            logger.error(
+                "KPI JSON producer enabled but output path is empty - skipping KPI JSON export"
+            )
         else:
             # Use configured KPI JSON file path
             kpi_file_path = output_dir / kpi_output
@@ -149,7 +151,9 @@ def list_kpi_json_files(output_dir: Path, postprocess_config=None) -> list[Path]
                     f"Found configured KPI JSON file: {kpi_file_path.name} ({kpi_file_path.stat().st_size} bytes)"
                 )
             else:
-                logger.warning(f"Configured KPI JSON file not found: {kpi_file_path}")
+                logger.error(
+                    f"Configured KPI JSON file not found: {kpi_file_path} - skipping KPI JSON export"
+                )
     else:
         # Fallback to glob pattern for backward compatibility
         kpi_json_files = list(output_dir.glob("kpis.json"))
@@ -176,7 +180,9 @@ def list_analysis_files(output_dir: Path, postprocess_config=None) -> list[Path]
         # Validate configured analysis output is non-empty
         analysis_output = postprocess_config.analyze.output
         if not analysis_output or not analysis_output.strip():
-            logger.warning("Analysis producer enabled but output path is empty, skipping")
+            logger.error(
+                "Analysis producer enabled but output path is empty - skipping analysis export"
+            )
         else:
             # Use configured analysis file path
             analysis_file_path = output_dir / analysis_output
@@ -186,7 +192,9 @@ def list_analysis_files(output_dir: Path, postprocess_config=None) -> list[Path]
                     f"Found configured analysis file: {analysis_file_path.name} ({analysis_file_path.stat().st_size} bytes)"
                 )
             else:
-                logger.warning(f"Configured analysis file not found: {analysis_file_path}")
+                logger.error(
+                    f"Configured analysis file not found: {analysis_file_path} - skipping analysis export"
+                )
     else:
         # Fallback to glob patterns for backward compatibility
         analysis_patterns = ["kpi_analyze.json", "kpi_analysis.json", "*analyze*.json"]
@@ -490,51 +498,9 @@ def run_s3_export_with_explicit_paths(
         if dry_run:
             logger.info("DRY RUN: Skipping actual upload")
 
-            # Create output directory for dry run file (use current working directory)
-            dry_run_file = Path.cwd() / "upload_dry_run.yaml"
-
-            # Save dry run results to YAML file
-            dry_run_data = {
-                "s3_export_dry_run": {
-                    "timestamp": datetime.now().isoformat(),
-                    "export_config": {
-                        "bucket": bucket,
-                        "instance": instance,
-                        "directory": directory,
-                        "upload_id": upload_id,
-                        "exported_path": f"s3://{bucket}/{export_s3_prefix}",
-                    },
-                    "upload_plan": upload_plan,
-                    "summary": {
-                        "total_files": len(upload_files),
-                        "total_size_bytes": total_size,
-                        "kpis_json_files": 1 if kpis_file else 0,
-                        "csv_files": 1 if csv_file else 0,
-                        "analysis_files": 1 if analysis_file else 0,
-                        "ai_data_files": len(ai_data_files),
-                    },
-                }
-            }
-
-            # Write to YAML file
-            try:
-                with open(dry_run_file, "w") as f:
-                    yaml.dump(dry_run_data, f, default_flow_style=False, indent=2)
-                logger.info(f"Dry run results saved to: {dry_run_file}")
-            except Exception as e:
-                logger.error(f"Failed to save dry run results: {e}")
-                return {
-                    "status": "failed",
-                    "error": f"Failed to save dry run results: {e}",
-                    "dry_run": True,
-                    "completed_at": time.time(),
-                    "duration": round(time.time() - start_time),
-                }
-
             return {
                 "status": "success",
                 "dry_run": True,
-                "dry_run_file": str(dry_run_file),
                 "exported_path": f"s3://{bucket}/{export_s3_prefix}",
                 "completed_at": time.time(),
                 "duration": round(time.time() - start_time),
@@ -648,6 +614,8 @@ def run_s3_export(
         }
 
     try:
+        error_detected = False
+
         s3_parent_config = postprocess_config.s3
         s3_config = postprocess_config.s3.export
         bucket = s3_parent_config.bucket
@@ -716,26 +684,33 @@ def run_s3_export(
         upload_files = []
 
         # Use postprocess config to determine file locations
-        csv_files = list_csv_files(output_dir, postprocess_config) if s3_config.include_csv else []
-        kpi_json_files = (
-            list_kpi_json_files(output_dir, postprocess_config)
-            if s3_config.include_kpis_json
-            else []
-        )
-        analysis_files = list_analysis_files(output_dir, postprocess_config)
+        csv_files = []
+        kpi_json_files = []
+        ai_data_files = []
 
-        upload_files.extend(csv_files)
-        upload_files.extend(kpi_json_files)
-        upload_files.extend(analysis_files)
+        if s3_config.include_csv:
+            csv_files = list_csv_files(output_dir, postprocess_config)
+            if not csv_files:
+                error_detected = True
+            upload_files.extend(csv_files)
+
+        if s3_config.include_kpis_json:
+            kpi_json_files = list_kpi_json_files(output_dir, postprocess_config)
+            if not kpi_json_files:
+                error_detected = True
+            upload_files.extend(kpi_json_files)
+
+        if True:
+            analysis_files = list_analysis_files(output_dir, postprocess_config)
+            if not analysis_files:
+                error_detected = True
+            upload_files.extend(analysis_files)
 
         if s3_config.include_ai_data:
-            # Use AI data directory from parameter
-            if ai_data_dir:
-                ai_data_files = list_ai_data_files(ai_data_dir)
-                logger.info(f"Found {len(ai_data_files)} AI data files in directory: {ai_data_dir}")
-                upload_files.extend(ai_data_files)
-            else:
-                logger.warning("AI data export is enabled but no AI data directory provided")
+            ai_data_files = list_ai_data_files(ai_data_dir)
+            if not ai_data_files:
+                error_detected = True
+            upload_files.extend(ai_data_files)
 
         logger.info(f"Preparing to upload {len(upload_files)} files to S3")
         total_size = sum(f.stat().st_size for f in upload_files)
@@ -743,8 +718,9 @@ def run_s3_export(
 
         if not upload_files:
             logger.warning("No files to upload")
+            status = "failed" if error_detected else "skipped"
             return {
-                "status": "skipped",
+                "status": status,
                 "reason": "no files to upload",
                 "completed_at": time.time(),
             }
@@ -794,104 +770,10 @@ def run_s3_export(
         if dry_run:
             logger.info("DRY RUN: Skipping actual upload")
 
-            # Save dry run results to YAML file
-            dry_run_data = {
-                "s3_export_dry_run": {
-                    "timestamp": datetime.now().isoformat(),
-                    "export_config": {
-                        "bucket": bucket,
-                        "instance": instance,
-                        "directory": directory,
-                        "upload_id": upload_id,
-                        "exported_path": f"s3://{bucket}/{export_s3_prefix}",
-                    },
-                    "csv_files": [],
-                    "kpis_json_files": [],
-                    "ai_data_files": [],
-                    "upload_plan": upload_plan,
-                    "summary": {
-                        "total_files": len(upload_files),
-                        "total_size_bytes": total_size,
-                        "csv_files_count": len([f for f in upload_files if f.suffix == ".csv"]),
-                        "kpis_json_files_count": len(
-                            [f for f in upload_files if f.name == "kpis.json"]
-                        ),
-                        "ai_data_files_count": len(
-                            [f for f in upload_files if ai_data_dir and ai_data_dir in f.parents]
-                        ),
-                    },
-                }
-            }
-
-            # Collect CSV file details (use already collected files)
-            for csv_file in csv_files:
-                try:
-                    relative_csv_path = str(csv_file.relative_to(artifact_dir))
-                except ValueError:
-                    relative_csv_path = str(csv_file)
-
-                dry_run_data["s3_export_dry_run"]["csv_files"].append(
-                    {
-                        "name": csv_file.name,
-                        "path": relative_csv_path,
-                        "size_bytes": csv_file.stat().st_size,
-                    }
-                )
-
-            # Collect KPI JSON file details
-            if s3_config.include_kpis_json:
-                kpi_json_files = list_kpi_json_files(output_dir, postprocess_config)
-                for kpi_file in kpi_json_files:
-                    try:
-                        relative_kpi_path = str(kpi_file.relative_to(artifact_dir))
-                    except ValueError:
-                        relative_kpi_path = str(kpi_file)
-
-                    dry_run_data["s3_export_dry_run"]["kpis_json_files"].append(
-                        {
-                            "name": kpi_file.name,
-                            "path": relative_kpi_path,
-                            "size_bytes": kpi_file.stat().st_size,
-                        }
-                    )
-
-            # Collect AI eval file details
-            if s3_config.include_ai_data and ai_data_dir:
-                ai_data_files = list_ai_data_files(ai_data_dir)
-                for ai_data_file in ai_data_files:
-                    relative_path = ai_data_file.relative_to(ai_data_dir)
-                    try:
-                        relative_full_path = str(ai_data_file.relative_to(artifact_dir))
-                    except ValueError:
-                        relative_full_path = str(ai_data_file)
-
-                    dry_run_data["s3_export_dry_run"]["ai_data_files"].append(
-                        {
-                            "full_path": relative_full_path,
-                            "size_bytes": ai_data_file.stat().st_size,
-                        }
-                    )
-
-            # Write to YAML file
-            dry_run_file = output_dir / "upload_dry_run.yaml"
-            try:
-                with open(dry_run_file, "w") as f:
-                    yaml.dump(dry_run_data, f, default_flow_style=False, indent=2)
-                logger.info(f"Dry run results saved to: {dry_run_file}")
-            except Exception as e:
-                logger.error(f"Failed to save dry run results: {e}")
-                return {
-                    "status": "failed",
-                    "error": f"Failed to save dry run results: {e}",
-                    "dry_run": True,
-                    "completed_at": time.time(),
-                    "duration": round(time.time() - start_time),
-                }
-
+            status = "failed" if error_detected else "success"
             response = {
-                "status": "success",
+                "status": status,
                 "dry_run": True,
-                "dry_run_file": str(dry_run_file),
                 "completed_at": time.time(),
                 "duration": round(time.time() - start_time),
             }
@@ -938,10 +820,11 @@ def run_s3_export(
                     "error": f"All uploads failed. Failed files: {failed_uploads}",
                     "completed_at": time.time(),
                 }
-            else:
-                logger.warning(
-                    f"Partial success: {uploaded_count} uploaded, {len(failed_uploads)} failed"
-                )
+
+            error_detected = True
+            logger.warning(
+                f"Partial success: {uploaded_count} uploaded, {len(failed_uploads)} failed"
+            )
 
         target_url = f"s3://{bucket}/{export_s3_prefix}"
         logger.info(
@@ -949,10 +832,8 @@ def run_s3_export(
         )
 
         # Determine final status
-        if failed_uploads:
-            status = "partial_success" if uploaded_count > 0 else "failed"
-        else:
-            status = "success"
+
+        status = "failed" if error_detected else "success"
 
         return {
             "status": status,
