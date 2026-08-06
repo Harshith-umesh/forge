@@ -29,6 +29,7 @@ from projects.caliper.orchestration.export_config import (
 )
 from projects.core.library import env
 from projects.core.library import vault as vault_lib
+from projects.core.library.config import requires
 
 logger = logging.getLogger(__name__)
 
@@ -278,6 +279,47 @@ def run_from_orchestration_config(
 
 
 TEST_LABELS_FILENAME = "__test_labels__.yaml"
+
+
+@requires(
+    vault_name="caliper.export.backend.mlflow.secrets.vault.name",
+    vault_key="caliper.export.backend.mlflow.secrets.vault.mlflow_secret",
+    experiment="caliper.export.backend.mlflow.config.experiment",
+    workspace="caliper.export.backend.mlflow.config.workspace",
+)
+def precreate_mlflow_run_if_configured(_cfg) -> dict[str, str] | None:
+    """Pre-create an MLflow run and return the ``mlflow_destination`` dict.
+
+    Uses ``@requires`` to read vault and MLflow config from the project config.
+    Returns ``None`` if MLflow is not configured or pre-creation fails.
+    The returned dict contains ``run_id``, ``experiment_id``, and ``workspace``.
+    """
+    vault_name = _cfg.vault_name
+    vault_key = _cfg.vault_key
+    if not vault_name or not vault_key:
+        logger.info("MLflow vault not configured, skipping run pre-creation")
+        return None
+
+    secrets_path = vault_lib.get_vault_content_path(vault_name, vault_key)
+    if not secrets_path or not secrets_path.exists():
+        logger.info("MLflow secrets file not found, skipping run pre-creation")
+        return None
+
+    try:
+        meta = precreate_mlflow_run(
+            secrets_path=secrets_path,
+            experiment=_cfg.experiment or None,
+            workspace=_cfg.workspace or None,
+        )
+    except Exception:
+        logger.warning("MLflow run pre-creation failed; continuing", exc_info=True)
+        return None
+
+    return {
+        "run_id": meta["run_id"],
+        "experiment_id": meta.get("experiment_id", ""),
+        "workspace": _cfg.workspace or "",
+    }
 
 
 def precreate_mlflow_run(

@@ -32,10 +32,10 @@ completion:
   - **`platform`**: Platform name (e.g., `"CKS"`, `"RHOAI"`)
   - **`gpu_type`**: GPU type (e.g., `"H100"`, `"A100"`)
   - **`test_harness`**: Test framework (e.g., `"guidellm"`, `"vllm"`)
-- **`mlflow_destination`**: Pre-created MLflow run for artifact upload
+- **`mlflow_destination`** *(optional)*: Pre-created MLflow run for artifact upload
   - **`run_id`**: MLflow run ID (assigned by the server during pre-creation)
-  - **`experiment_id`**: MLflow experiment ID
-  - **`workspace`**: MLflow workspace name (optional)
+  - **`experiment_id`** *(optional)*: MLflow experiment ID
+  - **`workspace`** *(optional)*: MLflow workspace name
 - **`completion`**: Test execution status
   - **`success`**: `true` if succeeded, `false` if failed
   - **`message`**: Human-readable status description
