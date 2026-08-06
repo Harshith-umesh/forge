@@ -27,6 +27,7 @@ from projects.caliper.orchestration.cli_builder import (
     build_analyse_kpis_command,
     build_kpi_csv_export_command,
     build_kpi_generate_command,
+    build_kpis_to_mlflow_command,
     build_parse_command,
     build_s3_export_command,
     build_s3_import_command,
@@ -1016,6 +1017,9 @@ class CaliperPostprocessOrchestrator:
         # KPI JSON generation
         self._run_artifacts_to_kpis_step(output_dir, mod_str)
 
+        # Generate per-run metrics.json + parameters.json from kpis.json
+        self._run_kpis_to_metrics_step(output_dir)
+
         # KPI CSV export
         self._run_kpis_to_csv_step(output_dir)
 
@@ -1054,6 +1058,51 @@ class CaliperPostprocessOrchestrator:
                     "completed_at": time.time(),
                 },
             )
+
+    def _run_kpis_to_metrics_step(self, output_dir: Path) -> None:
+        """Generate per-run metrics.json + parameters.json from kpis.json.
+
+        Runs automatically after kpis.json generation succeeds. Uses
+        ``caliper kpi kpis-to-mlflow`` via fork/exec like all other steps.
+        """
+        kpi_step = self._get_step("artifacts_to_kpis")
+        if not kpi_step or kpi_step.get("status") != "success":
+            return
+
+        kpis_json_path = output_dir / self.config.kpi.artifacts_to_kpis.output
+
+        status_file = output_dir / "kpis_to_mlflow_status.yaml"
+
+        command = build_kpis_to_mlflow_command(
+            tree_root=self.tree_root,
+            status_file=status_file,
+            input_file=kpis_json_path,
+        )
+
+        result, status_data, log_file = _execute_caliper_command(
+            command=command,
+            step_name="caliper kpi kpis-to-mlflow",
+            status_file=status_file,
+            step_logs_dir=self.step_logs_dir,
+        )
+
+        try:
+            status_file.unlink()
+        except FileNotFoundError:
+            pass
+
+        step_result = {
+            "status": "success" if status_data.get("success") else "failed",
+            "completed_at": time.time(),
+        }
+        if status_data.get("success"):
+            step_result["tests_processed"] = status_data.get("tests_processed", 0)
+            step_result["total_tests"] = status_data.get("total_tests", 0)
+        self._add_step("kpis_to_mlflow", step_result, log_file)
+
+        if result.returncode != 0 or not status_data.get("success"):
+            error = status_data.get("error", f"exit code {result.returncode}")
+            logger.error("kpis-to-mlflow step failed: %s", error)
 
     def _run_kpis_to_csv_step(self, output_dir: Path) -> None:
         """Execute the KPI CSV export step."""
