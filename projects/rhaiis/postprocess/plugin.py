@@ -20,25 +20,26 @@ logger = logging.getLogger(__name__)
 
 
 def _read_mlflow_destination_from_test_labels(kpi_records: list[dict]) -> dict[str, str]:
-    """Extract mlflow_destination from __test_labels__.yaml near the first KPI run_path."""
+    """Extract mlflow_destination from __test_labels__.yaml by walking up from KPI run_path."""
     import yaml
 
     for kpi in kpi_records:
         run_path = kpi.get("run_path", "")
         if not run_path:
             continue
-        labels_file = Path(run_path) / "__test_labels__.yaml"
-        if not labels_file.exists():
-            labels_file = Path(run_path).parent / "__test_labels__.yaml"
-        if not labels_file.exists():
-            continue
-        try:
-            data = yaml.safe_load(labels_file.read_text(encoding="utf-8"))
-            dest = data.get("mlflow_destination") if isinstance(data, dict) else None
-            if isinstance(dest, dict) and dest.get("run_id"):
-                return dest
-        except (OSError, yaml.YAMLError):
-            pass
+        current = Path(run_path)
+        while current != current.parent:
+            labels_file = current / "__test_labels__.yaml"
+            if labels_file.exists():
+                try:
+                    data = yaml.safe_load(labels_file.read_text(encoding="utf-8"))
+                    dest = data.get("mlflow_destination") if isinstance(data, dict) else None
+                    if isinstance(dest, dict) and dest.get("run_id"):
+                        return dest
+                except (OSError, yaml.YAMLError):
+                    pass
+                break
+            current = current.parent
     return {}
 
 
