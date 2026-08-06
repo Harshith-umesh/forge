@@ -1,3 +1,0 @@
-rhaiis.namespace: kserve-e2e-perf
-rhaiis.deploy.image_pull_secret: npalaska-image-pull
-rhaiis.deploy.service_account_name: sa
