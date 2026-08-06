@@ -146,12 +146,13 @@ def run_replot(*, artifact_directory: Path | None, keep_download_dir: bool | Non
 @click.option(
     "--keep-download",
     is_flag=True,
+    default=None,
     help="Keep the download directory after processing (don't clean up).",
 )
 @click.pass_context
 @ci_lib.safe_ci_entrypoint
 def caliper_replot_entrypoint(
-    _ctx, artifact_directory: Path | None, replot_url: str | None, keep_download: bool
+    _ctx, artifact_directory: Path | None, replot_url: str | None, keep_download: bool | None
 ):
     """Replot artifacts and visualizations from a remote URL."""
 
