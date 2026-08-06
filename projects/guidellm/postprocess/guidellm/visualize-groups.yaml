@@ -5,11 +5,16 @@
 # Report system:
 #   Report 00: GuideLLM Performance Analysis (comprehensive embedded report with all charts)
 #   Report 01: GuideLLM KPI Summary (test conditions and key performance indicators)
+#   Report 02: GuideLLM Deployment Profile Analysis (dedicated plots for each deployment profile)
 
 groups:
   # Comprehensive analysis - all reports including performance analysis and KPI summary (recommended)
   comprehensive:
+    - report_kpi_summary
     - report_performance_analysis
+
+  release_regression:
+    - report_deployment_profile
     - report_kpi_summary
 
   # Performance overview - main performance report only
@@ -24,3 +29,4 @@ groups:
   all:
     - report_performance_analysis
     - report_kpi_summary
+    - report_deployment_profile

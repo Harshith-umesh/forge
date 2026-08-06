@@ -794,8 +794,6 @@ class CaliperPostprocessOrchestrator:
                 step_data = {
                     "plugin_module": status_data.get("plugin_module", "unknown"),
                     "record_count": record_count,
-                    "test_directories": status_data.get("test_directories", []),
-                    "test_directories_count": status_data.get("test_directories_count", 0),
                     "parse_cache_ref": status_data.get("cache_ref"),
                     "completed_at": time.time(),
                 }
@@ -1291,6 +1289,16 @@ class CaliperPostprocessOrchestrator:
 
         logger.info("KPI analysis result:")
         logger.info(json.dumps(result, indent=2, default=str))
+
+        if result.get("regressions_detected"):
+            logger.info("Regression detected!")
+            if self.config.analyze.fail_on_regression:
+                result["status"] = "failed"
+                logger.info("fail_on_regression is set, setting the status to 'failure'")
+                result["error"] = "regression detected"
+            else:
+                result["status"] = "success"
+                logger.info("fail_on_regression is not set, setting the status to 'success'")
 
         self._check_step_result_and_set_failure("analyse_kpis", result)
 

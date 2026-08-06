@@ -45,6 +45,7 @@ class KpiTestResult:
     higher_is_better: bool
     regression: bool
     baseline_count: int
+    baseline_values: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -88,10 +89,10 @@ def _load_analysis_config(plugin_module: str) -> AnalysisConfig:
         )
 
     if isinstance(raw, AnalysisConfig):
-        return raw
-    if isinstance(raw, dict):
+        config = raw
+    elif isinstance(raw, dict):
         try:
-            return AnalysisConfig(
+            config = AnalysisConfig(
                 **{k: v for k, v in raw.items() if k in AnalysisConfig.__dataclass_fields__}
             )
         except Exception as exc:
@@ -103,6 +104,45 @@ def _load_analysis_config(plugin_module: str) -> AnalysisConfig:
         raise ValueError(
             f"Plugin module '{plugin_module}' analysis config has unsupported type '{type(raw).__name__}'. "
             f"Must be a dict or AnalysisConfig instance."
+        )
+
+    # Validate the configuration fields
+    try:
+        _validate_analysis_config(config, plugin_module)
+        return config
+    except ValueError:
+        raise
+
+
+def _validate_analysis_config(config: AnalysisConfig, plugin_module: str) -> None:
+    """Validate AnalysisConfig fields and raise ValueError for invalid values."""
+    # Validate list fields contain only strings
+    for field_name in ["comparison_keys", "ignored_keys", "sorting_keys"]:
+        field_value = getattr(config, field_name)
+        if not isinstance(field_value, list):
+            raise ValueError(
+                f"Plugin module '{plugin_module}' analysis config field '{field_name}' must be a list, "
+                f"got {type(field_value).__name__}: {field_value}"
+            )
+        for i, item in enumerate(field_value):
+            if not isinstance(item, str):
+                raise ValueError(
+                    f"Plugin module '{plugin_module}' analysis config field '{field_name}' "
+                    f"must contain only strings, got {type(item).__name__} at index {i}: {item}"
+                )
+
+    # Validate max_relative_regression is numeric
+    if not isinstance(config.max_relative_regression, (int, float)):
+        raise ValueError(
+            f"Plugin module '{plugin_module}' analysis config field 'max_relative_regression' "
+            f"must be numeric, got {type(config.max_relative_regression).__name__}: {config.max_relative_regression}"
+        )
+
+    # Validate min_baseline_points is at least 1
+    if not isinstance(config.min_baseline_points, int) or config.min_baseline_points < 1:
+        raise ValueError(
+            f"Plugin module '{plugin_module}' analysis config field 'min_baseline_points' "
+            f"must be an integer >= 1, got {type(config.min_baseline_points).__name__}: {config.min_baseline_points}"
         )
 
 
@@ -165,6 +205,22 @@ def _run_regression_test(
     baseline_values = [float(b["value"]) for b in baselines if b.get("value") is not None]
     baseline_mean = sum(baseline_values) / len(baseline_values)
 
+    # Build baseline values mapping by comparison flags
+    baseline_values_by_comparison = {}
+    for baseline in baselines:
+        if baseline.get("value") is not None:
+            baseline_value = float(baseline["value"])
+            baseline_labels = baseline.get("labels", {})
+
+            # Create comparison flag from comparison_keys
+            comparison_parts = []
+            for key in config.comparison_keys:
+                if key in baseline_labels:
+                    comparison_parts.append(f"{key}={baseline_labels[key]}")
+
+            comparison_flag = ", ".join(comparison_parts) if comparison_parts else "default"
+            baseline_values_by_comparison[comparison_flag] = baseline_value
+
     if baseline_mean == 0:
         relative_change = 0.0
     else:
@@ -186,6 +242,7 @@ def _run_regression_test(
         higher_is_better=higher_is_better,
         regression=regression,
         baseline_count=len(baseline_values),
+        baseline_values=baseline_values_by_comparison,
     )
 
 
@@ -247,6 +304,7 @@ def _build_report(
                 "higher_is_better": r.higher_is_better,
                 "verdict": "REGRESSION" if r.regression else "PASS",
                 "baseline_count": r.baseline_count,
+                "baseline_values": r.baseline_values,
             }
             for r in results
         ],
@@ -296,7 +354,7 @@ def run_kpi_analysis(
                 "error": f"Current KPI file not found: {current_kpi_file}",
                 "exit_code": 1,
                 "completed_at": time.time(),
-            }
+            }, None
 
         if not historical_data_dir.exists():
             logger.error("Historical data directory not found: %s", historical_data_dir)
@@ -306,7 +364,7 @@ def run_kpi_analysis(
                 "error": f"Historical data directory not found: {historical_data_dir}",
                 "exit_code": 1,
                 "completed_at": time.time(),
-            }
+            }, None
 
         try:
             config = _load_analysis_config(plugin_module)
@@ -318,7 +376,7 @@ def run_kpi_analysis(
                 "error": f"Analysis configuration error: {exc}",
                 "exit_code": 1,
                 "completed_at": time.time(),
-            }
+            }, None
 
         logger.info(
             "  config: comparison_keys=%s, ignored_keys=%s",
@@ -338,7 +396,7 @@ def run_kpi_analysis(
                 "error": "Current KPI file must be schema_version 2 (hierarchical)",
                 "exit_code": 1,
                 "completed_at": time.time(),
-            }
+            }, None
 
         current_records = _extract_kpi_records_from_hierarchical(current_data)
         if not current_records:
@@ -349,12 +407,12 @@ def run_kpi_analysis(
                 "error": "No KPI records found in current file",
                 "exit_code": 1,
                 "completed_at": time.time(),
-            }
+            }, None
 
         # Load baseline KPIs
         baseline_kpi_data = find_baseline_kpis(historical_data_dir)
         if not baseline_kpi_data:
-            _write_warning_report(output_file, current_kpi_file, plugin_module)
+            _write_no_baseline_report(output_file, current_kpi_file, plugin_module)
             return {
                 "status": "warning",
                 "success": True,
@@ -362,7 +420,7 @@ def run_kpi_analysis(
                 "output_file": str(output_file),
                 "exit_code": 2,
                 "completed_at": time.time(),
-            }
+            }, None
 
         # Build baseline index
         baseline_index = _build_baseline_index(baseline_kpi_data, config)
@@ -421,6 +479,7 @@ def run_kpi_analysis(
 
         regressions = report["overall"]["regression_count"]
         total = report["overall"]["total_tested"]
+        overall_verdict = report["overall"]["verdict"]
         logger.info(
             "Analysis complete: %d/%d KPIs tested, %d regressions",
             total,
@@ -428,23 +487,24 @@ def run_kpi_analysis(
             regressions,
         )
 
-        if regressions > 0:
+        # Return status based on the overall verdict from the report
+        if overall_verdict == "REGRESSION_DETECTED":
             return {
                 "status": "regression_detected",
-                "success": True,
-                "regressions_detected": True,
+                "success": False,
+                "regressions_detected": True,  # For orchestration compatibility
                 "output_file": str(output_file),
                 "exit_code": 3,
                 "completed_at": time.time(),
-            }
-        else:
+            }, report
+        else:  # "PASS"
             return {
                 "status": "success",
                 "success": True,
                 "output_file": str(output_file),
                 "exit_code": 0,
                 "completed_at": time.time(),
-            }
+            }, report
 
     except Exception as e:
         logger.exception("KPI analysis failed")
@@ -454,10 +514,12 @@ def run_kpi_analysis(
             "error": f"KPI analysis failed: {e}",
             "exit_code": 1,
             "completed_at": time.time(),
-        }
+        }, None
 
 
-def _write_warning_report(output_file: Path, current_kpi_file: Path, plugin_module: str) -> None:
+def _write_no_baseline_report(
+    output_file: Path, current_kpi_file: Path, plugin_module: str
+) -> None:
     """Write a warning-level report when no baselines are available."""
     report = {
         "analysis": {
@@ -555,19 +617,12 @@ def run_analyze(
 
     plugin_module = getattr(plugin, "__module__", "unknown") if plugin else "unknown"
 
-    result = run_kpi_analysis(
+    return run_kpi_analysis(
         current_kpi_file=Path(current_path),
         historical_data_dir=historical_dir,
         output_file=Path(output_path),
         plugin_module=plugin_module,
     )
-
-    # Extract just the relevant fields for this legacy interface
-    return {
-        "status": result.get("status"),
-        "message": result.get("message"),
-        "completed_at": result.get("completed_at"),
-    }
 
 
 def _convert_v1_to_v2(v1_records: list[dict]) -> dict:
@@ -713,7 +768,7 @@ def analyze_kpis(
     historical_kpis_dir: Path,
     output_file: Path,
     plugin_module: str,
-) -> dict[str, Any]:
+):
     """Analyze KPIs with automatic v1/v2 format conversion.
 
     This function handles:
@@ -737,82 +792,19 @@ def analyze_kpis(
     """
 
     try:
-        # Use directory-based analysis (supports multiple baseline files)
-        result = run_kpi_analysis(
+        return run_kpi_analysis(
             current_kpi_file=current_kpis_file,
             historical_data_dir=historical_kpis_dir,
             output_file=output_file,
             plugin_module=plugin_module,
         )
 
-        # Convert to the expected format for orchestration and CLI
-        if result.get("status") == "success":
-            return {
-                "status": "success",
-                "success": True,
-                "output_file": result.get("output_file"),
-                "completed_at": result.get("completed_at"),
-            }
-        elif result.get("status") == "warning":
-            return {
-                "status": "warning",
-                "success": True,  # Warning is still success
-                "message": result.get("message"),
-                "output_file": result.get("output_file"),
-                "completed_at": result.get("completed_at"),
-            }
-        elif result.get("status") == "regression_detected":
-            return {
-                "status": "regression_detected",
-                "success": True,  # Regression detection is successful analysis
-                "regressions_detected": True,
-                "output_file": result.get("output_file"),
-                "completed_at": result.get("completed_at"),
-            }
-        else:
-            return {
-                "status": "failed",
-                "success": False,
-                "error": result.get("error", "Analysis failed"),
-                "completed_at": result.get("completed_at"),
-            }
-
     except Exception as e:
         logger.exception("KPI analysis with format conversion failed")
         return {
+            "status": "failed",
             "success": False,
             "error": str(e),
+            "exit_code": 1,
             "completed_at": time.time(),
-        }
-
-
-def status_dict_to_exit_code(status_dict: dict[str, Any]) -> int:
-    """Convert a status dictionary to an exit code for CLI use.
-
-    Args:
-        status_dict: Status dictionary from engine analysis functions
-
-    Returns:
-        Exit code: 0=success, 1=error, 2=warning (no baseline), 3=regression detected
-    """
-    # If the status dict includes an explicit exit_code, use it
-    if "exit_code" in status_dict:
-        return status_dict["exit_code"]
-
-    # Otherwise, determine exit code from status fields
-    if not status_dict.get("success", False):
-        return 1  # General error
-
-    status = status_dict.get("status", "")
-
-    if status == "success":
-        return 0
-    elif status == "warning" or "no baseline" in status_dict.get("message", "").lower():
-        return 2  # Warning (no baseline data)
-    elif status == "regression_detected" or status_dict.get("regressions_detected"):
-        return 3  # Regression detected
-    else:
-        return 0  # Default to success if unclear
-
-
-# EOF
+        }, {}

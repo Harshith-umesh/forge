@@ -17,7 +17,10 @@ from projects.caliper.engine.model import (
 from .ai_eval import GuideLLMAIEvaluator
 from .parsing import GuideLLMKpiHandler, GuideLLMParser
 from .plotting.kpi_report import generate_kpi_report
-from .plotting.performance_analysis import generate_comprehensive_performance_report
+from .plotting.performance_analysis import (
+    generate_comprehensive_performance_report,
+    generate_deployment_profile_report,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +54,15 @@ PLOT_REGISTRY = {
             "report_title": "GuideLLM KPI Summary",
         },
         "description": "KPI summary with test conditions and metrics",
+    },
+    "report_deployment_profile": {
+        "function": generate_deployment_profile_report,
+        "type": "report",
+        "kwargs": {
+            "report_number": 2,
+            "report_title": "GuideLLM Deployment Profile Analysis",
+        },
+        "description": "performance analysis comparing different product versions/models under identical test conditions",
     },
 }
 
@@ -176,8 +188,9 @@ class GuideLLMPlugin(PostProcessingPlugin):
                     logger.info("Generated %s: %s", report_name, path)
                 else:
                     logger.warning("Failed to generate %s", report_name)
-            except Exception as e:
-                logger.error("Error generating %s: %s", report_name, e)
+            except Exception:
+                logger.exception("Error generating %s", report_name)
+                raise
 
         # Check for invalid report names and raise error if found
         if invalid_reports:
