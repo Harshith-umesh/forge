@@ -108,14 +108,14 @@ This installs the module into whichever agents they have configured.
 
 If you prefer not to use Lola, copy the skill directory manually.
 
-#### Cursor
+### Cursor
 
 ```bash
 mkdir -p .cursor/skills/forge-review
 cp -r module/skills/forge-review/* .cursor/skills/forge-review/
 ```
 
-#### Claude Code
+### Claude Code
 
 ```bash
 mkdir -p .claude/skills/forge-review

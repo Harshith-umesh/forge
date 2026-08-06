@@ -37,8 +37,11 @@ elif [[ -n "${UNSTAGED}" ]]; then
     echo "${UNSTAGED}"
 else
     MERGE_BASE=$(git merge-base "${BASE_BRANCH}" HEAD 2>/dev/null || true)
-    if [[ -n "${MERGE_BASE}" ]]; then
-        BRANCH_DIFF=$(git diff "${MERGE_BASE}...HEAD" 2>/dev/null || true)
+    if [[ -z "${MERGE_BASE}" ]]; then
+        echo ""
+        echo "=== DIFF_TYPE: none ==="
+        echo "Could not determine merge-base with ${BASE_BRANCH}."
+    elif BRANCH_DIFF=$(git diff "${MERGE_BASE}...HEAD" 2>&1); then
         if [[ -n "${BRANCH_DIFF}" ]]; then
             echo ""
             echo "=== DIFF_TYPE: branch ==="
@@ -50,8 +53,8 @@ else
         fi
     else
         echo ""
-        echo "=== DIFF_TYPE: none ==="
-        echo "Could not determine merge-base with ${BASE_BRANCH}."
+        echo "=== DIFF_TYPE: error ==="
+        echo "git diff failed: ${BRANCH_DIFF}"
     fi
 fi
 

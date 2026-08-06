@@ -18,10 +18,11 @@ Run this review **before every commit**. If the user asks to commit, run this re
 
 ### Step 1: Gather the diff
 
-Run the diff gathering script:
+Run the diff gathering script that lives alongside this SKILL.md file.
+Resolve the path relative to the directory containing this file, **not** the project root:
 
 ```bash
-./scripts/gather-diff.sh
+bash <this_skill_directory>/scripts/gather-diff.sh
 ```
 
 The script outputs structured sections:
