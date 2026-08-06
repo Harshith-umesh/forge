@@ -7,10 +7,6 @@ gpu_types:
   amd: mi300x
   l40s: l40s
 
-images:
-  nvidia: quay.io/aipcc/rhaiis/cuda-ubi9:3.4.0-ea.2-1773886296
-  amd: quay.io/aipcc/rhaiis/rocm-ubi9:3.2.5-1766067105
-
 engine: vllm
 
 engines:
@@ -94,4 +90,4 @@ profiler:
 agent_analysis:
   enabled: false
   severity_threshold: 10
-  url: "http://agent-gateway.psap-ai-analysis-agent-gateway.svc.cluster.local:8443/v1/stream"
+  url: ""
