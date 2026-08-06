@@ -14,7 +14,6 @@ from projects.caliper.cli.commands import (
     analyse_kpis_cmd,
     artifacts_export,
     artifacts_import,
-    kpi_analyze,
     kpi_csv_export,
     kpi_generate,
     kpi_import,
@@ -151,7 +150,7 @@ def main(
 @main.group("kpi")
 @click.pass_context
 def kpi_group(ctx: click.Context) -> None:
-    """KPI generate/import/export/analyze."""
+    """KPI generate/import/export/."""
 
 
 @main.group("artifacts")
@@ -211,7 +210,6 @@ main.add_command(ai_eval_export)
 kpi_group.add_command(kpi_generate)
 kpi_group.add_command(kpi_csv_export)
 kpi_group.add_command(kpi_import)
-kpi_group.add_command(kpi_analyze)
 kpi_group.add_command(analyse_kpis_cmd)
 kpi_group.add_command(kpi_s3_import)
 

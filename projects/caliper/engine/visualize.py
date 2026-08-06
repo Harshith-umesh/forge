@@ -7,7 +7,7 @@ from typing import Any
 
 import yaml
 
-from projects.caliper.engine.label_filters import filter_records, parse_filter_kv
+from projects.caliper.engine.label_filters import parse_filter_pairs
 from projects.caliper.engine.parse import run_parse
 
 
@@ -70,18 +70,24 @@ def run_visualize(
     use_cache: bool,
     cache_path: Path | None,
 ) -> list[str]:
+    # Parse include and exclude filters for directory-level filtering
+    include_filters = None
+    exclude_filters = None
+
+    if include_pairs:
+        include_filters = parse_filter_pairs(include_pairs, "include")
+
+    if exclude_pairs:
+        exclude_filters = parse_filter_pairs(exclude_pairs, "exclude")
+
+    # Apply both include and exclude filtering during parsing
     model = run_parse(
         base_dir=base_dir,
         plugin_module=plugin_module,
         plugin=plugin,
         use_cache=use_cache,
-    )
-    inc = parse_filter_kv(include_pairs)
-    exc = parse_filter_kv(exclude_pairs)
-    model.unified_result_records = filter_records(
-        model.unified_result_records,
-        include=inc,
-        exclude=exc,
+        include_label_filter=include_filters,
+        exclude_label_filter=exclude_filters,
     )
     cfg = resolve_visualize_config(base_dir, visualize_config_path)
     ids = resolve_report_ids(

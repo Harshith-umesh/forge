@@ -146,13 +146,16 @@ def _build_multi_run_script(*, endpoint_url: str, runs: list[GuideLLMRun]) -> st
     return "\n".join(lines)
 
 
-def render_guidellm_pvc_from_parts(*, namespace: str, name: str, pvc_size: str) -> dict[str, Any]:
+def render_guidellm_pvc_from_parts(
+    *, namespace: str, name: str, pvc_size: str, owner_reference: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Render a GuideLL-M PVC manifest from individual components.
 
     Args:
         namespace: Target namespace
         name: Name of the benchmark job and PVC
         pvc_size: Size of the PVC
+        owner_reference: Optional owner reference to set (e.g., for job ownership)
 
     Returns:
         PVC manifest as dict
@@ -165,7 +168,13 @@ def render_guidellm_pvc_from_parts(*, namespace: str, name: str, pvc_size: str) 
             "pvc_size": pvc_size,
         },
     )
-    return yaml.safe_load(rendered_yaml)
+    manifest = yaml.safe_load(rendered_yaml)
+
+    # Add owner reference if provided
+    if owner_reference:
+        manifest["metadata"]["ownerReferences"] = [owner_reference]
+
+    return manifest
 
 
 def render_guidellm_job_from_parts(
@@ -175,6 +184,9 @@ def render_guidellm_job_from_parts(
     image: str,
     endpoint_url: str,
     guidellm_args: list[str],
+    timeout_seconds: int,
+    hf_token_secret: str = "",
+    fs_group: int | None = None,
 ) -> dict[str, Any]:
     """Render a GuideLL-M job manifest from individual components.
 
@@ -184,6 +196,11 @@ def render_guidellm_job_from_parts(
         image: Container image for GuideLLM
         endpoint_url: Gateway endpoint URL
         guidellm_args: Additional arguments for GuideLLM
+        timeout_seconds: Active deadline for the Kubernetes Job
+        hf_token_secret: Name of the K8s secret containing HF_TOKEN. If empty, HF_TOKEN is not injected.
+        fs_group: If set, adds a pod-level securityContext.fsGroup to ensure
+            the PVC is writable by the container. Needed on clusters where the
+            CSI driver provisions volumes with root-only permissions.
 
     Returns:
         Job manifest as dict
@@ -195,9 +212,12 @@ def render_guidellm_job_from_parts(
             "namespace": namespace,
             "name": name,
             "image": image,
+            "hf_token_secret": hf_token_secret,
+            "fs_group": fs_group,
         },
     )
     manifest = yaml.safe_load(rendered_yaml)
+    manifest["spec"]["activeDeadlineSeconds"] = timeout_seconds
     container = manifest["spec"]["template"]["spec"]["containers"][0]
     if len(runs) == 1 and runs[0].rate is None:
         container["command"] = ["/opt/app-root/bin/guidellm"]

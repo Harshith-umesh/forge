@@ -33,21 +33,34 @@ import click
 )
 def analyze_cli(current: Path, historical_dir: Path, output: Path, plugin_module: str) -> None:
     """CLI entrypoint for KPI analysis."""
-    from projects.caliper.engine.kpi.analyze import run_kpi_analysis
+    from projects.caliper.engine.kpi.analyze import (
+        analyze_kpis,
+        status_dict_to_exit_code,
+    )
 
     try:
-        # Call the core analysis function from engine
-        exit_code = run_kpi_analysis(
-            current_kpi_file=current,
-            historical_data_dir=historical_dir,
+        # Call the core analysis function from engine (returns status dict)
+        result = analyze_kpis(
+            current_kpis_file=current,
+            historical_kpis_dir=historical_dir,
             output_file=output,
             plugin_module=plugin_module,
         )
 
-        if exit_code == 0:
+        # Convert status dict to exit code for CLI
+        exit_code = status_dict_to_exit_code(result)
+
+        if result.get("success"):
             click.echo(f"✅ Analysis completed successfully. Results written to: {output}")
+            if result.get("regressions_detected"):
+                click.echo("⚠️  Regressions detected in analysis results")
+            elif result.get("message"):
+                click.echo(f"ℹ️  {result.get('message')}")
         else:
-            click.echo(f"❌ Analysis failed with exit code {exit_code}", err=True)
+            error_msg = result.get("error", "Unknown error")
+            click.echo(f"❌ Analysis failed: {error_msg}", err=True)
+
+        if exit_code != 0:
             sys.exit(exit_code)
 
     except Exception as e:

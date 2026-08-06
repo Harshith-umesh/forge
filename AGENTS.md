@@ -25,7 +25,7 @@ Key paths:
    If the manifest contains sensitive data (passwords, tokens, pull-secrets, certificates, API keys),
    it MUST NOT be written to any path under `env.ARTIFACT_DIR`.
 
-2. **Use `oc_apply_secret()` or `oc("apply", "-f", "-", input_text=...)` for secrets.**
+2. **Use `oc("apply", "-f", "-", input_text=..., handled_secretly=True)` for secrets.**
    Apply secrets via stdin or a dedicated helper that does not persist the payload.
    Never use the standard `oc_apply()` for Secret-kind manifests.
 

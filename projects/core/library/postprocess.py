@@ -33,7 +33,12 @@ logger = logging.getLogger(__name__)
 
 
 def write_test_labels(
-    directory: Path, labels: dict[str, str], *, version: str = "1", dump_config: bool = True
+    directory: Path,
+    labels: dict[str, str],
+    *,
+    version: str = "1",
+    dump_config: bool = True,
+    kpi_labels: dict[str, str] | None = None,
 ) -> Path:
     """Write a __test_labels__.yaml file to mark a directory as a Caliper test base.
 
@@ -42,6 +47,7 @@ def write_test_labels(
         labels: Dictionary of label key-value pairs
         version: Version string for the test labels format (default: "1")
         dump_config: Whether to save project configuration to config.yaml (default: True)
+        kpi_labels: Optional dictionary of KPI labels for system context
 
     Returns:
         Path to the created __test_labels__.yaml file
@@ -53,6 +59,10 @@ def write_test_labels(
                 "model": "llama-3",
                 "deployment": "single-zone",
                 "rate": "10"
+            },
+            kpi_labels={
+                "platform": "CKS",
+                "gpu_type": "H100"
             }
         )
     """
@@ -61,6 +71,9 @@ def write_test_labels(
         "version": version,
         "labels": labels,
     }
+
+    if kpi_labels:
+        payload["kpi_labels"] = kpi_labels
 
     # Create directory and write YAML
     test_labels_path.parent.mkdir(parents=True, exist_ok=True)

@@ -1,0 +1,13 @@
+__multiple: true
+
+gpt-oss:
+  runtime.model_name: openai/gpt-oss-120b
+  runtime.smoke_request_key: default
+  model_cache.pvc.size: 300Gi
+  workloads.args:
+    request_type: text_completions
+
+llama3-70b:
+  runtime.model_name: RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
+  model_cache.pvc.size: 100Gi
+  runtime.smoke_request_key: default

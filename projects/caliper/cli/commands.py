@@ -13,7 +13,6 @@ from projects.caliper.engine.ai_eval import run_ai_eval_export
 from projects.caliper.engine.file_export.artifacts_export_run import run_artifacts_export
 from projects.caliper.engine.file_export.artifacts_import_run import run_artifacts_import
 from projects.caliper.engine.file_export.mlflow_config import load_mlflow_config_yaml
-from projects.caliper.engine.kpi.analyze import run_analyze
 from projects.caliper.engine.kpi.generate import run_kpi_generate
 from projects.caliper.engine.kpi.import_export import (
     import_kpis_snapshot,
@@ -49,6 +48,21 @@ def _workspace_cli_options(cmd_func):
         "plugin_module_override",
         metavar="MODULE",
         default=None,
+    )(cmd_func)
+    return cmd_func
+
+
+def _label_filter_options(cmd_func):
+    """Common include/exclude label filtering options decorator."""
+    cmd_func = click.option(
+        "--include-label",
+        multiple=True,
+        help="Include only test directories with matching labels (format: key=value).",
+    )(cmd_func)
+    cmd_func = click.option(
+        "--exclude-label",
+        multiple=True,
+        help="Exclude test directories with matching labels (format: key=value).",
     )(cmd_func)
     return cmd_func
 
@@ -93,9 +107,47 @@ def _plugin_tuple(ctx: click.Context):
     return mod, plugin
 
 
+def _parse_label_filters(
+    include_label: tuple[str, ...], exclude_label: tuple[str, ...]
+) -> tuple[list[dict[str, str]] | None, list[dict[str, str]] | None]:
+    """Parse include and exclude label CLI options into lists of filter dictionaries.
+
+    Args:
+        include_label: Tuple of include label specs in "key=value" format
+        exclude_label: Tuple of exclude label specs in "key=value" format
+
+    Returns:
+        Tuple of (list of include_filter_dicts, list of exclude_filter_dicts)
+        Each filter dict contains a single key=value pair to support multiple filters on the same key.
+
+    Raises:
+        click.BadParameter: If label format is invalid
+    """
+    from projects.caliper.engine.label_filters import parse_filter_pairs
+
+    include_filters = None
+    if include_label:
+        try:
+            include_filters = parse_filter_pairs(include_label, "include")
+        except ValueError as e:
+            # Convert to click.BadParameter for CLI error handling
+            raise click.BadParameter(str(e)) from e
+
+    exclude_filters = None
+    if exclude_label:
+        try:
+            exclude_filters = parse_filter_pairs(exclude_label, "exclude")
+        except ValueError as e:
+            # Convert to click.BadParameter for CLI error handling
+            raise click.BadParameter(str(e)) from e
+
+    return include_filters, exclude_filters
+
+
 # Main commands
 @click.command("parse")
 @_workspace_cli_options
+@_label_filter_options
 @click.option("--no-cache", is_flag=True, help="Force full parse.")
 @click.option(
     "--cache-dir",
@@ -120,6 +172,8 @@ def parse_cmd(
     no_cache: bool,
     cache_dir: Path | None,
     show_matrix: bool,
+    include_label: tuple[str, ...],
+    exclude_label: tuple[str, ...],
     status_file: Path | None,
     artifacts_dir: Path | None,
     postprocess_config: Path | None,
@@ -135,6 +189,9 @@ def parse_cmd(
     mod, plugin = _plugin_tuple(ctx)
     artifact_root: Path = _root_obj(ctx)["base_dir"]
 
+    # Parse label filters
+    include_filter, exclude_filter = _parse_label_filters(include_label, exclude_label)
+
     status = {"success": False}
 
     try:
@@ -144,10 +201,19 @@ def parse_cmd(
             plugin=plugin,
             use_cache=not no_cache,
             show_parameter_matrix=show_matrix,
+            include_label_filter=include_filter,
+            exclude_label_filter=exclude_filter,
         )
 
-        # Extract test directories from test nodes
-        test_directories = [str(node.directory) for node in model.test_nodes]
+        # Extract test directories with labels and relative paths
+        test_directories = []
+        for node in model.test_nodes:
+            test_directories.append(
+                {
+                    "path": str(node.test_path),  # relative to artifact_dir
+                    **node.test_labels,  # spread test_labels directly into the object
+                }
+            )
 
         status.update(
             {
@@ -173,13 +239,19 @@ def parse_cmd(
             click.echo("⚠️  No test directories found")
 
     except Exception as e:  # noqa: BLE001
+        import traceback
+
+        full_traceback = traceback.format_exc()
         status.update(
             {
                 "success": False,
                 "error": str(e),
+                "traceback": full_traceback,
             }
         )
         click.echo(f"parse failed: {e}", err=True)
+        click.echo("Full traceback:", err=True)
+        click.echo(full_traceback, err=True)
     finally:
         # Write status file if requested
         if status_file:
@@ -197,11 +269,10 @@ def parse_cmd(
 
 @click.command("visualize")
 @_workspace_cli_options
+@_label_filter_options
 @click.option("--reports", default=None, help="Comma-separated report ids.")
 @click.option("--report-group", default=None)
 @click.option("--visualize-config", type=click.Path(path_type=Path), default=None)
-@click.option("--include-label", multiple=True)
-@click.option("--exclude-label", multiple=True)
 @click.option(
     "--output-dir",
     type=click.Path(path_type=Path),
@@ -357,6 +428,7 @@ def list_reports_cmd(
 
 @click.command("ai-eval-export", hidden=True)
 @_workspace_cli_options
+@_label_filter_options
 @click.option("--output", type=click.Path(path_type=Path), required=True)
 @click.option("--no-cache", is_flag=True, help="Disable parse cache")
 @click.option(
@@ -366,6 +438,8 @@ def list_reports_cmd(
 def ai_eval_export(
     ctx: click.Context,
     output: Path,
+    include_label: tuple[str, ...],
+    exclude_label: tuple[str, ...],
     artifacts_dir: Path | None,
     postprocess_config: Path | None,
     plugin_module_override: str | None,
@@ -381,6 +455,9 @@ def ai_eval_export(
     mod, plugin = _plugin_tuple(ctx)
     artifact_root: Path = _root_obj(ctx)["base_dir"]
 
+    # Parse label filters
+    include_filter, exclude_filter = _parse_label_filters(include_label, exclude_label)
+
     status_data = {"success": False}
 
     try:
@@ -390,6 +467,8 @@ def ai_eval_export(
             plugin=plugin,
             output=output,
             use_cache=not no_cache,
+            include_label_filter=include_filter,
+            exclude_label_filter=exclude_filter,
         )
         status_data = {"success": True, "output_file": str(output)}
         click.echo(f"Exported {output}")
@@ -421,7 +500,15 @@ def ai_eval_export(
 # KPI commands
 @click.command("generate")
 @_workspace_cli_options
+@_label_filter_options
 @click.option("--output", type=click.Path(path_type=Path), required=True)
+@click.option(
+    "--format",
+    "format_type",
+    type=click.Choice(["hierarchical", "jsonl"], case_sensitive=False),
+    default="hierarchical",
+    help="Output format: hierarchical JSON (default) or JSONL",
+)
 @click.option(
     "--status-file", type=click.Path(path_type=Path), help="YAML file to write operation status"
 )
@@ -429,6 +516,9 @@ def ai_eval_export(
 def kpi_generate(
     ctx: click.Context,
     output: Path,
+    format_type: str,
+    include_label: tuple[str, ...],
+    exclude_label: tuple[str, ...],
     artifacts_dir: Path | None,
     postprocess_config: Path | None,
     plugin_module_override: str | None,
@@ -443,29 +533,69 @@ def kpi_generate(
     mod, plugin = _plugin_tuple(ctx)
     artifact_root: Path = _root_obj(ctx)["base_dir"]
 
+    # Parse label filters
+    include_filter, exclude_filter = _parse_label_filters(include_label, exclude_label)
+
     status_data = {"success": False}
 
     try:
-        run_kpi_generate(
+        # First run parse to check test directory count
+        model = run_parse(
             base_dir=artifact_root,
             plugin_module=mod,
             plugin=plugin,
-            output=output,
             use_cache=True,
-            cache_path=None,
+            include_label_filter=include_filter,
+            exclude_label_filter=exclude_filter,
         )
-        status_data = {"success": True, "output_file": str(output)}
-        click.echo(f"Generated {output}")
+
+        # Extract test directories from test nodes
+        test_directories = [str(node.directory) for node in model.test_nodes]
+        test_dir_count = len(test_directories)
+
+        # Check if any test directories were found
+        if test_dir_count == 0:
+            status_data = {
+                "success": False,
+                "message": "No test directories found - nothing to process for KPI generation",
+                "test_directories_count": 0,
+                "test_directories": [],
+            }
+            click.echo("❌ No test directories found - KPI generation failed", err=True)
+            click.echo("   No __test_labels__.yaml files found in artifact directory", err=True)
+
+            sys.exit(3)
+        else:
+            # Proceed with KPI generation
+            run_kpi_generate(
+                base_dir=artifact_root,
+                plugin_module=mod,
+                plugin=plugin,
+                output=output,
+                use_cache=True,
+                cache_path=None,
+                format_type=format_type,
+                include_label_filter=include_filter,
+                exclude_label_filter=exclude_filter,
+            )
+            status_data = {
+                "success": True,
+                "output_file": str(output),
+                "test_directories_count": test_dir_count,
+                "test_directories": test_directories,
+            }
+            click.echo(f"Generated {output}")
+            click.echo(f"📁 Processed {test_dir_count} test directories")
+
     except Exception as e:  # noqa: BLE001
         import traceback
 
         full_traceback = traceback.format_exc()
-        status_data = {"success": False, "error": str(e), "traceback": full_traceback}
+        status_data = {"success": False, "message": str(e), "traceback": full_traceback}
         click.echo(f"kpi generate failed: {e}", err=True)
         click.echo(f"Full traceback:\n{full_traceback}", err=True)
 
-        if not status_file:
-            sys.exit(3)
+        sys.exit(3)
     finally:
         # Write status file if requested
         if status_file:
@@ -519,16 +649,10 @@ def kpi_csv_export(
     status_data = {"success": False}
 
     try:
-        # Read KPI JSON Lines file (one JSON object per line)
-        import json
+        # Read KPI file (supports both hierarchical JSON and JSONL formats)
+        from projects.caliper.engine.kpi.format import read_kpis_from_file
 
-        kpi_records = []
-        with open(input_file, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:  # Skip empty lines
-                    kpi_record = json.loads(line)
-                    kpi_records.append(kpi_record)
+        kpi_records = read_kpis_from_file(input_file)
 
         # Export to CSV
         from projects.caliper.engine.kpi.csv_export import export_kpis_to_csv
@@ -583,97 +707,6 @@ def kpi_import(ctx: click.Context, snapshot: Path) -> None:
     click.echo(f"Imported {snapshot}")
 
 
-@click.command("analyze")
-@click.option(
-    "--current", type=click.Path(path_type=Path), required=True, help="Current KPI file to analyze"
-)
-@click.option(
-    "--baseline-dir",
-    type=click.Path(path_type=Path),
-    required=True,
-    help="Directory containing historical KPI files (will use most recent)",
-)
-@click.option(
-    "--output",
-    type=click.Path(path_type=Path),
-    required=True,
-    help="Output file for analysis results",
-)
-@click.option(
-    "--plugin",
-    "plugin_module",
-    metavar="MODULE",
-    required=True,
-    help="Plugin module for KPI definitions and analysis rules",
-)
-@click.pass_context
-def kpi_analyze(
-    ctx: click.Context,
-    current: Path,
-    baseline_dir: Path,
-    output: Path,
-    plugin_module: str,
-) -> None:
-    """Analyze KPIs for regression."""
-    try:
-        from projects.caliper.engine.kpi.analyze import find_baseline_kpis
-        from projects.caliper.engine.load_plugin import load_plugin
-
-        # Load plugin for KPI definitions and analysis rules
-        plugin = load_plugin(plugin_module)
-        if not plugin:
-            click.echo(f"❌ Failed to load plugin: {plugin_module}", err=True)
-            sys.exit(1)
-
-        click.echo(f"🔌 Using plugin: {plugin_module}")
-
-        baseline_kpis = find_baseline_kpis(baseline_dir)
-        if not baseline_kpis:
-            click.echo(
-                f"❌ No kpis.json files found in baseline directory: {baseline_dir}", err=True
-            )
-            sys.exit(1)
-
-        click.echo(f"📊 Found {len(baseline_kpis)} baseline files to process")
-
-        # Run analysis with ALL baseline files (not just the most recent)
-        result = run_analyze(
-            current_path=current, baseline_kpis=baseline_kpis, output_path=output, plugin=plugin
-        )
-
-        # Check result status at CLI level
-        if result["status"] == "success":
-            click.echo(f"✅ Analysis complete. Results written to: {output}")
-        elif result["status"] == "skipped":
-            click.echo(f"⚠️  Analysis skipped: {result.get('reason', 'Unknown reason')}")
-            click.echo(f"📝 Output written to: {output}")
-        else:
-            click.echo(f"❌ Analysis failed: {result.get('error', 'Unknown error')}", err=True)
-            sys.exit(1)
-
-        # Show the analysis results on screen
-        if output.exists():
-            try:
-                import json
-
-                with open(output) as f:
-                    result_data = json.load(f)
-
-                # Convert to YAML for better readability
-                yaml_output = yaml.dump(result_data, default_flow_style=False, indent=2)
-                click.echo("\n📊 Analysis Results:")
-                click.echo("=" * 50)
-                click.echo(yaml_output)
-            except Exception as e:
-                click.echo(f"⚠️  Could not display results: {e}")
-        else:
-            click.echo("⚠️  Output file not found")
-    except Exception as e:  # noqa: BLE001
-        raise e
-        click.echo(f"❌ kpi analyze failed: {e}", err=True)
-        sys.exit(3)
-
-
 @click.command("analyse-kpis")
 @click.option(
     "--output",
@@ -683,13 +716,13 @@ def kpi_analyze(
 )
 @click.option(
     "--current-kpis-file",
-    type=click.Path(path_type=Path, exists=True),
+    type=click.Path(path_type=Path),
     required=True,
     help="Path to current KPIs JSON file",
 )
 @click.option(
     "--historical-kpis-dir",
-    type=click.Path(path_type=Path, exists=True),
+    type=click.Path(path_type=Path),
     required=True,
     help="Directory containing historical KPI files",
 )
@@ -711,85 +744,19 @@ def analyse_kpis_cmd(
     status_file: Path | None,
 ) -> None:
     """Analyze KPIs for orchestration (fork/exec)."""
+    import time
+
     import yaml
 
-    status_data = {"success": False}
-
-    try:
-        # Create a minimal postprocess config for analysis
-        from projects.caliper.orchestration.postprocess_config import (
-            CaliperOrchestrationPostprocessConfig,
-        )
-
-        # Create config with analyze enabled and using provided directories
-        postprocess_config_dict = {
-            "analyze": {
-                "enabled": True,
-                "output": output.name,  # Use the provided output filename
-                "historical_kpis": str(historical_kpis_dir),  # Use provided historical dir
-            }
-        }
-
-        postprocess_config_obj = CaliperOrchestrationPostprocessConfig.model_validate(
-            postprocess_config_dict
-        )
-
-        output_dir = output.parent
-
-        # Run analysis
-        from projects.caliper.engine.kpi.analyze import analyze_kpis
-
-        try:
-            result = analyze_kpis(
-                postprocess_config=postprocess_config_obj,
-                plugin_module=plugin_module,
-                base_dir=output_dir,  # Use output dir as base since we have absolute paths
-                output_dir=output_dir,
-                current_kpis_file=current_kpis_file,
-            )
-        except Exception as e:
-            # Don't suppress the exception - let it bubble up with full traceback
-            import sys
-            import traceback
-
-            print(f"❌ Exception in analyze_kpis: {e}", file=sys.stderr)
-            print(f"Full traceback:\n{traceback.format_exc()}", file=sys.stderr)
-            raise
-
-        # Check if the analysis function returned a proper result
-        if not isinstance(result, dict) or "status" not in result:
-            raise ValueError(f"Invalid result from analyze_kpis: {result}")
-
+    # Validate paths exist before proceeding
+    if not current_kpis_file.exists():
         status_data = {
-            "success": result.get("status") == "success",
-            "output_file": result.get("output_file"),
+            "success": False,
+            "error": f"Current KPI file not found: {current_kpis_file}",
+            "completed_at": time.time(),
         }
+        click.echo(f"❌ Current KPI file not found: {current_kpis_file}", err=True)
 
-        if result.get("status") == "success":
-            click.echo(f"✅ KPI analysis completed: {result.get('output_file')}")
-        else:
-            # Show the full result for debugging if no clear error message
-            if "error" in result:
-                error_msg = result["error"]
-            else:
-                error_msg = f"Analysis failed with result: {result}"
-
-            status_data["error"] = error_msg
-            status_data.update(result)  # Include all result data for debugging
-            click.echo(f"❌ KPI analysis failed: {error_msg}", err=True)
-            if not status_file:
-                sys.exit(1)
-
-    except Exception as e:  # noqa: BLE001
-        import traceback
-
-        full_traceback = traceback.format_exc()
-        status_data = {"success": False, "error": str(e), "traceback": full_traceback}
-        click.echo(f"❌ analyse-kpis failed: {e}", err=True)
-        click.echo(f"Full traceback:\n{full_traceback}", err=True)
-        if not status_file:
-            sys.exit(2)
-    finally:
         # Write status file if requested
         if status_file:
             try:
@@ -798,6 +765,103 @@ def analyse_kpis_cmd(
             except Exception as status_err:
                 click.echo(f"Failed to write status file {status_file}: {status_err}", err=True)
                 sys.exit(4)
+        sys.exit(1)
+
+    if not historical_kpis_dir.exists():
+        status_data = {
+            "success": False,
+            "error": f"Historical KPI directory not found: {historical_kpis_dir}",
+            "completed_at": time.time(),
+        }
+        click.echo(f"❌ Historical KPI directory not found: {historical_kpis_dir}", err=True)
+
+        # Write status file if requested
+        if status_file:
+            try:
+                with open(status_file, "w", encoding="utf-8") as f:
+                    yaml.dump(status_data, f, default_flow_style=False)
+            except Exception as status_err:
+                click.echo(f"Failed to write status file {status_file}: {status_err}", err=True)
+                sys.exit(4)
+        sys.exit(2)
+
+    # Delegate to engine layer
+    from projects.caliper.engine.kpi.analyze import analyze_kpis
+
+    result = analyze_kpis(
+        current_kpis_file=current_kpis_file,
+        historical_kpis_dir=historical_kpis_dir,
+        output_file=output,
+        plugin_module=plugin_module,
+    )
+
+    # Format status data for CLI
+    status_data = {
+        "success": result.get("success", False),
+        "completed_at": result.get("completed_at"),
+    }
+
+    if result.get("output_file"):
+        status_data["output_file"] = result["output_file"]
+
+    if result.get("error"):
+        status_data["error"] = result["error"]
+
+    # Extract detailed analysis results for status file
+    if result.get("success") and result.get("output_file"):
+        try:
+            import yaml
+
+            with open(result["output_file"]) as f:
+                analysis_report = yaml.safe_load(f)
+
+            # Extract key fields from the analysis report
+            if analysis_report:
+                processed = analysis_report.get("processed", {})
+                tested = analysis_report.get("tested", {})
+                overall = analysis_report.get("overall", {})
+                results = analysis_report.get("results", [])
+
+                status_data.update(
+                    {
+                        "baseline_source_count": processed.get("baseline_source_count", 0),
+                        "tested": {
+                            "total_kpis": tested.get("total_kpis", 0),
+                            "regressions": tested.get("regressions", 0),
+                            "passes": tested.get("passes", 0),
+                            "skipped": tested.get("skipped", 0),
+                        },
+                        "results": results,
+                        "overall": {
+                            "verdict": overall.get("verdict", "UNKNOWN"),
+                            "regression_count": overall.get("regression_count", 0),
+                            "total_tested": overall.get("total_tested", 0),
+                            "total_skipped": overall.get("total_skipped", 0),
+                        },
+                    }
+                )
+        except Exception as e:
+            # If we can't read the analysis report, just include basic info
+            status_data["analysis_report_error"] = f"Could not read analysis report: {e}"
+
+    if result.get("result"):
+        status_data.update(result["result"])  # Include analysis result for debugging
+
+    # Display result
+    if result.get("success"):
+        click.echo(f"✅ KPI analysis completed: {result.get('output_file')}")
+    else:
+        error_msg = result.get("error", "Unknown error")
+        click.echo(f"❌ KPI analysis failed: {error_msg}", err=True)
+
+    # Write status file if requested
+    if status_file:
+        try:
+            with open(status_file, "w", encoding="utf-8") as f:
+                yaml.dump(status_data, f, default_flow_style=False)
+        except Exception as status_err:
+            click.echo(f"Failed to write status file {status_file}: {status_err}", err=True)
+            sys.exit(4)
 
     # Exit with error code if operation failed
     if not status_data.get("success", False):
@@ -957,6 +1021,7 @@ def kpi_s3_import(
 @click.option("--mlflow-experiment", default=None, envvar="MLFLOW_EXPERIMENT_NAME")
 @click.option("--mlflow-run-id", default=None, envvar="MLFLOW_RUN_ID")
 @click.option("--mlflow-run-name", default=None, envvar="CALIPER_MLFLOW_RUN_NAME")
+@click.option("--mlflow-workspace", default=None, help="MLflow workspace name")
 @click.option("--mlflow-insecure-tls", is_flag=True)
 @click.option(
     "--mlflow-secrets",
@@ -989,6 +1054,7 @@ def artifacts_export(
     mlflow_experiment: str | None,
     mlflow_run_id: str | None,
     mlflow_run_name: str | None,
+    mlflow_workspace: str | None,
     mlflow_insecure_tls: bool,
     mlflow_secrets_path: Path | None,
     mlflow_config_path: Path | None,
@@ -997,6 +1063,7 @@ def artifacts_export(
     status_yaml_path: Path | None,
     upload_workers: int,
 ) -> None:
+
     # Load config from file if provided, CLI args override
     config = {}
     if mlflow_config_path:
@@ -1012,6 +1079,7 @@ def artifacts_export(
         "experiment": mlflow_experiment or config.get("experiment"),
         "run_id": mlflow_run_id or config.get("run_id"),
         "run_name": mlflow_run_name or config.get("run_name"),
+        "workspace": mlflow_workspace or config.get("workspace"),
         "insecure_tls": mlflow_insecure_tls or config.get("insecure_tls", False),
         "secrets_path": mlflow_secrets_path or config.get("secrets_path"),
         "upload_workers": upload_workers,
@@ -1021,13 +1089,25 @@ def artifacts_export(
         run_artifacts_export(
             from_path=from_path,
             backend=list(backend) if backend else ["mlflow"],
+            mlflow_tracking_uri=mlflow_tracking_uri,
+            mlflow_experiment=mlflow_experiment,
+            mlflow_run_id=mlflow_run_id,
+            mlflow_run_name=mlflow_run_name,
+            mlflow_insecure_tls=mlflow_insecure_tls,
+            mlflow_secrets_path=mlflow_secrets_path,
+            mlflow_config_data=final_config,
             dry_run=dry_run,
             verbose=verbose,
             status_yaml_path=status_yaml_path,
-            mlflow_config=final_config,
+            upload_workers=upload_workers,
         )
     except Exception as e:  # noqa: BLE001
+        import traceback
+
+        full_traceback = traceback.format_exc()
         click.echo(f"artifacts export failed: {e}", err=True)
+        click.echo("Full traceback:", err=True)
+        click.echo(full_traceback, err=True)
         sys.exit(3)
 
 

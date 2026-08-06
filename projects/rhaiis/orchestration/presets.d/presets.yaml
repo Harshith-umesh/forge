@@ -75,3 +75,13 @@ nvidia:
 
 amd:
   rhaiis.accelerator: amd
+
+# Engine
+vllm:
+  rhaiis.engine: vllm
+
+sglang:
+  rhaiis.engine: sglang
+
+trtllm:
+  rhaiis.engine: trtllm

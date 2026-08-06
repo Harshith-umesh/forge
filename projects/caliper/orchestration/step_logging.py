@@ -11,6 +11,7 @@ import threading
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 # Thread-local storage for step-specific handlers
 _step_local_handlers = threading.local()
@@ -234,3 +235,350 @@ def cleanup_step_logging():
     if hasattr(_step_local_handlers, "file_handler"):
         _step_local_handlers.file_handler.close()
         del _step_local_handlers.file_handler
+
+
+def _log_command_banner(
+    step_name: str,
+    command_line: str,
+    description: str = "",
+    step_args: dict[str, Any] | None = None,
+) -> None:
+    """
+    Log a command reproduction banner at the start of a step.
+
+    Args:
+        step_name: Name of the step (e.g., "caliper_parse")
+        command_line: The CLI command to reproduce this step
+        description: Brief description of what this step does
+        step_args: Dictionary of step arguments for reference
+    """
+    logger = logging.getLogger(__name__)
+
+    LINE_WIDTH = 80
+
+    logger.info("")
+    logger.info("=" * LINE_WIDTH)
+    logger.info(f"CALIPER STEP: {step_name.upper()}")
+    if description:
+        logger.info(f"DESCRIPTION: {description}")
+    logger.info("=" * LINE_WIDTH)
+    logger.info(f"COMMAND TO REPRODUCE:\n{command_line}")
+
+    if step_args:
+        logger.info("")
+        logger.info("STEP PARAMETERS:")
+        for key, value in step_args.items():
+            if value is not None:
+                # Truncate very long values
+                value_str = str(value)
+                if len(value_str) > 100:
+                    value_str = value_str[:97] + "..."
+                logger.info(f"  {key}: {value_str}")
+
+    logger.info("=" * LINE_WIDTH)
+    logger.info("")
+
+
+def log_parse_command(
+    base_dir: Path,
+    plugin_module: str,
+    use_cache: bool,
+    manifest_path: Path | None = None,
+) -> None:
+    """Log the CLI command to reproduce the parse step."""
+    cache_flag = "" if use_cache else " --no-cache"
+    command = f'caliper parse --base-dir "{base_dir}" --plugin {plugin_module}{cache_flag}'
+
+    step_args = {
+        "base_dir": str(base_dir),
+        "plugin_module": plugin_module,
+        "use_cache": use_cache,
+    }
+
+    # Only include manifest_path if it's provided and safe to log
+    if manifest_path:
+        step_args["manifest_path"] = str(manifest_path)
+
+    _log_command_banner(
+        "caliper_parse",
+        command,
+        "Parse test results from artifact tree into unified model",
+        step_args,
+    )
+
+
+def log_visualize_command(
+    base_dir: Path,
+    plugin_module: str,
+    output_dir: Path,
+    reports_csv: str | None = None,
+    report_group: str | None = None,
+    visualize_config_path: Path | None = None,
+    include_pairs: tuple[str, ...] = (),
+    exclude_pairs: tuple[str, ...] = (),
+    use_cache: bool = True,
+) -> None:
+    """Log the CLI command to reproduce the visualize step."""
+    command_parts = [
+        "caliper visualize",
+        f'--base-dir "{base_dir}"',
+        f'--output-dir "{output_dir}"',
+        f"--plugin {plugin_module}",
+    ]
+
+    if not use_cache:
+        command_parts.append("--no-cache")
+    if reports_csv:
+        command_parts.append(f'--reports "{reports_csv}"')
+    if report_group:
+        command_parts.append(f'--report-group "{report_group}"')
+    if visualize_config_path:
+        command_parts.append(f'--visualize-config "{visualize_config_path}"')
+
+    for include_pair in include_pairs:
+        command_parts.append(f'--include "{include_pair}"')
+    for exclude_pair in exclude_pairs:
+        command_parts.append(f'--exclude "{exclude_pair}"')
+
+    command = " \\\n    ".join(command_parts)
+
+    step_args = {
+        "base_dir": str(base_dir),
+        "plugin_module": plugin_module,
+        "output_dir": str(output_dir),
+        "use_cache": use_cache,
+    }
+
+    # Only include optional parameters if they're provided
+    if reports_csv:
+        step_args["reports_csv"] = reports_csv
+    if report_group:
+        step_args["report_group"] = report_group
+    if visualize_config_path:
+        step_args["visualize_config_path"] = str(visualize_config_path)
+    if include_pairs:
+        step_args["include_pairs"] = list(include_pairs)
+    if exclude_pairs:
+        step_args["exclude_pairs"] = list(exclude_pairs)
+
+    _log_command_banner(
+        "caliper_visualize",
+        command,
+        "Generate visualization reports and plots from parsed data",
+        step_args,
+    )
+
+
+def log_artifacts_to_kpis_command(
+    base_dir: Path,
+    plugin_module: str,
+    output_file: Path,
+) -> None:
+    """Log the CLI command to reproduce the KPI generation step."""
+    command = f'caliper kpi generate --base-dir "{base_dir}" --plugin {plugin_module} --output "{output_file}"'
+
+    step_args = {
+        "base_dir": str(base_dir),
+        "plugin_module": plugin_module,
+        "output_file": str(output_file),
+    }
+
+    _log_command_banner(
+        "caliper_kpi_generate", command, "Generate KPI metrics from parsed test results", step_args
+    )
+
+
+def log_kpi_export_command(
+    input_path: Path,
+    target_system: str = "opensearch",
+) -> None:
+    """Log the CLI command to reproduce the KPI export step."""
+    command = f'caliper kpi export --input "{input_path}" --target {target_system}'
+
+    step_args = {
+        "input_path": str(input_path),
+        "target_system": target_system,
+    }
+
+    _log_command_banner(
+        "caliper_kpi_export", command, "Export KPI metrics to external monitoring system", step_args
+    )
+
+
+def log_ai_data_command(
+    base_dir: Path,
+    plugin_module: str,
+    output_file: Path,
+) -> None:
+    """Log the CLI command to reproduce the AI evaluation export step."""
+    command = f'caliper ai-eval export --base-dir "{base_dir}" --plugin {plugin_module} --output "{output_file}"'
+
+    step_args = {
+        "base_dir": str(base_dir),
+        "plugin_module": plugin_module,
+        "output_file": str(output_file),
+    }
+
+    _log_command_banner(
+        "caliper_ai_data_export",
+        command,
+        "Export AI evaluation payload with structured test directories and artifacts",
+        step_args,
+    )
+
+
+def log_s3_import_command(
+    bucket: str,
+    prefix: str,
+    output_dir: Path,
+) -> None:
+    """Log the CLI command to reproduce the S3 import step."""
+    command = (
+        f'caliper s3-import --bucket "{bucket}" --prefix "{prefix}" --output-dir "{output_dir}"'
+    )
+
+    step_args = {
+        "bucket": bucket,
+        "prefix": prefix,
+        "output_dir": str(output_dir),
+    }
+
+    _log_command_banner(
+        "caliper_s3_import",
+        command,
+        "Import historical data from S3 for analysis",
+        step_args,
+    )
+
+
+def log_s3_export_command(
+    bucket: str,
+    export_path: str,
+    from_dir: Path,
+    include_csv: bool,
+    include_kpis_json: bool,
+    include_ai_data: bool,
+) -> None:
+    """Log the CLI command to reproduce the S3 export step."""
+    command_parts = [f'caliper s3-export --from-dir "{from_dir}" --bucket "{bucket}"']
+
+    if export_path:
+        # Parse the export path to get prefix, instance, directory
+        parts = export_path.split("/")
+        if len(parts) >= 3:
+            instance = parts[0]
+            directory = parts[1]
+            prefix = "/".join(parts[2:]) if len(parts) > 2 else ""
+            command_parts.append(f'--instance "{instance}"')
+            command_parts.append(f'--directory "{directory}"')
+            if prefix:
+                command_parts.append(f'--prefix "{prefix}"')
+
+    # Note: Include flags use default values (--include-csv, --include-kpis-json, --include-ai-data all default to True)
+
+    command = " ".join(command_parts)
+
+    step_args = {
+        "bucket": bucket,
+        "export_path": export_path,
+        "from_dir": str(from_dir),
+        "include_csv": include_csv,
+        "include_kpis_json": include_kpis_json,
+        "include_ai_data": include_ai_data,
+    }
+
+    _log_command_banner(
+        "caliper_s3_export",
+        command,
+        "Export postprocess artifacts to S3",
+        step_args,
+    )
+
+
+def log_analyse_kpis_command(
+    current_kpi_file: Path,
+    historical_dir: Path,
+    output_file: Path,
+) -> None:
+    """Log the CLI command to reproduce the KPI analysis step."""
+    command = f'caliper analyse-kpis --current "{current_kpi_file}" --historical-dir "{historical_dir}" --output "{output_file}"'
+
+    step_args = {
+        "current_kpi_file": str(current_kpi_file),
+        "historical_dir": str(historical_dir),
+        "output_file": str(output_file),
+    }
+
+    _log_command_banner(
+        "caliper_analyse_kpis",
+        command,
+        "Analyze current KPIs against historical data",
+        step_args,
+    )
+
+
+def log_analyze_command(
+    base_dir: Path,
+    plugin_module: str,
+    current_kpis_path: Path | None = None,
+    baseline_file: Path | None = None,
+    historical_kpis_dir: Path | None = None,
+    output_path: Path | None = None,
+) -> None:
+    """Log the CLI command to reproduce the analyze step."""
+    # Use the correct command structure: caliper kpi analyze
+    command = "caliper kpi analyze"
+
+    # Add current KPI file path if provided
+    if current_kpis_path:
+        command += f' --current "{current_kpis_path}"'
+
+    # Add the historical directory, not the specific file
+    if historical_kpis_dir:
+        command += f' --baseline-dir "{historical_kpis_dir}"'
+
+    # Add output path if provided
+    if output_path:
+        command += f' --output "{output_path}"'
+
+    # Add plugin module
+    command += f" --plugin {plugin_module}"
+
+    # Add helpful context
+    command += "\n# Analyzes hierarchical KPI format for regressions"
+    command += "\n# The tool will automatically find the most recent kpis.json file in the baseline directory"
+    command += "\n# To re-run this analysis step independently, use the command above"
+    command += f"\n# Plugin: {plugin_module}"
+    command += f"\n# Base dir: {base_dir}"
+    if baseline_file:
+        command += f"\n# Most recent baseline file found: {baseline_file}"
+
+    step_args = {
+        "current_kpis_path": str(current_kpis_path) if current_kpis_path else None,
+        "historical_kpis_dir": str(historical_kpis_dir) if historical_kpis_dir else None,
+        "baseline_file_selected": str(baseline_file) if baseline_file else None,
+        "output_path": str(output_path) if output_path else None,
+        "plugin_module": plugin_module,
+        "base_dir": str(base_dir),
+    }
+
+    _log_command_banner(
+        "caliper_analyze", command, "Run regression analysis on test results", step_args
+    )
+
+
+def log_kpis_to_csv_command(
+    input_path: Path,
+    output_path: Path,
+) -> None:
+    """Log the CLI command to reproduce the KPI CSV export step."""
+    command = f'caliper kpi csv-export --input "{input_path}" --output "{output_path}"'
+
+    step_args = {
+        "input_path": str(input_path),
+        "output_path": str(output_path),
+    }
+
+    _log_command_banner(
+        "caliper_kpi_csv_export", command, "Export KPI metrics to CSV format", step_args
+    )

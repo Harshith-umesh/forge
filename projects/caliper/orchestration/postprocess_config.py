@@ -18,6 +18,15 @@ class CaliperOrchestrationParseSection(BaseModel):
     no_cache: bool = False
 
 
+class CaliperOrchestrationFilteringSection(BaseModel):
+    """``caliper.postprocess.filtering`` — label-based test directory filtering applied across all steps."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    include_labels: list[str] | None = Field(default=None)
+    exclude_labels: list[str] | None = Field(default=None)
+
+
 class CaliperOrchestrationVisualizeSection(BaseModel):
     """``caliper.postprocess.visualize`` — same semantics as ``caliper visualize``."""
 
@@ -115,6 +124,10 @@ class CaliperOrchestrationAnalyzeSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
+    current_kpis: str | None = Field(
+        default="kpis.json",
+        description="Current KPI file path (relative to postprocess output dir unless absolute).",
+    )
     historical_kpis: str | None = Field(
         default=None,
         description="Directory containing historical KPI JSON files (relative → postprocess output dir unless absolute).",
@@ -123,13 +136,22 @@ class CaliperOrchestrationAnalyzeSection(BaseModel):
         default="kpi_analyze.json",
         description="Written under post-processing artifact dir when relative.",
     )
+    fail_on_regression: bool = Field(
+        default=False,
+        description="Whether to fail (non-zero exit code) when KPI regressions are detected (default: false).",
+    )
 
     @model_validator(mode="after")
-    def _historical_kpis_when_enabled(self) -> Self:
-        if self.enabled and not (self.historical_kpis and str(self.historical_kpis).strip()):
-            raise ValueError(
-                "caliper.postprocess.analyze.enabled requires non-empty historical_kpis directory."
-            )
+    def _validate_when_enabled(self) -> Self:
+        if self.enabled:
+            if not (self.current_kpis and str(self.current_kpis).strip()):
+                raise ValueError(
+                    "caliper.postprocess.analyze.enabled requires non-empty current_kpis file path."
+                )
+            if not (self.historical_kpis and str(self.historical_kpis).strip()):
+                raise ValueError(
+                    "caliper.postprocess.analyze.enabled requires non-empty historical_kpis directory."
+                )
         return self
 
 
@@ -272,6 +294,9 @@ class CaliperOrchestrationPostprocessConfig(BaseModel):
     postprocess_config: str | None = Field(
         default=None,
         description="Explicit path to caliper.yaml manifest.",
+    )
+    filtering: CaliperOrchestrationFilteringSection = Field(
+        default_factory=CaliperOrchestrationFilteringSection
     )
     parse: CaliperOrchestrationParseSection = Field(
         default_factory=CaliperOrchestrationParseSection

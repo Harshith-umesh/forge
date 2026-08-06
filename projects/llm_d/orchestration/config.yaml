@@ -43,6 +43,9 @@ caliper:
     artifacts_dir: null
     plugin_module: projects.guidellm.postprocess.guidellm.plugin
     postprocess_config: null
+    filtering:
+      include_labels: []
+      exclude_labels: []
     parse:
       enabled: true
       no_cache: false
@@ -66,11 +69,6 @@ caliper:
         enabled: true
         output_dir: ai_data
 
-    analyze:
-      enabled: true
-      historical_kpis: historical_data
-      output: regression_analyze/kpi_analyze.json
-
     s3:
       bucket: psap-dashboard-data
       instance: smoke
@@ -93,9 +91,12 @@ caliper:
         include_kpis_json: true
         include_ai_data: true
 
-    analyse_kpis:
-      enabled: false
-      output: kpi_analysis.json
+    analyze:
+      enabled: true
+      current_kpis: kpis/kpis.json
+      historical_kpis: historical_data
+      output: regression_analyze/kpi_analyze.json
+      fail_on_regression: false
 
 agentic:
   enabled: true

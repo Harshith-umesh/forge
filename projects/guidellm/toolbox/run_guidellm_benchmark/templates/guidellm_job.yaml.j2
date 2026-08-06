@@ -17,6 +17,10 @@ spec:
     spec:
       serviceAccountName: default
       restartPolicy: Never
+{% if fs_group is not none %}
+      securityContext:
+        fsGroup: {{ fs_group }}
+{% endif %}
       containers:
         - name: guidellm
           image: {{ image }}
@@ -26,6 +30,14 @@ spec:
           env:
             - name: USER
               value: guidellm
+{% if hf_token_secret %}
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ hf_token_secret }}
+                  key: HF_TOKEN
+                  optional: true
+{% endif %}
           volumeMounts:
             - name: home
               mountPath: /home/guidellm

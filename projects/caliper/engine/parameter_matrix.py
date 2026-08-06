@@ -108,8 +108,9 @@ def format_parameter_matrix_summary(analysis: dict[str, Any], max_combinations: 
     # Show coverage matrix
     lines.append("📈 Parameter Value Coverage:")
     for key in analysis["parameter_keys"]:
-        lines.append(f"   {key}:")
         coverage = analysis["coverage_matrix"][key]
+        total_for_param = sum(coverage.values())
+        lines.append(f"   {key}: {total_for_param} records")
         for value, count in coverage.items():
             lines.append(f"      {value}: {count} records")
 
@@ -236,9 +237,5 @@ def create_legend_name(
         return "default"
 
     legend_name = ", ".join(param_pairs)
-
-    # Truncate if too long
-    if len(legend_name) > max_length:
-        legend_name = legend_name[: max_length - 3] + "..."
 
     return legend_name

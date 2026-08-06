@@ -7,6 +7,9 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import jsonpath_ng
+import yaml
+
 from projects.caliper.engine.model import (
     ParseResult,
     TestBaseNode,
@@ -18,13 +21,84 @@ from .models import GuideLLMBenchmark, GuideLLMConfiguration
 
 def _labels_from_node(node: TestBaseNode) -> dict[str, Any]:
     """Extract labels from a test node."""
-    raw = node.labels
+    raw = node.test_labels
     inner = raw.get("labels")
     if isinstance(inner, dict):
         return dict(inner)
     if isinstance(raw, dict):
         return dict(raw)
     return {"facet": "default"}
+
+
+def _kpi_labels_from_node(node: TestBaseNode) -> dict[str, Any]:
+    """Extract kpi_labels from a test node."""
+    raw = node.test_labels
+    kpi_labels = raw.get("kpi_labels")
+    if isinstance(kpi_labels, dict):
+        return dict(kpi_labels)
+    return {}
+
+
+def extract_field_by_jsonpath(data: dict[str, Any], jsonpath: str, default: Any = None) -> Any:
+    """
+    Extract a field from nested dictionary using JSONPath notation.
+
+    Args:
+        data: The dictionary to extract from
+        jsonpath: JSONPath like "spec.model.name" or "spec.template.containers[0].name"
+        default: Default value if field not found
+
+    Returns:
+        The extracted value or default if not found
+
+    Examples:
+        extract_field_by_jsonpath(yaml_data, "spec.model.name")
+        extract_field_by_jsonpath(yaml_data, "spec.template.containers[0].name")
+    """
+    try:
+        return jsonpath_ng.parse(jsonpath).find(data)[0].value
+    except IndexError:
+        return default
+
+
+def parse_product_version_from_annotation(annotation_value: str) -> str | None:
+    """
+    Parse product version from kserve config annotation.
+
+    Args:
+        annotation_value: Raw annotation like "v3-5-0-ea-2-kserve-config-llm-decode-template"
+
+    Returns:
+        Cleaned version like "v3.5.0-ea.2" or None if parsing fails
+
+    Examples:
+        parse_product_version_from_annotation("v3-5-0-ea-2-kserve-config-llm-decode-template")
+        # Returns: "v3.5.0-ea.2"
+    """
+    if not annotation_value:
+        return None
+
+    # Remove the kserve suffix
+    suffix = "-kserve-config-llm-decode-template"
+    if annotation_value.endswith(suffix):
+        version_part = annotation_value[: -len(suffix)]
+    else:
+        version_part = annotation_value
+
+    # Transform v3-5-0-ea-2 -> v3.5.0-ea.2
+    # Replace hyphens with dots in the version numbers, keep -ea- as is
+    if version_part.startswith("v") and "-ea-" in version_part:
+        # Split on -ea- to handle the pre-release part separately
+        base_version, ea_part = version_part.split("-ea-", 1)
+
+        # Replace hyphens with dots in base version (v3-5-0 -> v3.5.0)
+        base_version = base_version.replace("-", ".")
+
+        # Reconstruct with -ea. format
+        cleaned_version = f"{base_version}-ea.{ea_part}"
+        return cleaned_version
+
+    return None
 
 
 class GuideLLMParser:
@@ -35,6 +109,99 @@ class GuideLLMParser:
         return path.name == "benchmarks.json" or (
             path.name.startswith("benchmarks-rate-") and path.suffix == ".json"
         )
+
+    @staticmethod
+    def _is_llmisvc_artifact(path: Path) -> bool:
+        """Check if path is an LLMInferenceService YAML artifact."""
+        return path.name in [
+            "llminferenceservice.yaml",
+            "llminferenceservice.yml",
+        ] and "__capture_llmisvc_state" in str(path)
+
+    @staticmethod
+    def _is_config_artifact(path: Path) -> bool:
+        """Check if path is a config.yaml artifact."""
+        return path.name == "config.yaml"
+
+    def extract_fields_from_llmisvc(self, file_path: Path) -> dict[str, str]:
+        """
+        Extract multiple fields from LLMInferenceService YAML file.
+
+        Args:
+            file_path: Path to llminferenceservice.yaml file
+
+        Returns:
+            Dictionary with extracted fields (product_version, deployment_profile, model_name)
+        """
+        result = {}
+        try:
+            yaml_data = yaml.safe_load(file_path.read_text(encoding="utf-8"))
+            if not isinstance(yaml_data, dict):
+                return result
+
+            # Extract product version from kserve annotation
+            annotation_value = extract_field_by_jsonpath(
+                yaml_data, 'status.annotations["serving.kserve.io/config-llm-decode-template"]'
+            )
+            if annotation_value:
+                product_version = parse_product_version_from_annotation(annotation_value)
+                if product_version:
+                    result["product_version"] = product_version
+                    logging.info(f"Extracted product_version '{product_version}' from {file_path}")
+
+            # Extract deployment profile from forge annotation
+            deployment_profile = extract_field_by_jsonpath(
+                yaml_data, 'metadata.annotations["forge.openshift.io/deployment-profile"]'
+            )
+            if deployment_profile:
+                result["deployment_profile"] = deployment_profile
+                logging.info(
+                    f"Extracted deployment_profile '{deployment_profile}' from {file_path}"
+                )
+
+            # Extract model name from spec
+            model_name = extract_field_by_jsonpath(yaml_data, "spec.model.name")
+            if model_name:
+                result["model_name"] = model_name
+                logging.info(f"Extracted model_name '{model_name}' from {file_path}")
+
+        except Exception as e:
+            logging.warning(f"Failed to extract fields from {file_path}: {e}")
+
+        return result
+
+    def extract_fields_from_config(self, file_path: Path) -> dict[str, str]:
+        """
+        Extract multiple fields from config.yaml file.
+
+        Args:
+            file_path: Path to config.yaml file
+
+        Returns:
+            Dictionary with extracted fields (cluster, benchmark_key)
+        """
+        result = {}
+        try:
+            yaml_data = yaml.safe_load(file_path.read_text(encoding="utf-8"))
+            if not isinstance(yaml_data, dict):
+                return result
+
+            # Extract cluster name
+            cluster = extract_field_by_jsonpath(yaml_data, "ci_job.cluster")
+            if cluster:
+                result["cluster"] = cluster
+                logging.info(f"Extracted cluster '{cluster}' from {file_path}")
+
+            # Extract benchmark key
+            benchmark_key = extract_field_by_jsonpath(yaml_data, "runtime.benchmark_key")
+            if benchmark_key:
+                result["benchmark_key"] = benchmark_key
+                logging.info(f"Extracted benchmark_key '{benchmark_key}' from {file_path}")
+
+        except Exception as e:
+            logging.warning(f"Failed to extract fields from {file_path}: {e}")
+
+        return result
 
     def parse_benchmarks_json(
         self, file_path: Path
@@ -90,7 +257,7 @@ class GuideLLMParser:
         strategy = strategy_info.get("type_", "unknown")
 
         # Extract concurrency (streams) with multiple fallback paths
-        concurrency = self._extract_concurrency(strategy_info, scheduler)
+        intended_concurrency = self._extract_concurrency(strategy_info, scheduler)
 
         # Extract timing info
         state = scheduler.get("state", {})
@@ -176,7 +343,8 @@ class GuideLLMParser:
             cooldown_time=0.0,  # Not available in JSON format
             # Request metrics
             request_rate=request_rate,
-            request_concurrency=concurrency,
+            request_concurrency=intended_concurrency,  # For now, effective = intended
+            intended_concurrency=int(intended_concurrency),
             completed_requests=completed_requests,
             failed_requests=0,  # Could extract from unsuccessful metrics if needed
             # Token metrics per request
@@ -318,7 +486,8 @@ class GuideLLMParser:
             "request_latency_p95": [],
             "completed_requests": [],
             "failed_requests": [],
-            "request_concurrency": [],  # Add concurrency to curves
+            "request_concurrency": [],  # Effective concurrency to curves
+            "intended_concurrency": [],  # Intended concurrency to curves
         }
 
         for benchmark in sorted_benchmarks:
@@ -341,7 +510,10 @@ class GuideLLMParser:
             curves["failed_requests"].append(benchmark.failed_requests)
             curves["request_concurrency"].append(
                 benchmark.request_concurrency
-            )  # Add concurrency per rate point
+            )  # Add effective concurrency per rate point
+            curves["intended_concurrency"].append(
+                benchmark.intended_concurrency
+            )  # Add intended concurrency per rate point
 
         # Add request_rate and performance curves to metrics
         metrics["request_rate"] = request_rates
@@ -376,6 +548,10 @@ class GuideLLMParser:
             benchmarks_files = [p for p in node.artifact_paths if self._is_benchmarks_artifact(p)]
             benchmarks_files.sort(key=lambda path: path.name)
 
+            # Also look for LLMInferenceService YAML files and config.yaml files for system information
+            llmisvc_files = [p for p in node.artifact_paths if self._is_llmisvc_artifact(p)]
+            config_files = [p for p in node.artifact_paths if self._is_config_artifact(p)]
+
             if not benchmarks_files:
                 # No benchmark result JSON found for this node, create empty record
                 labels = _labels_from_node(node)
@@ -407,6 +583,25 @@ class GuideLLMParser:
                 metrics = self._create_aggregated_metrics(node_benchmarks)
                 if node_config:
                     metrics["configuration"] = node_config.to_dict()
+
+                # Extract fields from LLMInferenceService YAML if available
+                for llmisvc_file in llmisvc_files:
+                    llmisvc_fields = self.extract_fields_from_llmisvc(llmisvc_file)
+                    for field_name, field_value in llmisvc_fields.items():
+                        if field_value and field_name not in metrics:
+                            metrics[field_name] = field_value
+
+                # Extract fields from config.yaml if available
+                for config_file in config_files:
+                    config_fields = self.extract_fields_from_config(config_file)
+                    for field_name, field_value in config_fields.items():
+                        if field_value and field_name not in metrics:
+                            metrics[field_name] = field_value
+
+                # Extract kpi_labels from test labels
+                kpi_labels = _kpi_labels_from_node(node)
+                if kpi_labels:
+                    metrics["kpi_labels"] = kpi_labels
 
                 records.append(
                     UnifiedResultRecord(

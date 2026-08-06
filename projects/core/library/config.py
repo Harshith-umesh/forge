@@ -560,7 +560,7 @@ def write_variables_override(presets=None, variables_dict=None):
     if presets:
         if len(presets) == 1 and "," in presets[0]:
             presets = list(presets[0].split(","))
-
+        presets = list(presets)  # enforce list type for proper yaml serialization
         overrides["project.args"] = presets
         logger.info(f"write_variables_override: project.args --> {presets}")
 

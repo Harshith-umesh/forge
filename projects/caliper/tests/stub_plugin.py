@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
+from projects.caliper.engine.kpi.analyze import AnalysisConfig
 from projects.caliper.engine.model import (
     ParseResult,
     PostProcessingPlugin,
@@ -20,9 +21,9 @@ class StubPlugin(PostProcessingPlugin):
         warnings: list[str] = []
         for node in nodes:
             labels = (
-                node.labels.get("labels")
-                if isinstance(node.labels.get("labels"), dict)
-                else node.labels
+                node.test_labels.get("labels")
+                if isinstance(node.test_labels.get("labels"), dict)
+                else node.test_labels
             )
             raw = {}
             for p in node.artifact_paths:
@@ -63,16 +64,6 @@ class StubPlugin(PostProcessingPlugin):
         )
         return [str(html_path)]
 
-    def kpi_catalog(self) -> list[dict[str, object]]:
-        return [
-            {
-                "kpi_id": "throughput_rps",
-                "name": "Throughput",
-                "unit": "req/s",
-                "higher_is_better": True,
-            }
-        ]
-
     def compute_kpis(self, model: UnifiedRunModel) -> list[dict[str, object]]:
         ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         out: list[dict[str, object]] = []
@@ -109,6 +100,10 @@ class StubPlugin(PostProcessingPlugin):
             "metrics": {"records": len(model.unified_result_records)},
             "optional": {},
         }
+
+
+# Analysis configuration for testing KPI regression analysis
+analysis_config = AnalysisConfig()
 
 
 def get_plugin() -> PostProcessingPlugin:

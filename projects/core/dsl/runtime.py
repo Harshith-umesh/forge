@@ -665,7 +665,7 @@ def _generate_failure_file_for_agent(exception: Exception) -> None:
             logger.warning("No ARTIFACT_DIR available - cannot generate FAILURE file for agent")
             return
 
-        failure_file_path = artifact_dir / "FAILURE"
+        failure_file_path = artifact_dir / "FAILURE.txt"
 
         # Generate failure content
         failure_content = _format_failure_content_for_agent(exception)

@@ -1,7 +1,7 @@
 apiVersion: serving.kserve.io/v1alpha1
 kind: LLMInferenceService
 metadata:
-  name: llm-d-pd-d.x2-p.tp1-d.tp4-p.x8
+  name: llm-d-pd-d-x2-p-tp-bfb506
   namespace: forge-llm-d
   annotations:
     security.opendatahub.io/enable-auth: 'false'
@@ -21,8 +21,6 @@ spec:
       template:
         containers:
         - name: main
-        nodeSelector:
-          nvidia.com/gpu.present: 'true'
     route: {}
     gateway: {}
   template:
@@ -37,16 +35,30 @@ spec:
           rdma/ib: '1'
       env:
       - name: VLLM_ADDITIONAL_ARGS
-        value: --max-model-len=4096 --gpu-memory-utilization=0.92 --trust-remote-code
-          --no-enable-log-requests --enable-prefix-caching --block-size 128 --kv-transfer-config
+        value: --gpu-memory-utilization=0.92 --trust-remote-code --no-enable-log-requests
+          --enable-prefix-caching --max-model-len=4096 --block-size 128 --kv-transfer-config
           '{"kv_connector":"NixlConnector", "kv_role":"kv_both"}'
       - name: VLLM_NIXL_SIDE_CHANNEL_HOST
         valueFrom:
           fieldRef:
             apiVersion: v1
             fieldPath: status.podIP
+    metadata:
+      labels:
+        app.kubernetes.io/component: decode
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/component: prefill
+            topologyKey: kubernetes.io/hostname
   prefill:
     replicas: 8
+    parallelism:
+      tensor: 1
     template:
       containers:
       - name: main
@@ -59,11 +71,25 @@ spec:
             rdma/ib: '1'
         env:
         - name: VLLM_ADDITIONAL_ARGS
-          value: --max-model-len=4096 --gpu-memory-utilization=0.92 --trust-remote-code
-            --no-enable-log-requests --enable-prefix-caching --block-size 128 --kv-transfer-config
+          value: --gpu-memory-utilization=0.92 --trust-remote-code --no-enable-log-requests
+            --enable-prefix-caching --max-model-len=4096 --block-size 128 --kv-transfer-config
             '{"kv_connector":"NixlConnector", "kv_role":"kv_both"}'
         - name: VLLM_NIXL_SIDE_CHANNEL_HOST
           valueFrom:
             fieldRef:
               apiVersion: v1
               fieldPath: status.podIP
+      metadata:
+        labels:
+          app.kubernetes.io/component: prefill
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/component: decode
+              topologyKey: kubernetes.io/hostname
+  parallelism:
+    tensor: 4

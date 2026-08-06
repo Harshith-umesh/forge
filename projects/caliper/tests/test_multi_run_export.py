@@ -20,12 +20,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
-from projects.caliper.orchestration.export import (
-    METRICS_FILE,
-    PARAMETERS_FILE,
-    TEST_LABELS_MARKER,
-    _discover_run_dirs,
-)
+from projects.caliper.engine.file_export.artifacts_export_run import discover_run_dirs
+
+METRICS_FILE = "metrics.json"
+PARAMETERS_FILE = "parameters.json"
+TEST_LABELS_MARKER = "__test_labels__.yaml"
 
 
 def _write_test_labels(directory: Path, labels: dict) -> None:
@@ -154,13 +153,13 @@ def single_run_tree(tmp_path: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Test: _discover_run_dirs
+# Test: discover_run_dirs
 # ---------------------------------------------------------------------------
 
 
 class TestDiscoverRunDirs:
     def test_detects_via_test_labels_markers(self, artifact_tree: Path):
-        run_dirs = _discover_run_dirs(artifact_tree)
+        run_dirs = discover_run_dirs(artifact_tree)
 
         assert len(run_dirs) == 2
         names = [d.name for d in run_dirs]
@@ -168,11 +167,11 @@ class TestDiscoverRunDirs:
         assert "mcp-smoke-s1-u64-gateway" in names
 
     def test_returns_empty_when_no_markers(self, single_run_tree: Path):
-        run_dirs = _discover_run_dirs(single_run_tree)
+        run_dirs = discover_run_dirs(single_run_tree)
         assert run_dirs == []
 
     def test_returns_sorted(self, artifact_tree: Path):
-        run_dirs = _discover_run_dirs(artifact_tree)
+        run_dirs = discover_run_dirs(artifact_tree)
         names = [d.name for d in run_dirs]
         assert names == sorted(names)
 
@@ -183,7 +182,7 @@ class TestDiscoverRunDirs:
         (runs / "run-a").mkdir(parents=True)
         (runs / "run-a" / "stats.csv").write_text("data")
 
-        run_dirs = _discover_run_dirs(tmp_path / "artifacts")
+        run_dirs = discover_run_dirs(tmp_path / "artifacts")
         assert run_dirs == []
 
 
@@ -204,7 +203,7 @@ class TestArtifactCollection:
         assert PARAMETERS_FILE in all_names
 
     def test_run_dir_files_are_correct(self, artifact_tree: Path):
-        run_dirs = _discover_run_dirs(artifact_tree)
+        run_dirs = discover_run_dirs(artifact_tree)
         run_a = [d for d in run_dirs if "u16" in d.name][0]
         run_a_files = {p.name for p in run_a.rglob("*") if p.is_file()}
 
@@ -223,7 +222,7 @@ class TestMetricsParametersLoading:
     def test_load_metrics_json(self, artifact_tree: Path):
         from projects.caliper.engine.file_export.mlflow_backend import _load_json_file
 
-        run_dirs = _discover_run_dirs(artifact_tree)
+        run_dirs = discover_run_dirs(artifact_tree)
         run_a = [d for d in run_dirs if "u16" in d.name][0]
 
         metrics = _load_json_file(run_a / METRICS_FILE)
@@ -234,7 +233,7 @@ class TestMetricsParametersLoading:
     def test_load_parameters_json(self, artifact_tree: Path):
         from projects.caliper.engine.file_export.mlflow_backend import _load_json_file
 
-        run_dirs = _discover_run_dirs(artifact_tree)
+        run_dirs = discover_run_dirs(artifact_tree)
         run_a = [d for d in run_dirs if "u16" in d.name][0]
 
         params = _load_json_file(run_a / PARAMETERS_FILE)
@@ -290,7 +289,7 @@ class TestMultiRunMlflowLogging:
             log_multi_run_artifacts,
         )
 
-        run_dirs = _discover_run_dirs(artifact_tree)
+        run_dirs = discover_run_dirs(artifact_tree)
         all_files = [p for p in artifact_tree.rglob("*") if p.is_file()]
 
         log_multi_run_artifacts(
@@ -323,7 +322,7 @@ class TestMultiRunMlflowLogging:
             log_multi_run_artifacts,
         )
 
-        run_dirs = _discover_run_dirs(artifact_tree)
+        run_dirs = discover_run_dirs(artifact_tree)
 
         log_multi_run_artifacts(
             all_artifact_paths=[],
@@ -346,7 +345,7 @@ class TestMultiRunMlflowLogging:
             log_multi_run_artifacts,
         )
 
-        run_dirs = _discover_run_dirs(artifact_tree)
+        run_dirs = discover_run_dirs(artifact_tree)
 
         log_multi_run_artifacts(
             all_artifact_paths=[],
@@ -372,7 +371,7 @@ class TestMultiRunMlflowLogging:
         log_multi_run_artifacts(
             all_artifact_paths=[],
             artifact_root=artifact_tree,
-            run_dirs=_discover_run_dirs(artifact_tree),
+            run_dirs=discover_run_dirs(artifact_tree),
             metrics_file=METRICS_FILE,
             parameters_file=PARAMETERS_FILE,
             tracking_uri="http://test-mlflow:5000",
@@ -387,7 +386,7 @@ class TestMultiRunMlflowLogging:
             log_multi_run_artifacts,
         )
 
-        run_dirs = _discover_run_dirs(artifact_tree)
+        run_dirs = discover_run_dirs(artifact_tree)
         all_files = [p for p in artifact_tree.rglob("*") if p.is_file()]
 
         child_run_ids = iter(["child-run-a", "child-run-b"])
@@ -449,7 +448,7 @@ class TestMultiRunMlflowLogging:
             log_multi_run_artifacts,
         )
 
-        run_dirs = _discover_run_dirs(artifact_tree)
+        run_dirs = discover_run_dirs(artifact_tree)
 
         log_multi_run_artifacts(
             all_artifact_paths=[],
@@ -472,7 +471,7 @@ class TestMultiRunMlflowLogging:
             log_multi_run_artifacts,
         )
 
-        run_dirs = _discover_run_dirs(artifact_tree)
+        run_dirs = discover_run_dirs(artifact_tree)
 
         child_run_ids = iter(["child-id-1", "child-id-2"])
 
@@ -549,7 +548,7 @@ class TestWorkspacePropagation:
         log_multi_run_artifacts(
             all_artifact_paths=[],
             artifact_root=artifact_tree,
-            run_dirs=_discover_run_dirs(artifact_tree),
+            run_dirs=discover_run_dirs(artifact_tree),
             metrics_file=METRICS_FILE,
             parameters_file=PARAMETERS_FILE,
             tracking_uri="http://test:5000",
@@ -568,7 +567,7 @@ class TestWorkspacePropagation:
         log_multi_run_artifacts(
             all_artifact_paths=[],
             artifact_root=artifact_tree,
-            run_dirs=_discover_run_dirs(artifact_tree),
+            run_dirs=discover_run_dirs(artifact_tree),
             metrics_file=METRICS_FILE,
             parameters_file=PARAMETERS_FILE,
             tracking_uri="http://test:5000",
@@ -677,6 +676,6 @@ class TestSingleRunExport:
         (run_a / METRICS_FILE).write_text(json.dumps({"total_requests": 100}))
         (run_a / PARAMETERS_FILE).write_text(json.dumps({"preset": "smoke"}))
 
-        run_dirs = _discover_run_dirs(base)
+        run_dirs = discover_run_dirs(base)
         assert len(run_dirs) == 1
         assert not (len(run_dirs) > 1)

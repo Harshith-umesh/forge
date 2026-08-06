@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from projects.caliper.engine.kpi.analyze import AnalysisConfig
 from projects.caliper.engine.model import (
     ParseResult,
     PostProcessingPlugin,
@@ -19,6 +20,16 @@ from .plotting.kpi_report import generate_kpi_report
 from .plotting.performance_analysis import generate_comprehensive_performance_report
 
 logger = logging.getLogger(__name__)
+
+
+# Analysis configuration for KPI regression testing
+analysis_config = AnalysisConfig(
+    comparison_keys=["product_version", "model_name"],
+    ignored_keys=[],
+    sorting_keys=["product_version"],
+    max_relative_regression=0.15,  # 15% threshold (LLM performance can vary more)
+    min_baseline_points=2,  # Require at least 2 baseline points for reliability
+)
 
 
 # Plot registry - maps report names to their generator functions and parameters
@@ -177,10 +188,6 @@ class GuideLLMPlugin(PostProcessingPlugin):
             )
 
         return paths
-
-    def kpi_catalog(self) -> list[dict[str, Any]]:
-        """Return the GuideLLM KPI catalog."""
-        return self.kpi_handler.get_catalog()
 
     def compute_kpis(self, model: UnifiedRunModel) -> list[dict[str, Any]]:
         """Compute KPI values from the unified model."""

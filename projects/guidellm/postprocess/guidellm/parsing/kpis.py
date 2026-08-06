@@ -13,7 +13,6 @@ from projects.caliper.engine.kpi import (
     LowerBetter,
     TwoDimensional,
     build_catalog_from_functions,
-    create_label_extractor,
     get_kpi_functions,
     is_2d_kpi,
 )
@@ -34,17 +33,6 @@ def guidellm_request_concurrency(unified_record) -> float:
 # Token Count Statistics KPIs - static values
 @LowerBetter()
 @Format("{:.1f}")
-@KPIMetadata(help="Average input tokens per request", unit="tokens")
-def guidellm_input_tokens_per_request(unified_record) -> float:
-    """Input Tokens Per Request KPI."""
-    value = unified_record.metrics.get("input_tokens_per_request")
-    if value is None:
-        raise ValueError("input_tokens_per_request metric not found")
-    return float(value)
-
-
-@LowerBetter()
-@Format("{:.1f}")
 @KPIMetadata(help="Average output tokens per request", unit="tokens")
 def guidellm_output_tokens_per_request(unified_record) -> float:
     """Output Tokens Per Request KPI."""
@@ -63,156 +51,160 @@ def guidellm_output_tokens_per_request(unified_record) -> float:
 # 2D KPIs that extract data from performance curves
 @HigherBetter()
 @TwoDimensional(
-    x_unit="req/s",
-    x_help="Request rate",
+    x_unit="connections",
+    x_help="Input concurrency",
     y_unit="tokens/s",
     y_help="Achieved throughput",
-    x_format="{:.1f}",
+    x_format="{:.0f}",
     y_format="{:.1f}",
 )
-@KPIMetadata(help="Throughput achieved at different request rates", unit="tokens/s")
-def guidellm_throughput_curve(unified_record) -> list[tuple[float, float]]:
-    """Throughput vs Request Rate Curve KPI."""
-    request_rates = unified_record.metrics.get("request_rate", [])
+@KPIMetadata(help="Throughput achieved at different concurrency levels", unit="tokens/s")
+def guidellm_throughput_curve(unified_record) -> list[tuple[int, float]]:
+    """Throughput vs Concurrency Curve KPI."""
     curves = unified_record.metrics.get("performance_curves", {})
+    intended_concurrency = curves.get("intended_concurrency", [])
     tokens_per_sec = curves.get("tokens_per_second", [])
 
-    if not request_rates or not tokens_per_sec or len(request_rates) != len(tokens_per_sec):
+    if (
+        not intended_concurrency
+        or not tokens_per_sec
+        or len(intended_concurrency) != len(tokens_per_sec)
+    ):
         return []
 
     return [
-        (float(x), float(y))
-        for x, y in zip(request_rates, tokens_per_sec, strict=False)
+        (int(x), float(y))
+        for x, y in zip(intended_concurrency, tokens_per_sec, strict=False)
         if x > 0 and y > 0
     ]
 
 
 @LowerBetter()
 @TwoDimensional(
-    x_unit="req/s",
-    x_help="Request rate",
+    x_unit="connections",
+    x_help="Input concurrency",
     y_unit="s",
     y_help="P95 latency",
-    x_format="{:.1f}",
+    x_format="{:.0f}",
     y_format="{:.4f}",
 )
-@KPIMetadata(help="P95 latency at different request rates", unit="s")
-def guidellm_latency(unified_record) -> list[tuple[float, float]]:
-    """P95 Latency vs Load Curve KPI."""
-    request_rates = unified_record.metrics.get("request_rate", [])
+@KPIMetadata(help="P95 latency at different concurrency levels", unit="s")
+def guidellm_latency(unified_record) -> list[tuple[int, float]]:
+    """P95 Latency vs Concurrency Curve KPI."""
     curves = unified_record.metrics.get("performance_curves", {})
+    intended_concurrency = curves.get("intended_concurrency", [])
     p95_latency = curves.get("request_latency_p95", [])
 
-    if not request_rates or not p95_latency or len(request_rates) != len(p95_latency):
+    if not intended_concurrency or not p95_latency or len(intended_concurrency) != len(p95_latency):
         return []
 
     return [
-        (float(x), float(y))
-        for x, y in zip(request_rates, p95_latency, strict=False)
+        (int(x), float(y))
+        for x, y in zip(intended_concurrency, p95_latency, strict=False)
         if x > 0 and y > 0
     ]
 
 
 @LowerBetter()
 @TwoDimensional(
-    x_unit="req/s",
-    x_help="Request rate",
+    x_unit="connections",
+    x_help="Input concurrency",
     y_unit="s",
     y_help="TTFT P95",
-    x_format="{:.1f}",
+    x_format="{:.0f}",
     y_format="{:.4f}",
 )
-@KPIMetadata(help="Time to first token P95 at different request rates", unit="s")
-def guidellm_ttft(unified_record) -> list[tuple[float, float]]:
-    """TTFT P95 vs Load Curve KPI."""
-    request_rates = unified_record.metrics.get("request_rate", [])
+@KPIMetadata(help="Time to first token P95 at different concurrency levels", unit="s")
+def guidellm_ttft(unified_record) -> list[tuple[int, float]]:
+    """TTFT P95 vs Concurrency Curve KPI."""
     curves = unified_record.metrics.get("performance_curves", {})
+    intended_concurrency = curves.get("intended_concurrency", [])
     ttft_p95 = curves.get("ttft_p95", [])
 
-    if not request_rates or not ttft_p95 or len(request_rates) != len(ttft_p95):
+    if not intended_concurrency or not ttft_p95 or len(intended_concurrency) != len(ttft_p95):
         return []
 
     return [
-        (float(x), float(y))
-        for x, y in zip(request_rates, ttft_p95, strict=False)
+        (int(x), float(y))
+        for x, y in zip(intended_concurrency, ttft_p95, strict=False)
         if x > 0 and y > 0
     ]
 
 
 @LowerBetter()
 @TwoDimensional(
-    x_unit="req/s",
-    x_help="Request rate",
+    x_unit="connections",
+    x_help="Input concurrency",
     y_unit="s",
     y_help="TPOT median",
-    x_format="{:.1f}",
+    x_format="{:.0f}",
     y_format="{:.4f}",
 )
-@KPIMetadata(help="Time per output token median at different request rates", unit="s")
-def guidellm_tpot(unified_record) -> list[tuple[float, float]]:
-    """TPOT Median vs Load Curve KPI."""
-    request_rates = unified_record.metrics.get("request_rate", [])
+@KPIMetadata(help="Time per output token median at different concurrency levels", unit="s")
+def guidellm_tpot(unified_record) -> list[tuple[int, float]]:
+    """TPOT Median vs Concurrency Curve KPI."""
     curves = unified_record.metrics.get("performance_curves", {})
+    intended_concurrency = curves.get("intended_concurrency", [])
     tpot_median = curves.get("tpot_median", [])
 
-    if not request_rates or not tpot_median or len(request_rates) != len(tpot_median):
+    if not intended_concurrency or not tpot_median or len(intended_concurrency) != len(tpot_median):
         return []
 
     return [
-        (float(x), float(y))
-        for x, y in zip(request_rates, tpot_median, strict=False)
+        (int(x), float(y))
+        for x, y in zip(intended_concurrency, tpot_median, strict=False)
         if x > 0 and y > 0
     ]
 
 
 @LowerBetter()
 @TwoDimensional(
-    x_unit="req/s",
-    x_help="Request rate",
+    x_unit="connections",
+    x_help="Input concurrency",
     y_unit="s",
     y_help="TPOT P95",
-    x_format="{:.1f}",
+    x_format="{:.0f}",
     y_format="{:.4f}",
 )
-@KPIMetadata(help="Time per output token P95 at different request rates", unit="s")
-def guidellm_tpot_p95(unified_record) -> list[tuple[float, float]]:
-    """TPOT P95 vs Load Curve KPI."""
-    request_rates = unified_record.metrics.get("request_rate", [])
+@KPIMetadata(help="Time per output token P95 at different concurrency levels", unit="s")
+def guidellm_tpot_p95(unified_record) -> list[tuple[int, float]]:
+    """TPOT P95 vs Concurrency Curve KPI."""
     curves = unified_record.metrics.get("performance_curves", {})
+    intended_concurrency = curves.get("intended_concurrency", [])
     tpot_p95 = curves.get("tpot_p95", [])
 
-    if not request_rates or not tpot_p95 or len(request_rates) != len(tpot_p95):
+    if not intended_concurrency or not tpot_p95 or len(intended_concurrency) != len(tpot_p95):
         return []
 
     return [
-        (float(x), float(y))
-        for x, y in zip(request_rates, tpot_p95, strict=False)
+        (int(x), float(y))
+        for x, y in zip(intended_concurrency, tpot_p95, strict=False)
         if x > 0 and y > 0
     ]
 
 
 @LowerBetter()
 @TwoDimensional(
-    x_unit="req/s",
-    x_help="Request rate",
+    x_unit="connections",
+    x_help="Input concurrency",
     y_unit="s",
     y_help="TPOT P99",
-    x_format="{:.1f}",
+    x_format="{:.0f}",
     y_format="{:.4f}",
 )
-@KPIMetadata(help="Time per output token P99 at different request rates", unit="s")
-def guidellm_tpot_p99(unified_record) -> list[tuple[float, float]]:
-    """TPOT P99 vs Load Curve KPI."""
-    request_rates = unified_record.metrics.get("request_rate", [])
+@KPIMetadata(help="Time per output token P99 at different concurrency levels", unit="s")
+def guidellm_tpot_p99(unified_record) -> list[tuple[int, float]]:
+    """TPOT P99 vs Concurrency Curve KPI."""
     curves = unified_record.metrics.get("performance_curves", {})
+    intended_concurrency = curves.get("intended_concurrency", [])
     tpot_p99 = curves.get("tpot_p99", [])
 
-    if not request_rates or not tpot_p99 or len(request_rates) != len(tpot_p99):
+    if not intended_concurrency or not tpot_p99 or len(intended_concurrency) != len(tpot_p99):
         return []
 
     return [
-        (float(x), float(y))
-        for x, y in zip(request_rates, tpot_p99, strict=False)
+        (int(x), float(y))
+        for x, y in zip(intended_concurrency, tpot_p99, strict=False)
         if x > 0 and y > 0
     ]
 
@@ -220,13 +212,34 @@ def guidellm_tpot_p99(unified_record) -> list[tuple[float, float]]:
 class GuideLLMKpiHandler:
     """Handles KPI catalog and computation for GuideLLM benchmarks."""
 
-    # Define label extractor for all GuideLLM test conditions
-    LABEL_EXTRACTOR = create_label_extractor(
-        {
-            "strategy": "metrics.strategy",
-            "duration": "metrics.duration",
+    # Define custom label extractor for GuideLLM with fallbacks for missing kpi_labels
+    @staticmethod
+    def _extract_labels(record) -> dict[str, Any]:
+        """Extract labels from record with fallbacks for missing kpi_labels."""
+
+        from projects.caliper.engine.kpi.decorators import _extract_value_by_path
+
+        labels = {}
+
+        # Extract artifact-based labels (graceful handling)
+        artifact_fields = {
+            "product_version": "metrics.product_version",
+            "cluster": "metrics.cluster",
+            "deployment_profile": "metrics.deployment_profile",
+            "model_name": "metrics.model_name",
+            "load_shape": "metrics.benchmark_key",
         }
-    )
+
+        for label_key, path in artifact_fields.items():
+            value = _extract_value_by_path(record, path)
+            if value is not None:
+                labels[label_key] = str(value)
+
+        labels |= record.metrics.get("kpi_labels", {}) or {}
+
+        return labels
+
+    LABEL_EXTRACTOR = type("TestLabelExtractor", (), {"extract": _extract_labels})()
 
     # Metadata fields to include in KPI records but not as labels
     @staticmethod
@@ -284,7 +297,6 @@ class GuideLLMKpiHandler:
 
         # Generate scalar KPIs for each record
         for r in valid_records:
-            base_labels = {**r.distinguishing_labels}
             test_condition_labels = GuideLLMKpiHandler.LABEL_EXTRACTOR.extract(r)
             metadata_fields = GuideLLMKpiHandler.extract_metadata(r)
 
@@ -303,9 +315,8 @@ class GuideLLMKpiHandler:
                 if value is None:
                     continue
 
-                # Merge base labels, test condition labels, and system labels
+                # Use only extracted KPI labels, not test labels
                 all_labels = {
-                    **base_labels,
                     **test_condition_labels,
                     "higher_is_better": kpi_func._kpi_higher_is_better,
                 }
@@ -338,7 +349,6 @@ class GuideLLMKpiHandler:
             if not curves or not request_rates:
                 continue
 
-            base_labels = {**r.distinguishing_labels}
             test_condition_labels = GuideLLMKpiHandler.LABEL_EXTRACTOR.extract(r)
             metadata_fields = GuideLLMKpiHandler.extract_metadata(r)
 
@@ -357,14 +367,8 @@ class GuideLLMKpiHandler:
                 if not value or value is None:
                     continue
 
-                # Remove rate-specific labels for aggregated KPIs
-                aggregated_labels = {
-                    k: v
-                    for k, v in base_labels.items()
-                    if k not in ["concurrency", "rate", "max_concurrency"]
-                }
+                # Use only extracted KPI labels, not test labels
                 all_labels = {
-                    **aggregated_labels,
                     **test_condition_labels,
                     "higher_is_better": kpi_func._kpi_higher_is_better,
                 }

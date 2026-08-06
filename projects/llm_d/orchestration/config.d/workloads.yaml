@@ -11,8 +11,12 @@ smoke_requests:
     temperature: 0.7
 
 benchmarks:
+  default:
+    vllm_args:
+      max_model_len: 4096
+
   short:
-    timeout_seconds: 900
+    timeout_seconds: 3600
     outputs: json
     args:
       backend_type: openai_http
@@ -23,6 +27,7 @@ benchmarks:
       data: prompt_tokens=256,output_tokens=128
 
   concurrent-1k-1k:
+    timeout_seconds: 3600
     args:
       backend_type: openai_http
       rate_type: concurrent
@@ -31,6 +36,9 @@ benchmarks:
       max_seconds: 600
 
   heavy-heterogeneous:
+    timeout_seconds: 3600
+    vllm_args:
+      max_model_len: 40960
     args:
       backend_type: openai_http
       rate_type: concurrent
@@ -39,6 +47,11 @@ benchmarks:
       max_seconds: 600
 
   multi-turn:
+    vllm_args:
+      max_model_len: 40960
+    # One Job runs all five rates sequentially; the high-rate cases need more
+    # than the default one-hour wall-clock budget.
+    timeout_seconds: 7200
     args:
       backend_type: openai_http
       rate_type: concurrent

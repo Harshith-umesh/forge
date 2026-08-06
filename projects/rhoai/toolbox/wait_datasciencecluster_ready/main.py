@@ -61,16 +61,14 @@ def capture_initial_dsc(args, ctx):
 def wait_for_datasciencecluster_ready(args, ctx):
     """Wait for the DataScienceCluster phase to become Ready"""
 
-    # Query only the status.phase field and show output
+    # Use plain text output to show both READY and REASON columns
     result = oc(
         "get",
         "datasciencecluster",
         args.datasciencecluster_name,
         "-n",
         args.namespace,
-        "-o",
-        "jsonpath={.status.phase}",
-        log_stdout=True,  # Show the output
+        log_stdout=True,  # Show the table output
         check=False,
     )
 
@@ -81,18 +79,46 @@ def wait_for_datasciencecluster_ready(args, ctx):
             error_msg += f": {result.stderr.strip()}"
         raise RuntimeError(error_msg)
 
-    phase = result.stdout.strip() if result.stdout else None
-
-    if phase == "Ready":
-        return "DataScienceCluster ready"
-    if phase in {"Failed", "Error"}:
-        raise RuntimeError(f"DataScienceCluster entered terminal phase {phase}")
-
-    # Provide specific reason for retry
-    if not phase:
-        return (False, "DataScienceCluster status.phase is empty, retrying...")
+    # Parse the table output into a dict
+    lines = result.stdout.strip().split("\n")
+    if len(lines) < 2:
+        parsed_data = {}
     else:
-        return (False, f"DataScienceCluster is in {phase} phase, waiting for Ready...")
+        header = lines[0].split()
+        data = lines[1].split()
+        # Handle case where REASON column might be empty
+        while len(data) < len(header):
+            data.append("")
+        parsed_data = dict(zip(header, data, strict=True))
+
+    # Check if we have the required columns
+    if not parsed_data:
+        return (False, "Unable to parse DataScienceCluster output, waiting...")
+
+    ready_value = parsed_data.get("READY", "").strip()
+    reason_value = parsed_data.get("REASON", "").strip()
+
+    # Check if READY column shows True
+    if ready_value.lower() == "true":
+        return f"DataScienceCluster ready (READY={ready_value})"
+
+    # Fail fast if READY shows False and REASON shows Error
+    if ready_value.lower() == "false" and "error" in reason_value.lower():
+        raise RuntimeError(
+            f"DataScienceCluster is in Error state (READY={ready_value}, REASON={reason_value}). Check the DSC status and logs for details."
+        )
+
+    # Fail fast if REASON shows Failed
+    if "failed" in reason_value.lower():
+        raise RuntimeError(
+            f"DataScienceCluster failed (REASON={reason_value}). Check the DSC status and logs for details."
+        )
+
+    # Still waiting - provide context for retry
+    return (
+        False,
+        f"DataScienceCluster is not ready yet (READY={ready_value}, REASON={reason_value or 'N/A'}), waiting...",
+    )
 
 
 @always

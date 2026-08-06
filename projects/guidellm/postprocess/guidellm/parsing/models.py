@@ -17,7 +17,8 @@ class GuideLLMBenchmark:
 
     # Request metrics
     request_rate: float = 0.0
-    request_concurrency: float = 0.0
+    request_concurrency: float = 0.0  # Effective concurrency achieved
+    intended_concurrency: int = 0  # Input/target concurrency
     completed_requests: int = 0
     failed_requests: int = 0
 
@@ -72,6 +73,7 @@ class GuideLLMBenchmark:
             "duration": self.duration,
             "request_rate": self.request_rate,
             "request_concurrency": self.request_concurrency,
+            "intended_concurrency": self.intended_concurrency,
             "completed_requests": self.completed_requests,
             "failed_requests": self.failed_requests,
             "input_tokens_per_request": self.input_tokens_per_request,
