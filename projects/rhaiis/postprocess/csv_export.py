@@ -66,6 +66,8 @@ FIELDNAMES = [
     "prefix_tokens",
     "prefix_count",
     "request_type",
+    "mlflow_run_id",
+    "mlflow_experiment_id",
 ]
 
 
@@ -279,4 +281,6 @@ def _extract_row(
         "prefix_tokens": "",
         "prefix_count": "",
         "request_type": "",
+        "mlflow_run_id": "",
+        "mlflow_experiment_id": "",
     }

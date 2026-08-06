@@ -32,6 +32,10 @@ completion:
   - **`platform`**: Platform name (e.g., `"CKS"`, `"RHOAI"`)
   - **`gpu_type`**: GPU type (e.g., `"H100"`, `"A100"`)
   - **`test_harness`**: Test framework (e.g., `"guidellm"`, `"vllm"`)
+- **`mlflow_destination`** *(optional)*: Pre-created MLflow run for artifact upload
+  - **`run_id`**: MLflow run ID (assigned by the server during pre-creation)
+  - **`experiment_id`** *(optional)*: MLflow experiment ID
+  - **`workspace`** *(optional)*: MLflow workspace name
 - **`completion`**: Test execution status
   - **`success`**: `true` if succeeded, `false` if failed
   - **`message`**: Human-readable status description
@@ -89,6 +93,10 @@ kpi_labels:
   platform: "CKS"
   gpu_type: "H100"
   test_harness: "guidellm"
+mlflow_destination:
+  run_id: "48e49dfc966c487cb76cf105a5314908"
+  experiment_id: "264"
+  workspace: "forge-rhaiis"
 completion:
   success: true
   message: "Test completed successfully"

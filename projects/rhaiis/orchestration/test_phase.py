@@ -53,6 +53,9 @@ def run(
         logger.exception("Dashboard CSV S3 sync after postprocessing failed")
         ret = 1
 
+    if ret == 0:
+        _maybe_send_success_notification(model_key, workload_keys)
+
     return ret
 
 
@@ -295,6 +298,14 @@ def _run_test(
                 logger.exception("Profiler trace upload failed")
                 _warnings.append("Profiler trace upload failed")
 
+        try:
+            from projects.caliper.orchestration.export import precreate_mlflow_run_if_configured
+
+            mlflow_destination = precreate_mlflow_run_if_configured()
+        except Exception:
+            logger.warning("MLflow run pre-creation failed; continuing", exc_info=True)
+            mlflow_destination = None
+
         # Phase 2: benchmark + post-processing for ALL workloads
         trtllm_cfg = runtime_config.get_trtllm_config() if engine == "trtllm" else None
         for wl_key in workload_keys:
@@ -316,6 +327,7 @@ def _run_test(
                 version=version,
                 cluster_tag=cluster_tag,
                 trtllm_config=trtllm_cfg,
+                mlflow_destination=mlflow_destination,
             )
 
         try:
@@ -382,6 +394,7 @@ def _run_workload_benchmark(
     version: str,
     cluster_tag: str,
     trtllm_config: dict | None = None,
+    mlflow_destination: dict[str, str] | None = None,
 ) -> None:
     """Run benchmark and post-processing for a single workload.
 
@@ -416,6 +429,7 @@ def _run_workload_benchmark(
             accelerator_chip=gpu_type.upper(),
             run_uuid=run_uuid,
             trtllm_config=trtllm_config,
+            mlflow_destination=mlflow_destination,
         )
 
         if not run_benchmark:
@@ -473,6 +487,7 @@ def _create_test_labels(
     accelerator_chip: str = "",
     run_uuid: str = "",
     trtllm_config: dict | None = None,
+    mlflow_destination: dict[str, str] | None = None,
 ) -> None:
     _, image_tag = runtime_config.split_image_tag(serving_image) if serving_image else ("", "")
     parts = [f"{k}: {v}" for k, v in engine_args.items()]
@@ -500,7 +515,8 @@ def _create_test_labels(
         "runtime_args": runtime_args,
         "run_uuid": run_uuid,
     }
-    write_test_labels(env.ARTIFACT_DIR, labels)
+
+    write_test_labels(env.ARTIFACT_DIR, labels, mlflow_destination=mlflow_destination)
     logger.info("Created test labels: %s", labels)
 
 
@@ -593,8 +609,41 @@ def _sync_postprocessed_dashboard_csv(model_key: str, workload_keys: list[str]) 
 
     version = config.project.get_config("tests.rhaiis.version", "")
     compare_version = config.project.get_config("tests.rhaiis.compare_version", "")
-    if not compare_version or not version:
+
+    if compare_version and version:
+        model_cfg = runtime_config.get_model(model_key)
+        accelerator = runtime_config.get_accelerator()
+        engine = runtime_config.get_engine()
+        engine_defaults = runtime_config.get_engine_args(engine)
+        first_workload = runtime_config.get_workload(workload_keys[0])
+        ea = runtime_config.merge_engine_args(engine_defaults, model_cfg, first_workload, engine)
+
+        from projects.rhaiis.orchestration.analysis import run_regression_check
+
+        run_regression_check(
+            csv_path,
+            compare_version,
+            version,
+            model_cfg,
+            accelerator,
+            run_uuid="",
+            engine_args=ea,
+        )
         return
+
+
+def _maybe_send_success_notification(model_key: str, workload_keys: list[str]) -> None:
+    """Send a Slack success notification if slack_notify_always is set and no regression check."""
+    from projects.core.library import config
+
+    compare_version = config.project.get_config("tests.rhaiis.compare_version", "")
+    if compare_version:
+        return
+
+    if not config.project.get_config("tests.rhaiis.slack_notify_always", False):
+        return
+
+    from projects.rhaiis.postprocess.regression import send_success_notification
 
     model_cfg = runtime_config.get_model(model_key)
     accelerator = runtime_config.get_accelerator()
@@ -602,17 +651,21 @@ def _sync_postprocessed_dashboard_csv(model_key: str, workload_keys: list[str]) 
     engine_defaults = runtime_config.get_engine_args(engine)
     first_workload = runtime_config.get_workload(workload_keys[0])
     ea = runtime_config.merge_engine_args(engine_defaults, model_cfg, first_workload, engine)
+    tp = ea.get("tensor-parallel-size") or ea.get("tp-size") or ea.get("tp_size") or ""
+    dp = ea.get("data-parallel-size") or ea.get("dp-size") or ""
+    version = config.project.get_config("tests.rhaiis.version", "")
 
-    from projects.rhaiis.orchestration.analysis import run_regression_check
-
-    run_regression_check(
-        csv_path,
-        compare_version,
-        version,
-        model_cfg,
-        accelerator,
-        run_uuid="",
-        engine_args=ea,
+    send_success_notification(
+        model=model_cfg.get("hf_model_id", ""),
+        accelerator=accelerator,
+        job_id=os.environ.get("FJOB_NAME", ""),
+        slack_user=config.project.get_config("tests.rhaiis.slack_user", ""),
+        notification_vault="psap-forge-notifications",
+        tp=str(tp),
+        dp=str(dp),
+        version=version,
+        workload_keys=workload_keys,
+        cluster=config.project.get_config("rhaiis.cluster_tag", ""),
     )
 
 
