@@ -55,7 +55,7 @@ def validate_parameters(args, ctx):
     if not args.catalog_image:
         raise ValueError("catalog_image is required")
 
-    return f"Validated custom catalog parameters for {ctx.display_name}"
+    return f"Validated custom catalog parameters for {args.display_name}"
 
 
 @task
@@ -66,7 +66,7 @@ def render_catalog_source_manifest(args, ctx):
         args.artifact_dir / "src" / f"{args.catalog_source_name}-catalogsource.yaml"
     )
     template.render_template_to_file("catalogsource.yaml.j2", ctx.catalog_manifest_file)
-    return f"Rendered CatalogSource manifest for {ctx.display_name}"
+    return f"Rendered CatalogSource manifest for {args.display_name}"
 
 
 @task
