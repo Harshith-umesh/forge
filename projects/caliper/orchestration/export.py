@@ -400,6 +400,31 @@ def _read_mlflow_ids_from_test_labels() -> tuple[str, str]:
     return "", ""
 
 
+@requires(
+    vault_name="caliper.export.backend.mlflow.secrets.vault.name",
+    vault_key="caliper.export.backend.mlflow.secrets.vault.mlflow_secret",
+    workspace="caliper.export.backend.mlflow.config.workspace",
+)
+def build_mlflow_run_url_from_config(_cfg) -> str:
+    """Config-aware wrapper around :func:`build_mlflow_run_url`.
+
+    Resolves vault secrets and workspace from project config via ``@requires``.
+    Returns an empty string if MLflow is not configured or URL cannot be built.
+    """
+    vault_name = _cfg.vault_name
+    vault_key = _cfg.vault_key
+    if not vault_name or not vault_key:
+        logger.warning("Cannot build MLflow URL: vault not configured")
+        return ""
+
+    secrets_path = vault_lib.get_vault_content_path(vault_name, vault_key)
+    if not secrets_path or not secrets_path.exists():
+        logger.warning("Cannot build MLflow URL: secrets file not found")
+        return ""
+
+    return build_mlflow_run_url(secrets_path=secrets_path, workspace=_cfg.workspace or None)
+
+
 def build_mlflow_run_url(
     *,
     secrets_path: Path,

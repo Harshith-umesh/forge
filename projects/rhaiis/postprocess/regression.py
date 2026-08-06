@@ -334,30 +334,13 @@ DASHBOARD_BASE_URL = "https://staging-aidash.apps.ocp4.intlab.redhat.com/"
 
 def _build_mlflow_run_url() -> str:
     """Construct the MLflow run URL at runtime from vault secrets and config."""
-    from projects.caliper.orchestration.export import build_mlflow_run_url
-    from projects.core.library import config
-    from projects.core.library import vault as vault_lib
+    from projects.caliper.orchestration.export import build_mlflow_run_url_from_config
 
-    vault_name = config.project.get_config(
-        "caliper.export.backend.mlflow.secrets.vault.name", None, print=False, warn=False
-    )
-    vault_key = config.project.get_config(
-        "caliper.export.backend.mlflow.secrets.vault.mlflow_secret", None, print=False, warn=False
-    )
-    if not vault_name or not vault_key:
-        logger.warning("Cannot build MLflow URL: vault not configured")
+    try:
+        return build_mlflow_run_url_from_config()
+    except Exception:
+        logger.warning("Failed to build MLflow run URL", exc_info=True)
         return ""
-
-    secrets_path = vault_lib.get_vault_content_path(vault_name, vault_key)
-    if not secrets_path or not secrets_path.exists():
-        logger.warning("Cannot build MLflow URL: secrets file not found")
-        return ""
-
-    workspace = config.project.get_config(
-        "caliper.export.backend.mlflow.config.workspace", None, print=False, warn=False
-    )
-
-    return build_mlflow_run_url(secrets_path=secrets_path, workspace=workspace)
 
 
 PROFILE_DISPLAY_NAMES = {
