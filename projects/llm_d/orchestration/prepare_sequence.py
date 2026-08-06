@@ -1,6 +1,6 @@
 import logging
 
-from projects.core.library import env
+from projects.core.library import config, env
 from projects.llm_d.orchestration import prepare_phase, runtime_config
 
 logger = logging.getLogger(__name__)
@@ -13,8 +13,7 @@ def run_prepare_sequence() -> int:
     prepare_phase.prepare_cert_manager()
     prepare_phase.prepare_leader_worker_set()
 
-    platform = runtime_config.get_platform_config()
-    skip_gpu = platform["cluster"].get("skip_gpu_readiness", False)
+    skip_gpu = config.project.get_config("platform.cluster.skip_gpu_readiness")
     if skip_gpu:
         logger.info("Skipping GPU readiness (NFD + GPU operator): skip_gpu_readiness is enabled")
     else:
