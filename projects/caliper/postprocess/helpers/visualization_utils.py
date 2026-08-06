@@ -3,10 +3,36 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import logging
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def _truncate_filename(filename: str, max_length: int = 200) -> str:
+    """
+    Truncate a filename if it's too long, preserving the end and adding a hash.
+
+    Args:
+        filename: Original filename (without extension)
+        max_length: Maximum allowed filename length
+
+    Returns:
+        Truncated filename with hash if needed
+    """
+    if len(filename) <= max_length:
+        return filename
+
+    # Create a hash of the original filename
+    hash_object = hashlib.md5(filename.encode())
+    filename_hash = hash_object.hexdigest()[:8]
+
+    # Truncate and add hash
+    truncated = filename[: (max_length - 9)] + "_" + filename_hash
+    logger.warning(f"Filename too long, truncated to: {truncated}")
+
+    return truncated
 
 
 def save_figure(
@@ -39,6 +65,9 @@ def save_figure(
             final_filename = f"report_{report_number:02d}_{filename}"
         else:
             final_filename = filename
+
+        # Truncate filename if too long to avoid filesystem limits
+        final_filename = _truncate_filename(final_filename)
 
         if as_image:
             logger.info(f"Saving {final_filename} as PNG image...")

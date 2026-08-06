@@ -33,10 +33,7 @@ import click
 )
 def analyze_cli(current: Path, historical_dir: Path, output: Path, plugin_module: str) -> None:
     """CLI entrypoint for KPI analysis."""
-    from projects.caliper.engine.kpi.analyze import (
-        analyze_kpis,
-        status_dict_to_exit_code,
-    )
+    from projects.caliper.engine.kpi.analyze import analyze_kpis
 
     try:
         # Call the core analysis function from engine (returns status dict)
@@ -47,8 +44,8 @@ def analyze_cli(current: Path, historical_dir: Path, output: Path, plugin_module
             plugin_module=plugin_module,
         )
 
-        # Convert status dict to exit code for CLI
-        exit_code = status_dict_to_exit_code(result)
+        # Use exit code directly from the status dict
+        exit_code = result.get("exit_code", 1)
 
         if result.get("success"):
             click.echo(f"✅ Analysis completed successfully. Results written to: {output}")

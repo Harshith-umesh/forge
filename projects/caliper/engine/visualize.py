@@ -69,6 +69,7 @@ def run_visualize(
     exclude_pairs: tuple[str, ...],
     use_cache: bool,
     cache_path: Path | None,
+    verbose_parsing: bool = False,
 ) -> list[str]:
     # Parse include and exclude filters for directory-level filtering
     include_filters = None
@@ -88,6 +89,8 @@ def run_visualize(
         use_cache=use_cache,
         include_label_filter=include_filters,
         exclude_label_filter=exclude_filters,
+        verbose_parsing=verbose_parsing,
+        show_parameter_matrix=True,
     )
     cfg = resolve_visualize_config(base_dir, visualize_config_path)
     ids = resolve_report_ids(

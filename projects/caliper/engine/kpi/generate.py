@@ -19,8 +19,9 @@ def run_kpi_generate(
     use_cache: bool,
     cache_path: Path | None,
     format_type: str = "hierarchical",
-    include_label_filter: list[tuple[str, str]] | None = None,
-    exclude_label_filter: list[tuple[str, str]] | None = None,
+    include_label_filter: list[dict[str, str]] | None = None,
+    exclude_label_filter: list[dict[str, str]] | None = None,
+    verbose_parsing: bool = False,
 ) -> list[dict[str, Any]]:
     """Generate KPI output in specified format.
 
@@ -45,6 +46,8 @@ def run_kpi_generate(
         use_cache=use_cache,
         include_label_filter=include_label_filter,
         exclude_label_filter=exclude_label_filter,
+        verbose_parsing=verbose_parsing,
+        show_parameter_matrix=verbose_parsing,  # Only show matrix in verbose mode
     )
     compute = plugin.compute_kpis
     rows: list[dict[str, Any]] = compute(model)

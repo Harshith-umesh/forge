@@ -35,6 +35,7 @@ def run_parse(
     show_parameter_matrix: bool = True,
     include_label_filter: list[dict[str, str]] | None = None,
     exclude_label_filter: list[dict[str, str]] | None = None,
+    verbose_parsing: bool = False,
 ) -> UnifiedRunModel:
     """
     Run full parse or load valid cache.
@@ -86,13 +87,30 @@ def run_parse(
             cache_refs.append(str(cache_file))
             elapsed_time = time.time() - start_time
             cached_count += 1
-            relative_path = test_base_dir.relative_to(base_dir)
-            logger.info(f"⏱️  Directory parsed from cache in {elapsed_time:.3f}s: {relative_path}")
+            if verbose_parsing:
+                relative_path = test_base_dir.relative_to(base_dir)
+                logger.info(
+                    f"⏱️  Directory parsed from cache in {elapsed_time:.3f}s: {relative_path}"
+                )
         else:
-            # Parse this test base
-            result = parse_fn([node])  # Parse just this node
-            records = result.records
-            warnings = getattr(result, "warnings", [])
+            # Configure plugin parser logging level based on verbose_parsing
+            # Remove .plugin suffix if present to match actual module structure
+            base_plugin_module = plugin_module.replace(".plugin", "")
+            plugin_logger_name = f"{base_plugin_module}.parsing.parsers"
+            plugin_logger = logging.getLogger(plugin_logger_name)
+            original_level = plugin_logger.level
+
+            if not verbose_parsing:
+                plugin_logger.setLevel(logging.WARNING)
+
+            try:
+                # Parse this test base
+                result = parse_fn([node])  # Parse just this node
+                records = result.records
+                warnings = getattr(result, "warnings", [])
+            finally:
+                # Restore original log level
+                plugin_logger.setLevel(original_level)
 
             all_records.extend(records)
             all_warnings.extend(warnings)
@@ -107,14 +125,16 @@ def run_parse(
             cache_refs.append(str(cache_file))
             elapsed_time = time.time() - start_time
             parsed_count += 1
-            relative_path = test_base_dir.relative_to(base_dir)
-            logger.info(f"⏱️  Directory parsed fresh in {elapsed_time:.3f}s: {relative_path}")
+            if verbose_parsing:
+                relative_path = test_base_dir.relative_to(base_dir)
+                logger.info(f"⏱️  Directory parsed fresh in {elapsed_time:.3f}s: {relative_path}")
 
     # Log timing summary
     total_parse_time = time.time() - parse_start_time
-    logger.info(
-        f"⏱️  Parse timing summary: {total_parse_time:.3f}s total ({cached_count} cached, {parsed_count} parsed)"
-    )
+    if verbose_parsing:
+        logger.info(
+            f"⏱️  Parse timing summary: {total_parse_time:.3f}s total ({cached_count} cached, {parsed_count} parsed)"
+        )
 
     # Create unified model with all records
     cache_ref_summary = f"per-test-base: {len(cache_refs)} cache files"

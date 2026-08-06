@@ -39,6 +39,7 @@ def write_test_labels(
     version: str = "1",
     dump_config: bool = True,
     kpi_labels: dict[str, str] | None = None,
+    mlflow_destination: dict[str, str] | None = None,
 ) -> Path:
     """Write a __test_labels__.yaml file to mark a directory as a Caliper test base.
 
@@ -48,6 +49,7 @@ def write_test_labels(
         version: Version string for the test labels format (default: "1")
         dump_config: Whether to save project configuration to config.yaml (default: True)
         kpi_labels: Optional dictionary of KPI labels for system context
+        mlflow_destination: Optional MLflow run destination (run_id, experiment_id, workspace)
 
     Returns:
         Path to the created __test_labels__.yaml file
@@ -74,6 +76,9 @@ def write_test_labels(
 
     if kpi_labels:
         payload["kpi_labels"] = kpi_labels
+
+    if mlflow_destination:
+        payload["mlflow_destination"] = mlflow_destination
 
     # Create directory and write YAML
     test_labels_path.parent.mkdir(parents=True, exist_ok=True)

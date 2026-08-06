@@ -166,6 +166,12 @@ def _parse_label_filters(
     default=None,
     help="Path to write status YAML for orchestration (absolute path required).",
 )
+@click.option(
+    "--verbose-parsing",
+    is_flag=True,
+    default=False,
+    help="Enable verbose parsing logs.",
+)
 @click.pass_context
 def parse_cmd(
     ctx: click.Context,
@@ -175,6 +181,7 @@ def parse_cmd(
     include_label: tuple[str, ...],
     exclude_label: tuple[str, ...],
     status_file: Path | None,
+    verbose_parsing: bool,
     artifacts_dir: Path | None,
     postprocess_config: Path | None,
     plugin_module_override: str | None,
@@ -203,6 +210,7 @@ def parse_cmd(
             show_parameter_matrix=show_matrix,
             include_label_filter=include_filter,
             exclude_label_filter=exclude_filter,
+            verbose_parsing=verbose_parsing,
         )
 
         # Extract test directories with labels and relative paths
@@ -284,6 +292,12 @@ def parse_cmd(
     default=None,
     help="Path to write status YAML for orchestration (absolute path required).",
 )
+@click.option(
+    "--verbose-parsing",
+    is_flag=True,
+    default=False,
+    help="Enable verbose parsing logs.",
+)
 @click.pass_context
 def visualize_cmd(
     ctx: click.Context,
@@ -294,6 +308,7 @@ def visualize_cmd(
     exclude_label: tuple[str, ...],
     output_dir: Path,
     status_file: Path | None,
+    verbose_parsing: bool,
     artifacts_dir: Path | None,
     postprocess_config: Path | None,
     plugin_module_override: str | None,
@@ -323,6 +338,7 @@ def visualize_cmd(
             exclude_pairs=exclude_label,
             use_cache=True,
             cache_path=None,
+            verbose_parsing=verbose_parsing,
         )
 
         status.update(
@@ -434,6 +450,12 @@ def list_reports_cmd(
 @click.option(
     "--status-file", type=click.Path(path_type=Path), help="YAML file to write operation status"
 )
+@click.option(
+    "--verbose-parsing",
+    is_flag=True,
+    default=False,
+    help="Enable verbose parsing logs.",
+)
 @click.pass_context
 def ai_eval_export(
     ctx: click.Context,
@@ -445,6 +467,7 @@ def ai_eval_export(
     plugin_module_override: str | None,
     no_cache: bool,
     status_file: Path | None,
+    verbose_parsing: bool,
 ) -> None:
     _apply_workspace_cli_overrides(
         ctx,
@@ -469,6 +492,7 @@ def ai_eval_export(
             use_cache=not no_cache,
             include_label_filter=include_filter,
             exclude_label_filter=exclude_filter,
+            verbose_parsing=verbose_parsing,
         )
         status_data = {"success": True, "output_file": str(output)}
         click.echo(f"Exported {output}")
@@ -512,6 +536,12 @@ def ai_eval_export(
 @click.option(
     "--status-file", type=click.Path(path_type=Path), help="YAML file to write operation status"
 )
+@click.option(
+    "--verbose-parsing",
+    is_flag=True,
+    default=False,
+    help="Enable verbose parsing logs.",
+)
 @click.pass_context
 def kpi_generate(
     ctx: click.Context,
@@ -523,6 +553,7 @@ def kpi_generate(
     postprocess_config: Path | None,
     plugin_module_override: str | None,
     status_file: Path | None,
+    verbose_parsing: bool,
 ) -> None:
     _apply_workspace_cli_overrides(
         ctx,
@@ -547,6 +578,7 @@ def kpi_generate(
             use_cache=True,
             include_label_filter=include_filter,
             exclude_label_filter=exclude_filter,
+            verbose_parsing=verbose_parsing,
         )
 
         # Extract test directories from test nodes
@@ -577,6 +609,7 @@ def kpi_generate(
                 format_type=format_type,
                 include_label_filter=include_filter,
                 exclude_label_filter=exclude_filter,
+                verbose_parsing=verbose_parsing,
             )
             status_data = {
                 "success": True,
@@ -858,70 +891,18 @@ def analyse_kpis_cmd(
     # Delegate to engine layer
     from projects.caliper.engine.kpi.analyze import analyze_kpis
 
-    result = analyze_kpis(
+    status_data, report = analyze_kpis(
         current_kpis_file=current_kpis_file,
         historical_kpis_dir=historical_kpis_dir,
         output_file=output,
         plugin_module=plugin_module,
     )
 
-    # Format status data for CLI
-    status_data = {
-        "success": result.get("success", False),
-        "completed_at": result.get("completed_at"),
-    }
-
-    if result.get("output_file"):
-        status_data["output_file"] = result["output_file"]
-
-    if result.get("error"):
-        status_data["error"] = result["error"]
-
-    # Extract detailed analysis results for status file
-    if result.get("success") and result.get("output_file"):
-        try:
-            import yaml
-
-            with open(result["output_file"]) as f:
-                analysis_report = yaml.safe_load(f)
-
-            # Extract key fields from the analysis report
-            if analysis_report:
-                processed = analysis_report.get("processed", {})
-                tested = analysis_report.get("tested", {})
-                overall = analysis_report.get("overall", {})
-                results = analysis_report.get("results", [])
-
-                status_data.update(
-                    {
-                        "baseline_source_count": processed.get("baseline_source_count", 0),
-                        "tested": {
-                            "total_kpis": tested.get("total_kpis", 0),
-                            "regressions": tested.get("regressions", 0),
-                            "passes": tested.get("passes", 0),
-                            "skipped": tested.get("skipped", 0),
-                        },
-                        "results": results,
-                        "overall": {
-                            "verdict": overall.get("verdict", "UNKNOWN"),
-                            "regression_count": overall.get("regression_count", 0),
-                            "total_tested": overall.get("total_tested", 0),
-                            "total_skipped": overall.get("total_skipped", 0),
-                        },
-                    }
-                )
-        except Exception as e:
-            # If we can't read the analysis report, just include basic info
-            status_data["analysis_report_error"] = f"Could not read analysis report: {e}"
-
-    if result.get("result"):
-        status_data.update(result["result"])  # Include analysis result for debugging
-
     # Display result
-    if result.get("success"):
-        click.echo(f"✅ KPI analysis completed: {result.get('output_file')}")
+    if status_data.get("success"):
+        click.echo("✅ KPI analysis completed with success")
     else:
-        error_msg = result.get("error", "Unknown error")
+        error_msg = status_data.get("status", "Unknown error")
         click.echo(f"❌ KPI analysis failed: {error_msg}", err=True)
 
     # Write status file if requested
@@ -933,9 +914,9 @@ def analyse_kpis_cmd(
             click.echo(f"Failed to write status file {status_file}: {status_err}", err=True)
             sys.exit(4)
 
-    # Exit with error code if operation failed
-    if not status_data.get("success", False):
-        sys.exit(3)
+    # Use exit code directly from analysis result
+    exit_code = status_data.get("exit_code", 1)
+    sys.exit(exit_code)
 
 
 @click.command("s3-import")

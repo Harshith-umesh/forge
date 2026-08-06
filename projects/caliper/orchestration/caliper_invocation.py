@@ -415,34 +415,53 @@ def run_analyse_kpis(
             step_logs_dir=step_logs_dir,
         )
 
-        # Handle fail_on_regression logic at orchestration level
-        if (
-            hasattr(postprocess_config.analyze, "fail_on_regression")
-            and not postprocess_config.analyze.fail_on_regression
-            and result.returncode == 3
+        # Check success condition, accounting for regression override
+        # Regression detection with exit code 3 is considered successful analysis
+        regression_analysis_success = (
+            result.returncode == 3
             and status_data.get("regressions_detected")
-        ):
-            # Override exit code to 0 when fail_on_regression is False but keep regression info
-            logger.info(
-                "KPI regressions detected, but fail_on_regression=False - treating as success"
-            )
+            and "output_file" in status_data
+        )
 
-            result.returncode = 0
-            status_data["success"] = True
+        orchestration_success = (
+            result.returncode == 0 and status_data.get("success")
+        ) or regression_analysis_success
 
-        if not (result.returncode == 0 and status_data.get("success")):
+        if not orchestration_success:
+            # Include only summary data in failure case too
+            summary_fields = [
+                "success",
+                "regressions_detected",
+                "baseline_source_count",
+                "tested",
+                "overall",
+            ]
+            analysis_summary = {k: v for k, v in status_data.items() if k in summary_fields}
+
             return {
                 "status": "failed",
                 "error": status_data.get("error", "Unknown error"),
                 "completed_at": time.time(),
                 "log_file": log_file,
+                **analysis_summary,
             }
+
+        # Include only summary data, not detailed results
+        summary_fields = [
+            "success",
+            "regressions_detected",
+            "baseline_source_count",
+            "tested",
+            "overall",
+        ]
+        analysis_summary = {k: v for k, v in status_data.items() if k in summary_fields}
 
         return {
             "status": "success",
             "output_file": _make_path_relative_to_base(output_file, env.ARTIFACT_DIR),
             "completed_at": time.time(),
             "log_file": log_file,
+            **analysis_summary,
         }
 
     except Exception as e:
@@ -489,7 +508,6 @@ def run_parse_step(
             return True, {
                 "status": "success",
                 "detail": "Parse completed successfully",
-                "test_directories": status_data.get("test_directories", []),
                 "exit_code": result.returncode,
                 "completed_at": time.time(),
                 "log_file": log_file,

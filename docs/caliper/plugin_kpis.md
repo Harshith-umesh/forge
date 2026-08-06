@@ -68,6 +68,9 @@ def throughput_curve(unified_record) -> list[tuple[float, float]]:
     """Throughput vs Request Rate Curve KPI."""
     request_rates = unified_record.metrics.get("request_rate", [])
     throughputs = unified_record.metrics.get("throughput", [])
+    
+    if len(request_rates) != len(throughputs):
+        raise ValueError("Request rates and throughputs arrays must have same length")
 
     return [(float(x), float(y)) for x, y in zip(request_rates, throughputs)]
 ```
@@ -185,9 +188,14 @@ class MyKpiHandler:
                         )
 
                     records.append(kpi_record)
-                except Exception as e:
-                    # Handle missing metrics gracefully
+                except ValueError as e:
+                    # Handle missing metrics gracefully - KPI functions raise ValueError for absent data
+                    logger.debug(f"Skipping KPI {kpi_name} for {record.test_base_path}: {e}")
                     continue
+                except Exception as e:
+                    # Log and re-raise programming errors and conversion failures to make KPI failures visible
+                    logger.warning(f"KPI {kpi_name} failed for {record.test_base_path}: {e}")
+                    raise
 
         return records
 ```
@@ -312,7 +320,7 @@ The default output format groups KPIs by test with metadata:
 Legacy flat format with one KPI per line:
 
 ```json
-{"kpi_id": "throughput", "value": 150.5, "unit": "tokens/s", "run_id": "test_001", ...}
+{"schema_version": "1", "kpi_id": "throughput", "value": 150.5, "unit": "tokens/s", "run_id": "test_001", "timestamp": "2024-01-15T10:30:00Z", "labels": {"version": "v1.0", "platform": "gpu"}, "source": {"test_base_path": "/path/to/test", "plugin_module": "example_plugin"}}
 ```
 
 ## Testing KPIs
@@ -324,24 +332,24 @@ import pytest
 from unittest.mock import Mock
 
 
-def test_throughput_kpi():
+def test_request_rate_kpi():
     # Create mock record
     mock_record = Mock()
-    mock_record.metrics = {"throughput": 150.5}
+    mock_record.metrics = {"request_rate": 150.5}
 
     # Test KPI function
-    result = throughput_kpi(mock_record)
+    result = request_rate(mock_record)
 
     assert result == 150.5
     assert isinstance(result, float)
 
 
-def test_throughput_kpi_missing_data():
+def test_request_rate_kpi_missing_data():
     mock_record = Mock()
     mock_record.metrics = {}
 
-    with pytest.raises(ValueError, match="throughput metric not found"):
-        throughput_kpi(mock_record)
+    with pytest.raises(ValueError, match="request_rate metric not found"):
+        request_rate(mock_record)
 ```
 
 ### Integration Testing
@@ -382,8 +390,11 @@ def efficiency_ratio(unified_record) -> float:
     throughput = unified_record.metrics.get("throughput")
     latency = unified_record.metrics.get("latency")
     
-    if not throughput or not latency:
+    if throughput is None or latency is None:
         raise ValueError("Both throughput and latency required")
+    
+    if latency == 0:
+        raise ValueError("Latency cannot be zero")
     
     return throughput / latency
 ```

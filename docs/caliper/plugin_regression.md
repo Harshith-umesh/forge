@@ -30,7 +30,7 @@ class AnalysisConfig:
 
 #### Field Descriptions
 
-**`comparison_keys`** *(required)*
+**`comparison_keys`** *(optional, defaults to empty list)*
 - Label keys that define what we compare against
 - Records must differ on at least one comparison key to be distinct baselines
 - Example: `["version"]` means we test the current version against other versions
@@ -210,7 +210,7 @@ def get_analysis_config() -> AnalysisConfig:
    - Labels in `ignored_keys` (explicitly ignored)
    - Labels in `comparison_keys` (expected to differ)
 3. **Threshold Comparison**: If relative change exceeds `max_relative_regression`:
-   - For "higher is better" KPIs: negative change > threshold = regression
+   - For "higher is better" KPIs: relative_change < -max_relative_regression = regression
    - For "lower is better" KPIs: positive change > threshold = regression
 
 ### Example Matching Scenario
