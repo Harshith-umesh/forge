@@ -1018,14 +1018,7 @@ class CaliperPostprocessOrchestrator:
         self._run_artifacts_to_kpis_step(output_dir, mod_str)
 
         # Generate per-run metrics.json + parameters.json from kpis.json
-        try:
-            self._run_kpis_to_metrics_step(output_dir)
-        except Exception as e:
-            logger.error("kpis-to-mlflow step failed: %s", e)
-            self._add_step(
-                "kpis_to_mlflow",
-                {"status": "failed", "error": str(e), "completed_at": time.time()},
-            )
+        self._run_kpis_to_metrics_step(output_dir)
 
         # KPI CSV export
         self._run_kpis_to_csv_step(output_dir)
@@ -1109,7 +1102,7 @@ class CaliperPostprocessOrchestrator:
 
         if result.returncode != 0 or not status_data.get("success"):
             error = status_data.get("error", f"exit code {result.returncode}")
-            raise RuntimeError(f"kpis-to-mlflow failed: {error}")
+            logger.error("kpis-to-mlflow step failed: %s", error)
 
     def _run_kpis_to_csv_step(self, output_dir: Path) -> None:
         """Execute the KPI CSV export step."""
