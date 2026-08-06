@@ -794,8 +794,6 @@ class CaliperPostprocessOrchestrator:
                 step_data = {
                     "plugin_module": status_data.get("plugin_module", "unknown"),
                     "record_count": record_count,
-                    "test_directories": status_data.get("test_directories", []),
-                    "test_directories_count": status_data.get("test_directories_count", 0),
                     "parse_cache_ref": status_data.get("cache_ref"),
                     "completed_at": time.time(),
                 }

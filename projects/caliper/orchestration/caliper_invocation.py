@@ -430,9 +430,18 @@ def run_analyse_kpis(
             regression_override = True
 
         # Check success condition, accounting for regression override
+        # Regression detection with exit code 3 is considered successful analysis
+        regression_analysis_success = (
+            result.returncode == 3
+            and status_data.get("regressions_detected")
+            and "output_file" in status_data
+        )
+
         orchestration_success = (
-            result.returncode == 0 and status_data.get("success")
-        ) or regression_override
+            (result.returncode == 0 and status_data.get("success"))
+            or regression_override
+            or regression_analysis_success
+        )
 
         if not orchestration_success:
             # Include only summary data in failure case too
@@ -515,7 +524,6 @@ def run_parse_step(
             return True, {
                 "status": "success",
                 "detail": "Parse completed successfully",
-                "test_directories": status_data.get("test_directories", []),
                 "exit_code": result.returncode,
                 "completed_at": time.time(),
                 "log_file": log_file,
