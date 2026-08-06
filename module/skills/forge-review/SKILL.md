@@ -62,6 +62,14 @@ For every added or modified line in the diff (`+` lines), check against each rul
 - Any file under `projects/*/toolbox/` importing from `projects/*/orchestration/`
 - Toolbox code reading config via `config.project.get_config()` directly instead of receiving values through `run()` parameters
 - Manifest/template files placed outside their toolbox command directory
+- **Caliper orchestration vs engine**: The `projects/caliper/engine/` layer contains pure
+  data-processing logic (parsing artifacts, building the unified model, computing KPIs,
+  rendering visualizations). The `projects/caliper/orchestration/` layer drives the engine
+  via CLI subprocess calls and handles CI concerns (step sequencing, status files, logging,
+  notifications, final status computation). Orchestration code must not duplicate or inline
+  engine logic — e.g. directly traversing artifact trees, computing KPI values, rendering
+  plots, or manipulating the unified model. If new data-processing capability is needed,
+  add it to the engine and expose it through the CLI; orchestration only invokes it.
 
 #### No time.sleep()
 - `time.sleep(N)` used to wait for cluster state (pod ready, operator deployed, resource status)
