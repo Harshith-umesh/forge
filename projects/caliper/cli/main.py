@@ -18,6 +18,7 @@ from projects.caliper.cli.commands import (
     kpi_generate,
     kpi_import,
     kpi_s3_import,
+    kpis_to_mlflow_cmd,
     list_reports_cmd,
     parse_cmd,
     visualize_cmd,
@@ -212,6 +213,7 @@ kpi_group.add_command(kpi_csv_export)
 kpi_group.add_command(kpi_import)
 kpi_group.add_command(analyse_kpis_cmd)
 kpi_group.add_command(kpi_s3_import)
+kpi_group.add_command(kpis_to_mlflow_cmd)
 
 # Register s3-export command under kpi group
 kpi_group.add_command(s3_export_cmd)

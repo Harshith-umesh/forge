@@ -7,7 +7,7 @@ These handlers are consumed by project-level pr_args modules (e.g., llm_d).
 
 Supported syntax::
 
-    /rhoai.rc-image quay.io/rhoai/rhoai-fbc-fragment@sha256:abc123
+    /rhoai.rc-image quay.io/rhoai/rhoai-fbc-fragment@sha256:abc123 [CHANNEL]
 """
 
 from __future__ import annotations
@@ -22,7 +22,9 @@ def handle_rhoai_rc_image_directive(line: str) -> dict[str, Any]:
     """
     Handle /rhoai.rc-image directive for setting RHOAI RC catalog image.
 
-    Format: /rhoai.rc-image IMAGE
+    Format: /rhoai.rc-image IMAGE [CHANNEL]
+
+    CHANNEL is optional and defaults to "beta" if not specified.
 
     Args:
         line: The directive line
@@ -33,18 +35,21 @@ def handle_rhoai_rc_image_directive(line: str) -> dict[str, Any]:
     Raises:
         ValueError: If image is empty
     """
-    image = line.removeprefix("/rhoai.rc-image").strip()
+    parts = line.removeprefix("/rhoai.rc-image").strip().split()
 
-    if not image:
+    if not parts or not parts[0]:
         raise ValueError(
             "Invalid /rhoai.rc-image directive: image cannot be empty. "
-            "Example: /rhoai.rc-image quay.io/rhoai/rhoai-fbc-fragment@sha256:abc123"
+            "Example: /rhoai.rc-image quay.io/rhoai/rhoai-fbc-fragment@sha256:abc123 [beta]"
         )
+
+    image = parts[0]
+    channel = parts[1] if len(parts) > 1 else "beta"
 
     return {
         "platform.rhoai.custom_catalog.enabled": True,
         "platform.rhoai.custom_catalog.image": image,
-        "platform.operators.rhods-operator.channel": "beta",
+        "platform.operators.rhods-operator.channel": channel,
     }
 
 
@@ -69,7 +74,8 @@ def get_supported_rhoai_directives() -> dict[str, str]:
     """
     return {
         "/rhoai.rc-image": """Set RHOAI RC catalog image for testing release candidates.
-                      Format: /rhoai.rc-image IMAGE
-                      Example: /rhoai.rc-image quay.io/rhoai/rhoai-fbc-fragment@sha256:abc123
-                      Effect: Enables custom catalog with the given image and sets operator channel to beta.""",
+                      Format: /rhoai.rc-image IMAGE [CHANNEL]
+                      CHANNEL is optional and defaults to beta if not specified.
+                      Example: /rhoai.rc-image quay.io/rhoai/rhoai-fbc-fragment@sha256:abc123 stable
+                      Effect: Enables custom catalog with the given image and sets operator channel.""",
     }
