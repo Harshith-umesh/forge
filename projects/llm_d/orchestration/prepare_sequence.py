@@ -12,8 +12,15 @@ def run_prepare_sequence() -> int:
     prepare_phase.verify_cluster_version()
     prepare_phase.prepare_cert_manager()
     prepare_phase.prepare_leader_worker_set()
-    prepare_phase.prepare_nfd()
-    prepare_phase.prepare_gpu_operator()
+
+    platform = runtime_config.get_platform_config()
+    skip_gpu = platform["cluster"].get("skip_gpu_readiness", False)
+    if skip_gpu:
+        logger.info("Skipping GPU readiness (NFD + GPU operator): skip_gpu_readiness is enabled")
+    else:
+        prepare_phase.prepare_nfd()
+        prepare_phase.prepare_gpu_operator()
+
     prepare_phase.prepare_rhoai_operator()
     prepare_phase.apply_datasciencecluster()
     prepare_phase.wait_for_datasciencecluster_ready()
@@ -25,7 +32,8 @@ def run_prepare_sequence() -> int:
                 prepare_phase.ensure_test_namespace()
                 prepare_phase.cleanup_previous_run()
                 prepare_phase.prepare_model_cache()
-                prepare_phase.verify_gpu_nodes()
+                if not skip_gpu:
+                    prepare_phase.verify_gpu_nodes()
                 prepare_phase.capture_prepare_state()
     logger.info("Prepare sequence completed successfully - all phases executed without errors")
     return 0
