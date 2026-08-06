@@ -63,6 +63,13 @@ class RhaiisKpiHandler:
         ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         out: list[dict[str, Any]] = []
 
+        mlflow_dest = {}
+        for node in model.test_nodes:
+            dest = node.test_labels.get("mlflow_destination")
+            if isinstance(dest, dict) and dest.get("run_id"):
+                mlflow_dest = dest
+                break
+
         for r in model.unified_result_records:
             if not r.run_identity.get("guidellm"):
                 continue
@@ -80,6 +87,8 @@ class RhaiisKpiHandler:
                 "output_toks": str(r.metrics.get("output_toks", "")),
                 "guidellm_start_time_ms": str(r.metrics.get("guidellm_start_time_ms", "")),
                 "guidellm_end_time_ms": str(r.metrics.get("guidellm_end_time_ms", "")),
+                "mlflow_run_id": mlflow_dest.get("run_id", ""),
+                "mlflow_experiment_id": mlflow_dest.get("experiment_id", ""),
             }
 
             if not curves or not request_rates:
