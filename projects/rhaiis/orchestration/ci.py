@@ -97,7 +97,7 @@ def resolve_hardware_request(hardware_spec: dict) -> dict:
 
     model_key = runtime_config.get_test_model_key()
     model = runtime_config.get_model(model_key)
-    ea = model.get("engine_args", {})
+    ea = model.get("vllm_args", {})
     tp_size = int(ea.get("tensor-parallel-size") or ea.get("tp-size") or ea.get("tp_size") or 1)
 
     accelerator = runtime_config.get_accelerator()

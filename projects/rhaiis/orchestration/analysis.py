@@ -257,7 +257,7 @@ def run_agent_analysis(
         logger.warning("Agent not reachable, skipping analysis: %s", detail)
         return ""
 
-    ea = model_cfg.get("engine_args", {})
+    ea = model_cfg.get("vllm_args", {})
     tp = str(ea.get("tensor-parallel-size") or ea.get("tp-size") or ea.get("tp_size") or 1)
     model = model_cfg.get("hf_model_id", "")
     improvements = analysis.get("improvements", [])

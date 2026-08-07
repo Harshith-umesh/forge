@@ -70,7 +70,7 @@ Key sections:
 | `rhaiis.deploy` | Deploy settings (replicas, CPU/memory, image_pull_secrets list, storage) |
 | `rhaiis.s3` | S3 bucket, vault, and credentials for dashboard CSV and profiler trace uploads |
 | `rhaiis.profiler` | PyTorch profiler settings (enable, S3 prefix, rates, labels) |
-| `models` | Model definitions (hf_model_id, per-model `engine_args` overrides) |
+| `models` | Model definitions (hf_model_id, per-model `vllm_args` overrides) |
 | `workloads` | Benchmark profiles (data shape, rates, max_seconds) |
 | `benchmarks.guidellm` | GuideLLM image, backend, timeout, PVC size, HF token secret, fs_group |
 | `tests` | CI test mapping (model_key, workload_keys, version) |
@@ -86,12 +86,12 @@ rhaiis supports three inference engines via a generic abstraction:
 | SGLang | `rhaiis.engine: sglang` | `rhaiis.engines.sglang.images` | `tp-size` | No root required, uses `sglang serve` entrypoint |
 | TRT-LLM | `rhaiis.engine: trtllm` | `rhaiis.engines.trtllm.images` | `tp_size` | Requires root (`anyuid` SCC), NGC pull secret |
 
-Models define `engine_args` with vLLM-style keys (e.g. `tensor-parallel-size`).
+Models define `vllm_args` with vLLM-style keys (e.g. `tensor-parallel-size`).
 When running with SGLang or TRT-LLM, arguments are automatically translated
 (e.g. `tensor-parallel-size` → `tp-size` for SGLang, `tp_size` for TRT-LLM).
 
 Engine-specific args can also be set directly via `rhaiis.engines.<engine>.args.*`
-in FournosJob `configOverrides`, which take precedence over model-level `engine_args`.
+in FournosJob `configOverrides`, which take precedence over model-level `vllm_args`.
 
 TRT-LLM additionally supports a `trtllm_config` block for server-side configuration
 (KV cache, CUDA graphs, MoE backend, etc.) that is serialized as a JSON config file
