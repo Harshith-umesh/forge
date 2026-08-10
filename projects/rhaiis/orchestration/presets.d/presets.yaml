@@ -21,7 +21,7 @@ trtllm:
 
 # ── Workload profiles ───────────────────────────────────────
 
-ci-quick:
+ci-test:
   tests.rhaiis.workload_key: ci-quick
   tests.rhaiis.model_key: qwen3-0_6b
   tests.rhaiis.warmup: false
@@ -30,6 +30,10 @@ ci-quick:
   caliper.postprocess.csv_dashboard.enabled: false
   tests.rhaiis.slack_notify_always: true
   rhaiis.agent_analysis.enabled: false
+
+ci-quick:
+  tests.rhaiis.workload_key: ci-quick
+
 
 profile1:
   tests.rhaiis.workload_key: profile1

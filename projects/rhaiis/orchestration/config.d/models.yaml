@@ -315,6 +315,14 @@ nemotron3super-120b-fp8:
   hf_model_id: nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8
   vllm_args:
     tensor-parallel-size: 2
+  sglang_args:
+    tp-size: 2
+    disable-radix-cache: true
+    max-running-requests: 512
+    cuda-graph-max-bs: 512
+    mem-fraction-static: 0.90
+    context-length: 8192
+    trust-remote-code: true
 
 # Ministral
 ministral-3-14b-reasoning:
