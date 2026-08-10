@@ -95,9 +95,13 @@ def resolve_hardware_request(hardware_spec: dict) -> dict:
     if hardware_spec.get("gpuType"):
         return hardware_spec
 
+    from projects.core.library import config as _cfg
+
     model_key = runtime_config.get_test_model_key()
     model = runtime_config.get_model(model_key)
-    ea = model.get("vllm_args", {})
+    engine = runtime_config.get_engine()
+    engine_defaults = _cfg.project.get_config(f"rhaiis.engines.{engine}.args") or {}
+    ea = runtime_config.merge_engine_args(engine_defaults, model, {}, engine)
     tp_size = int(ea.get("tensor-parallel-size") or ea.get("tp-size") or ea.get("tp_size") or 1)
 
     accelerator = runtime_config.get_accelerator()
