@@ -194,6 +194,17 @@ def _run_test(
     wait_guidellm_benchmark_task._retry_config["attempts"] = max(1, benchmark_timeout // 10)
 
     try:
+        from projects.caliper.orchestration.export import precreate_mlflow_run_if_configured
+
+        mlflow_destination = precreate_mlflow_run_if_configured()
+    except Exception:
+        logger.warning("MLflow run pre-creation failed; continuing", exc_info=True)
+        mlflow_destination = None
+
+    if mlflow_destination:
+        write_test_labels(env.ARTIFACT_DIR, {}, mlflow_destination=mlflow_destination)
+
+    try:
         isvc_labels = {"opendatahub.io/dashboard": "true"}
         if profiler_enabled and engine == "vllm":
             isvc_labels["vllm-profiler/enabled"] = "true"
@@ -297,14 +308,6 @@ def _run_test(
             except Exception:
                 logger.exception("Profiler trace upload failed")
                 _warnings.append("Profiler trace upload failed")
-
-        try:
-            from projects.caliper.orchestration.export import precreate_mlflow_run_if_configured
-
-            mlflow_destination = precreate_mlflow_run_if_configured()
-        except Exception:
-            logger.warning("MLflow run pre-creation failed; continuing", exc_info=True)
-            mlflow_destination = None
 
         # Phase 2: benchmark + post-processing for ALL workloads
         trtllm_cfg = runtime_config.get_trtllm_config() if engine == "trtllm" else None
