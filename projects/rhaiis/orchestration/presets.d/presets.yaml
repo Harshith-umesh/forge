@@ -33,6 +33,13 @@ ci-test:
 
 ci-quick:
   tests.rhaiis.workload_key: ci-quick
+  tests.rhaiis.warmup: false
+  tests.rhaiis.version: "vLLM-ci-quick"
+  rhaiis.profiler.enabled: false
+  caliper.postprocess.csv_dashboard.enabled: false
+  tests.rhaiis.slack_notify_always: true
+  rhaiis.agent_analysis.enabled: false
+
 
 
 profile1:
