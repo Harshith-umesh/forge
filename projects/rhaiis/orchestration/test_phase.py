@@ -672,6 +672,7 @@ def _maybe_send_success_notification(model_key: str, workload_keys: list[str]) -
         version=version,
         workload_keys=workload_keys,
         cluster=config.project.get_config("rhaiis.cluster_tag", ""),
+        engine=engine,
     )
 
 

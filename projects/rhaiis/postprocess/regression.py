@@ -590,6 +590,7 @@ def send_success_notification(
     version: str = "",
     workload_keys: list[str] | None = None,
     cluster: str = "",
+    engine: str = "",
 ) -> bool:
     """Send a Slack notification when the RHAIIS pipeline succeeds with no regressions.
 
@@ -618,6 +619,7 @@ def send_success_notification(
 
     cluster_line = f"*Cluster:* {cluster}\n" if cluster else ""
     version_line = f"*Version:* {version}\n" if version else ""
+    engine_line = f"*Engine:* {engine}\n" if engine else ""
 
     dashboard_line = ""
     try:
@@ -645,6 +647,7 @@ def send_success_notification(
         f"*Model:* {model}\n"
         f"*Accelerator:* {accelerator}\n"
         f"{parallelism_line}"
+        f"{engine_line}"
         f"{version_line}"
         f"{cluster_line}"
         f"{profiles_line}"
@@ -675,6 +678,7 @@ def send_failure_notification(
     version: str = "",
     workload_keys: list[str] | None = None,
     cluster: str = "",
+    engine: str = "",
 ) -> bool:
     """Send a Slack alert when the RHAIIS pipeline fails.
 
@@ -717,6 +721,7 @@ def send_failure_notification(
 
     cluster_line = f"*Cluster:* {cluster}\n" if cluster else ""
     version_line = f"*Version:* {version}\n" if version else ""
+    engine_line = f"*Engine:* {engine}\n" if engine else ""
 
     error_text = error if len(error) <= 500 else error[:500] + "..."
 
@@ -730,6 +735,7 @@ def send_failure_notification(
         f"*Model:* {model}\n"
         f"*Accelerator:* {accelerator}\n"
         f"{parallelism_line}"
+        f"{engine_line}"
         f"{version_line}"
         f"{cluster_line}"
         f"{profiles_line}"
