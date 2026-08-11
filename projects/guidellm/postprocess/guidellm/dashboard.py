@@ -427,7 +427,7 @@ def export_dashboard_kpis_to_csv(
             labels_by_group[key] = labels
 
     rows: list[dict[str, Any]] = []
-    for key in sorted(groups):
+    for key in sorted(groups, key=lambda k: (k[0], int(k[1]) if k[1].isdigit() else k[1])):
         metrics = groups[key]
         labels = labels_by_group.get(key, {})
         row: dict[str, Any] = dict.fromkeys(fieldnames, "")

@@ -7,7 +7,7 @@ import yaml
 
 from projects.caliper.engine.model import TestBaseNode as CaliperTestBaseNode
 from projects.caliper.engine.model import UnifiedRunModel
-from projects.llm_d.postprocess.plugin import FIELDNAMES, LlmDGuideLLMPlugin
+from projects.llm_d.postprocess.llm_d.plugin import FIELDNAMES, LlmDGuideLLMPlugin
 
 
 def _metric(**values):
@@ -114,7 +114,7 @@ def test_llmd_plugin_exports_dashboard_compatible_csv(tmp_path):
     plugin = LlmDGuideLLMPlugin()
     parsed = plugin.parse([node])
     model = UnifiedRunModel(
-        plugin_module="projects.llm_d.postprocess.plugin",
+        plugin_module="projects.llm_d.postprocess.llm_d.plugin",
         base_directory=str(tmp_path),
         test_nodes=[node],
         unified_result_records=parsed.records,
@@ -193,7 +193,7 @@ def test_llmd_plugin_recovers_deployment_metadata_from_config(tmp_path):
         test_labels={"labels": {}},
     )
 
-    from projects.llm_d.postprocess.plugin import _extract_deployment_metadata
+    from projects.llm_d.postprocess.llm_d.plugin import _extract_deployment_metadata
 
     metadata = _extract_deployment_metadata(node)
 
@@ -242,6 +242,6 @@ def test_llmd_plugin_infers_accelerator_from_serving_pod_node(tmp_path):
         test_labels={"labels": {}},
     )
 
-    from projects.llm_d.postprocess.plugin import _extract_deployment_metadata
+    from projects.llm_d.postprocess.llm_d.plugin import _extract_deployment_metadata
 
     assert _extract_deployment_metadata(node)["gpu_type"] == "H200"

@@ -22,7 +22,6 @@ from projects.guidellm.postprocess.guidellm.dashboard import (
     enrich_guidellm_parse_result,
     export_dashboard_kpis_to_csv,
     normalize_product_version,
-    validate_dashboard_fieldnames,
 )
 from projects.guidellm.postprocess.guidellm.parsing import GuideLLMKpiHandler, GuideLLMParser
 from projects.llm_d.orchestration.render_inference_service import _build_vllm_args
@@ -81,7 +80,6 @@ FIELDNAMES = [
     "guidellm_version",
     "notes",
 ]
-validate_dashboard_fieldnames(FIELDNAMES)
 
 
 class LlmDGuideLLMPlugin(PostProcessingPlugin):
