@@ -368,7 +368,9 @@ def _build_mlflow_run_url() -> str:
             return ""
 
         vault_name = _cfg.project.get_config("caliper.export.backend.mlflow.secrets.vault.name", "")
-        vault_key = _cfg.project.get_config("caliper.export.backend.mlflow.secrets.vault.mlflow_secret", "")
+        vault_key = _cfg.project.get_config(
+            "caliper.export.backend.mlflow.secrets.vault.mlflow_secret", ""
+        )
         if not vault_name or not vault_key:
             return ""
         secrets_path = vault_lib.get_vault_content_path(vault_name, vault_key)

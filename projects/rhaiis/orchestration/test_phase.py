@@ -205,9 +205,7 @@ def _run_test(
         import yaml as _yaml
 
         mlflow_marker = env.ARTIFACT_DIR / "_mlflow_destination.yaml"
-        mlflow_marker.write_text(
-            _yaml.safe_dump(mlflow_destination, sort_keys=False)
-        )
+        mlflow_marker.write_text(_yaml.safe_dump(mlflow_destination, sort_keys=False))
 
     try:
         isvc_labels = {"opendatahub.io/dashboard": "true"}
