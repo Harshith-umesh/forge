@@ -8,7 +8,7 @@ from projects.core.dsl import entrypoint, execute_tasks, retry, task
 from projects.core.dsl.utils.k8s import oc
 
 SERVING_CONTROL_PLANE_DEPLOYMENTS = (
-    "kserve-controller-manager",
+    "kserve-module-controller-manager",
     "llmisvc-controller-manager",
     "model-serving-api",
     "odh-model-controller",
