@@ -102,7 +102,7 @@ _COMMON_ARG_TRANSLATIONS: dict[str, dict[str, str]] = {
 
 
 def _translate_args(args: dict, engine: str) -> dict:
-    """Translate vLLM-style engine_args to another engine's arg naming.
+    """Translate vLLM-style args to another engine's arg naming.
 
     Only shared args (TP, DP) are translated; vLLM-specific args are dropped.
     """
@@ -124,11 +124,11 @@ def merge_engine_args(
     engine = engine or get_engine()
     engine_key = f"{engine}_args"
 
-    # Use engine-specific block if present, otherwise fall back to engine_args
+    # Use engine-specific block if present, otherwise fall back to vllm_args
     # and auto-translate common args when the engine isn't vLLM
     model_args = model.get(engine_key) if engine != "vllm" else None
     if model_args is None:
-        base = dict(model.get("engine_args", {}))
+        base = dict(model.get("vllm_args", {}))
         if engine != "vllm":
             base = _translate_args(base, engine)
     else:
@@ -136,7 +136,7 @@ def merge_engine_args(
 
     wl_args = workload.get(engine_key) if engine != "vllm" else None
     if wl_args is None:
-        wl = dict(workload.get("engine_args", {}))
+        wl = dict(workload.get("vllm_args", {}))
         if engine != "vllm":
             wl = _translate_args(wl, engine)
     else:

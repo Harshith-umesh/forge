@@ -182,6 +182,7 @@ def run_regression_check(
                     compare_version,
                     run_uuid,
                     severity_threshold=agent_cfg.get("severity_threshold", 10),
+                    engine_args=engine_args,
                 )
 
             from projects.rhaiis.postprocess.regression import send_regression_notification
@@ -228,6 +229,7 @@ def run_agent_analysis(
     run_uuid: str,
     *,
     severity_threshold: int = 10,
+    engine_args: dict | None = None,
 ) -> str:
     """Request AI agent analysis for severe regressions. Returns report URL or empty string."""
     from projects.core.library import config
@@ -257,7 +259,7 @@ def run_agent_analysis(
         logger.warning("Agent not reachable, skipping analysis: %s", detail)
         return ""
 
-    ea = model_cfg.get("engine_args", {})
+    ea = engine_args or {}
     tp = str(ea.get("tensor-parallel-size") or ea.get("tp-size") or ea.get("tp_size") or 1)
     model = model_cfg.get("hf_model_id", "")
     improvements = analysis.get("improvements", [])
