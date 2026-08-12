@@ -197,7 +197,7 @@ class TestEndToEnd:
         self._write_hierarchical_kpi(historical_dir / "run1" / "kpis.json", baseline1)
         self._write_hierarchical_kpi(historical_dir / "run2" / "kpis.json", baseline2)
 
-        test_status = run_kpi_analysis(
+        test_status, _ = run_kpi_analysis(
             current_kpi_file=current_dir / "kpis.json",
             historical_data_dir=historical_dir,
             output_file=output_file,
@@ -247,7 +247,7 @@ class TestEndToEnd:
         )
         self._write_hierarchical_kpi(historical_dir / "run1" / "kpis.json", baseline)
 
-        test_status = run_kpi_analysis(
+        test_status, _ = run_kpi_analysis(
             current_kpi_file=current_dir / "kpis.json",
             historical_data_dir=historical_dir,
             output_file=output_file,
@@ -282,7 +282,7 @@ class TestEndToEnd:
         )
         self._write_hierarchical_kpi(current_dir / "kpis.json", current)
 
-        test_status = run_kpi_analysis(
+        test_status, _ = run_kpi_analysis(
             current_kpi_file=current_dir / "kpis.json",
             historical_data_dir=historical_dir,
             output_file=output_file,
@@ -327,7 +327,7 @@ class TestEndToEnd:
         )
         self._write_hierarchical_kpi(historical_dir / "run1" / "kpis.json", baseline)
 
-        test_status = run_kpi_analysis(
+        test_status, _ = run_kpi_analysis(
             current_kpi_file=current_dir / "kpis.json",
             historical_data_dir=historical_dir,
             output_file=output_file,
@@ -376,7 +376,7 @@ class TestEndToEnd:
         )
         self._write_hierarchical_kpi(historical_dir / "run1" / "kpis.json", baseline)
 
-        test_status = run_kpi_analysis(
+        test_status, _ = run_kpi_analysis(
             current_kpi_file=current_dir / "kpis.json",
             historical_data_dir=historical_dir,
             output_file=output_file,
@@ -426,7 +426,7 @@ class TestEndToEnd:
 
         # With version as comparison_key, both match on platform=A100
         # (plugin would expose this config; here we test the core logic directly)
-        test_status = run_kpi_analysis(
+        test_status, _ = run_kpi_analysis(
             current_kpi_file=current_dir / "kpis.json",
             historical_data_dir=historical_dir,
             output_file=output_file,

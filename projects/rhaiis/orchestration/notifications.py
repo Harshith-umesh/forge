@@ -52,6 +52,7 @@ def _send_alert(
         version=_cfg.project.get_config("tests.rhaiis.version", ""),
         workload_keys=workload_keys,
         cluster=cluster_tag,
+        engine=engine,
     )
 
 
