@@ -87,3 +87,163 @@ logger.info(f"Applying secret: {manifest}")  # LEAKS if manifest has sensitive d
 # BAD: Including tokens in error messages
 raise RuntimeError(f"Failed to auth with token {token}")  # LEAKS TOKEN
 ```
+
+## Error Handling: Never Swallow Exceptions
+
+**Never catch-and-warn silently.** A `logger.warning(...)` inside a bare `except` gets buried in logs and failures go unnoticed for weeks.
+
+### Rules
+
+1. **Raise typed exceptions.** Use `ValueError`, `FileNotFoundError`, `RuntimeError` — not `logger.warning()` + `return ""`.
+   A missing config, missing vault secret, or failed version extraction is a real error.
+
+2. **Register visible notifications for operational failures.**
+   Use `ci.add_notification_file(name, message)` so failures appear in GitHub notifications,
+   not just in log streams nobody reads.
+
+3. **Bootstrap edge cases belong in the project, not shared libraries.**
+   If a new nightly test has no previous MLflow run yet, the *project orchestration* should
+   handle that gracefully (e.g., catch the exception and treat it as "no previous version").
+   Shared/library code should raise — callers decide policy.
+
+### Forbidden
+
+```python
+# BAD: Exception swallowed, failure invisible
+try:
+    upload_traces(data)
+except Exception:
+    logger.warning("Upload failed; continuing", exc_info=True)
+
+# BAD: Returning empty string instead of raising
+if connection is None:
+    return ""  # caller has no idea something broke
+```
+
+### Correct
+
+```python
+# GOOD: Raise so caller can decide
+if connection is None:
+    raise ValueError("MLflow connection failed — check vault config")
+
+# GOOD: If truly optional, still make it visible
+try:
+    upload_traces(data)
+except Exception:
+    logger.exception("Trace upload failed")
+    ci.add_notification_file("trace-upload-failed", "Profiler trace upload failed — check logs")
+    raise
+```
+
+## Layer Isolation: Toolbox Independence
+
+Toolbox scripts are the **lower layer** — standalone, reusable cluster-state commands.
+Orchestration is the **upper layer** — CI phases, config, presets.
+
+### Rules
+
+1. **Toolbox must never import from orchestration.**
+   No `from projects.NAME.orchestration.runtime_config import cfg` in toolbox code.
+   All inputs come through the `run()` entrypoint parameters for strong isolation.
+
+2. **Pass all values explicitly via `run()` parameters.**
+   Declare typed parameters with defaults in the entrypoint. This makes the command
+   standalone, testable, and reviewable via `_meta/metadata.yaml`.
+
+3. **Manifests and templates live with their toolbox command.**
+   Put them in `projects/NAME/toolbox/COMMAND_NAME/templates/` — keeps the command self-contained.
+
+### Forbidden
+
+```python
+# BAD: Toolbox importing orchestration config
+from projects.llamastack.orchestration.runtime_config import cfg
+hpa_cfg = cfg.get_hpa_config()
+min_replicas = hpa_cfg.get("min_replicas", 1)
+```
+
+### Correct
+
+```python
+# GOOD: All config passed through entrypoint
+@entrypoint
+def run(*, min_replicas: int = 1, max_replicas: int = 4, memory_target: int = 75):
+    """
+    Configure HPA for the deployment.
+
+    Args:
+        min_replicas: Minimum replica count
+        max_replicas: Maximum replica count
+        memory_target: Target memory utilization percentage
+    """
+    return execute_tasks(locals())
+```
+
+## Waiting for State: No `time.sleep()`
+
+### Rules
+
+1. **Never use `time.sleep(N)` to wait for cluster state changes.**
+   Arbitrary sleeps are unreliable — too short in slow environments, wasted time in fast ones.
+
+2. **Use `@retry` to poll for readiness.**
+
+```python
+# GOOD: Poll until resource is ready
+@retry(attempts=60, delay=30, backoff=1.0)
+@task
+def wait_until_ready(args, ctx):
+    status = oc_get_json("datasciencecluster", "default-dsc")["status"]["phase"]
+    return status == "Ready"
+```
+
+3. **Reuse existing wait toolbox scripts.**
+   Before writing a new wait loop, check `projects/rhoai/toolbox/`, `projects/rhaiis/toolbox/`,
+   `projects/core/` — many wait patterns already exist.
+
+## Config Types: No Unnecessary Coercion
+
+`config.project.get_config()` returns typed values from YAML. Do not cast.
+
+```python
+# BAD: YAML already returns int
+replicas = int(config.project.get_config("runtime.replicas"))
+
+# BAD: Custom bool coercion for YAML values
+def _as_bool(value):
+    return value.strip().lower() not in ("false", "0", "no")
+
+# GOOD: Trust YAML types
+replicas = config.project.get_config("runtime.replicas")
+```
+
+If a config value has the wrong type, fix the YAML — not the code.
+
+## Don't Duplicate Framework Behavior
+
+Before implementing preset handling, vault init, phase registration, or PR arg parsing —
+check what `config.init()`, `ci_base`, and core library already provide.
+
+- Preset application: handled by `config.init()`
+- Config overrides: handled by `config.project.apply_config_overrides()`
+- `/test` directives: handled at framework level
+
+Duplicating framework behavior leads to drift and subtle bugs.
+
+## Environment Variable Hygiene
+
+If you temporarily set an environment variable, restore it in a `finally` block.
+
+```python
+# GOOD: Cleanup in finally
+old_value = os.environ.get("MLFLOW_WORKSPACE")
+try:
+    os.environ["MLFLOW_WORKSPACE"] = workspace
+    # ... do work ...
+finally:
+    if old_value is None:
+        os.environ.pop("MLFLOW_WORKSPACE", None)
+    else:
+        os.environ["MLFLOW_WORKSPACE"] = old_value
+```
