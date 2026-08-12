@@ -214,6 +214,7 @@ def _extract_dashboard_metrics(node: TestBaseNode) -> tuple[dict[str, Any], dict
             .get("requests_per_second", {})
             .get("successful", {})
             .get("mean", 0)
+            or 0
         )
     )
     data_values = args.get("data", []) if isinstance(args, dict) else []

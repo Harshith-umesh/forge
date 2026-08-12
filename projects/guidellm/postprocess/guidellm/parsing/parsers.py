@@ -153,8 +153,11 @@ class GuideLLMParser:
             if annotation_value:
                 product_version = parse_product_version_from_annotation(annotation_value)
                 if product_version:
-                    result["product_version"] = normalize_product_version(product_version)
-                    logger.info(f"Extracted product_version '{product_version}' from {file_path}")
+                    normalized = normalize_product_version(product_version)
+                    result["product_version"] = normalized
+                    logger.info(
+                        f"Extracted product_version '{product_version}' (normalized to '{normalized}') from {file_path}"
+                    )
 
             # Extract deployment profile from forge annotation
             deployment_profile = extract_field_by_jsonpath(
