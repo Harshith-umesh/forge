@@ -14,7 +14,6 @@ from projects.caliper.engine.model import (
     TestBaseNode,
     UnifiedRunModel,
 )
-from projects.guidellm.postprocess.guidellm.ai_eval import GuideLLMAIEvaluator
 from projects.guidellm.postprocess.guidellm.dashboard import (
     compute_dashboard_kpis,
     dashboard_kpi_catalog,
@@ -23,7 +22,8 @@ from projects.guidellm.postprocess.guidellm.dashboard import (
     export_dashboard_kpis_to_csv,
     normalize_product_version,
 )
-from projects.guidellm.postprocess.guidellm.parsing import GuideLLMKpiHandler, GuideLLMParser
+from projects.guidellm.postprocess.guidellm.plugin import GuideLLMPlugin
+from projects.guidellm.postprocess.guidellm.plugin import analysis_config as analysis_config
 from projects.llm_d.orchestration.render_inference_service import _build_vllm_args
 from projects.llm_d.orchestration.runtime_config import deep_merge
 
@@ -82,16 +82,11 @@ FIELDNAMES = [
 ]
 
 
-class LlmDGuideLLMPlugin(PostProcessingPlugin):
+class LlmDGuideLLMPlugin(GuideLLMPlugin):
     """Keep generic GuideLLM outputs and add the llm-d dashboard projection."""
 
-    def __init__(self) -> None:
-        self.parser = GuideLLMParser()
-        self.kpi_handler = GuideLLMKpiHandler()
-        self.ai_evaluator = GuideLLMAIEvaluator()
-
     def parse(self, nodes: list[TestBaseNode]) -> ParseResult:
-        parsed = enrich_guidellm_parse_result(self.parser.parse(nodes), nodes)
+        parsed = enrich_guidellm_parse_result(super().parse(nodes), nodes)
         nodes_by_path = {str(node.test_path): node for node in nodes}
         records = []
         for record in parsed.records:
@@ -110,7 +105,7 @@ class LlmDGuideLLMPlugin(PostProcessingPlugin):
         return self.kpi_handler.get_catalog() + dashboard_kpi_catalog(prefix="llmd")
 
     def compute_kpis(self, model: UnifiedRunModel) -> list[dict[str, Any]]:
-        return self.kpi_handler.compute_kpis(model) + compute_dashboard_kpis(model, prefix="llmd")
+        return super().compute_kpis(model) + compute_dashboard_kpis(model, prefix="llmd")
 
     def export_kpis_to_csv(
         self,
@@ -160,9 +155,6 @@ class LlmDGuideLLMPlugin(PostProcessingPlugin):
             fieldnames=FIELDNAMES,
             metadata_row=metadata_row,
         )
-
-    def build_ai_data_payload(self, model: UnifiedRunModel) -> dict[str, Any]:
-        return self.ai_evaluator.build_payload(model, self)
 
 
 def get_plugin() -> PostProcessingPlugin:
