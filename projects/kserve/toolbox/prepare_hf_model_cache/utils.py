@@ -44,29 +44,26 @@ def annotate_model_cache_pvc(spec: dict[str, Any]) -> None:
 def model_cache_pvc_ready(spec: dict[str, Any]) -> bool:
     """Check if the model cache PVC is ready (has populated label and marker file)."""
 
-    # First check if PVC has the populated label
-    from projects.core.dsl.utils.k8s import oc_get_json
-
-    pvc_data = oc_get_json(
-        "persistentvolumeclaim",
-        name=spec["pvc_name"],
-        namespace=spec["namespace"],
-        ignore_not_found=True,
+    # Query directly for the populated label using oc command
+    label_check = oc(
+        "get",
+        "pvc",
+        spec["pvc_name"],
+        "-n",
+        spec["namespace"],
+        "-o",
+        "jsonpath={.metadata.labels.forge\\.openshift\\.io/model-cache-populated}",
+        check=False,
     )
 
-    if not pvc_data:
-        return False
-
-    # Check if PVC has the populated label
-    labels = pvc_data.get("metadata", {}).get("labels", {})
-    is_labeled_populated = labels.get("forge.openshift.io/model-cache-populated") == "true"
-
-    if not is_labeled_populated:
+    # If command failed (PVC doesn't exist) or label is not "true", return False
+    if label_check.returncode != 0 or label_check.stdout.strip() != "true":
         return False
 
     # Also verify with the marker file check for extra safety
     if spec["source_scheme"] == "hf":
         return _hf_cache_ready(spec)
+
     return True
 
 
