@@ -286,8 +286,16 @@ def _render_standard_deployment(
 
     serving_container = manifest["spec"]["template"]["containers"][0]
     serving_container["resources"] = _build_serving_resources(deployment_profile)
-    if deployment_profile.get("serving_image"):
-        serving_container["image"] = deployment_profile["serving_image"]
+
+    # Set serving container image (deployment profile specific or default)
+    serving_image = deployment_profile.get("serving_image")
+    if not serving_image:
+        # Fall back to defaults vllm_extra.image
+        serving_image = config.project.get_config(
+            "deployments.defaults.serving_image", default_value=None
+        )
+    if serving_image:
+        serving_container["image"] = serving_image
 
     vllm_additional_args = _build_vllm_additional_args(deployment_profile, workload)
 
@@ -313,9 +321,17 @@ def _render_standard_deployment(
     else:
         # Configure scheduler for intelligent routing
         manifest["spec"]["router"]["scheduler"] = copy.deepcopy(scheduler)
-        if deployment_profile.get("router_image"):
+
+        # Set router container image (deployment profile specific or default)
+        router_image = deployment_profile.get("router_image")
+        if not router_image:
+            # Fall back to defaults router_image
+            router_image = config.project.get_config(
+                "deployments.defaults.router_image", default_value=None
+            )
+        if router_image:
             manifest["spec"]["router"]["scheduler"]["template"]["containers"][0]["image"] = (
-                deployment_profile["router_image"]
+                router_image
             )
 
     return manifest
@@ -434,9 +450,15 @@ def _build_pd_pod_template(
         "env": all_env,
     }
 
-    # Add serving image if specified
-    if deployment_profile.get("serving_image"):
-        container["image"] = deployment_profile["serving_image"]
+    # Set serving container image (deployment profile specific or default)
+    serving_image = deployment_profile.get("serving_image")
+    if not serving_image:
+        # Fall back to defaults serving_image
+        serving_image = config.project.get_config(
+            "deployments.defaults.serving_image", default_value=None
+        )
+    if serving_image:
+        container["image"] = serving_image
 
     # Build pod template with anti-affinity for P/D deployments
     component_type = "prefill" if is_prefill else "decode"

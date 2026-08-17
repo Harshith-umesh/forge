@@ -4,6 +4,8 @@ defaults:
     forge.openshift.io/project: llm_d
   replicas: 1
   tensor_parallelism: 1
+  serving_image: null
+  router_image: null
   vllm_extra:
     args:
       gpu_memory_utilization: 0.92
