@@ -1,6 +1,5 @@
 kpi:
   labels:
     platform_name: null
-    gpu_type: null
     test_harness: null
     product_version: null

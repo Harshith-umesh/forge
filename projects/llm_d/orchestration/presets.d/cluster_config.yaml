@@ -1,0 +1,43 @@
+__multiple: true
+
+cluster_cks-waldorf:
+  runtime.namespace: kpouget-dev
+  platform.cluster.namespace.labels: {}
+
+  runtime.kserve.wait_readiness: false
+  runtime.kueue.enabled: true
+  runtime.kueue.queue_name: llm-d-cluster-queue
+  runtime.kueue.disable_above_n_gpus: 8
+
+  # Use ReadWriteMany for model cache PVC in CKS environment
+  model_cache.pvc.access_mode: ReadWriteMany
+  platform.preflight.check_crds: false
+  runtime.kserve.wait_long_scheduling: true
+  platform.inference_service.scheduler.node_selector:
+    gpu.nvidia.com/class: H200
+
+  cpt.kpi.labels.platform_name: CKS
+
+
+cluster_janus:
+  runtime.namespace: kpouget-dev
+
+  # Use ReadWriteMany for model cache PVC in CKS environment
+  model_cache.pvc.access_mode: ReadWriteMany
+  model_cache.pvc.storage_class_name: nfs
+  deployments.pd.resources: composite.dra.io/gpu-nic-pair
+
+  cpt.kpi.labels.platform_name: OCP
+
+cluster_eks-h100:
+  runtime.namespace: kevin-dev
+
+  cpt.kpi.labels.platform_name: EKS
+  platform.inference_service.scheduler.node_selector:
+    nvidia.com/gpu.accelerator: h100
+
+cluster_athena-fire:
+  cpt.kpi.labels.platform_name: OCP
+  model_cache.pvc.access_mode: ReadWriteMany
+  model_cache.pvc.storage_class_name: nfs-rwx
+  workloads.pvc_storage_class: nfs-rwx
