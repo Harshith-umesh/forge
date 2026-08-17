@@ -159,6 +159,7 @@ Orchestration is the **upper layer** — CI phases, config, presets.
 ```python
 # BAD: Toolbox importing orchestration config
 from projects.llamastack.orchestration.runtime_config import cfg
+
 hpa_cfg = cfg.get_hpa_config()
 min_replicas = hpa_cfg.get("min_replicas", 1)
 ```
@@ -210,9 +211,11 @@ def wait_until_ready(args, ctx):
 # BAD: YAML already returns int
 replicas = int(config.project.get_config("runtime.replicas"))
 
+
 # BAD: Custom bool coercion for YAML values
 def _as_bool(value):
     return value.strip().lower() not in ("false", "0", "no")
+
 
 # GOOD: Trust YAML types
 replicas = config.project.get_config("runtime.replicas")
