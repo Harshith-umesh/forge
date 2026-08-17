@@ -338,3 +338,18 @@ qwen3-8-2-4t:
 # DeepSeek V4 Flash
 deepseek-v4-flash:
   tests.rhaiis.model_key: deepseek-v4-flash-nvfp4
+
+# Gemma 4 26B-A4B
+gemma-4-26b:
+  tests.rhaiis.model_key: gemma-4-26b-a4b-fp8
+
+gemma-4-26b-bf16:
+  tests.rhaiis.model_key: gemma-4-26b-a4b
+
+# Muse Glimmer 30B
+muse-glimmer:
+  tests.rhaiis.model_key: muse-glimmer-30b
+
+# Inkling Small
+inkling-small:
+  tests.rhaiis.model_key: inkling-small

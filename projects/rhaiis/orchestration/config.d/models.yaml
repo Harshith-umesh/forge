@@ -557,3 +557,33 @@ deepseek-v4-flash-nvfp4:
   vllm_args:
     tensor-parallel-size: 4
     kv-cache-dtype: fp8
+
+# Gemma 4 26B-A4B
+gemma-4-26b-a4b:
+  name: Gemma-4-26B-A4B-IT
+  hf_model_id: google/gemma-4-26B-A4B-it
+  vllm_args:
+    tensor-parallel-size: 1
+
+gemma-4-26b-a4b-fp8:
+  name: Gemma-4-26B-A4B-IT-FP8
+  hf_model_id: RedHatAI/gemma-4-26B-A4B-it-FP8-dynamic
+  vllm_args:
+    tensor-parallel-size: 2
+    reasoning-parser: gemma4
+    tool-call-parser: gemma4
+    enable-auto-tool-choice: true
+
+# Muse Glimmer 30B
+muse-glimmer-30b:
+  name: Muse-Glimmer-30B
+  hf_model_id: meta-models/Muse-Glimmer-30B
+  vllm_args:
+    tensor-parallel-size: 2
+
+# Inkling Small (276B total / 12B active MoE)
+inkling-small:
+  name: Inkling-Small
+  hf_model_id: thinkingmachines/Inkling-Small
+  vllm_args:
+    tensor-parallel-size: 8
