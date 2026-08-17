@@ -194,6 +194,20 @@ def _run_test(
     wait_guidellm_benchmark_task._retry_config["attempts"] = max(1, benchmark_timeout // 10)
 
     try:
+        from projects.caliper.orchestration.export import precreate_mlflow_run_if_configured
+
+        mlflow_destination = precreate_mlflow_run_if_configured()
+    except Exception:
+        logger.warning("MLflow run pre-creation failed; continuing", exc_info=True)
+        mlflow_destination = None
+
+    if mlflow_destination:
+        import yaml as _yaml
+
+        mlflow_marker = env.ARTIFACT_DIR / "_mlflow_destination.yaml"
+        mlflow_marker.write_text(_yaml.safe_dump(mlflow_destination, sort_keys=False))
+
+    try:
         isvc_labels = {"opendatahub.io/dashboard": "true"}
         if profiler_enabled and engine == "vllm":
             isvc_labels["vllm-profiler/enabled"] = "true"
@@ -297,14 +311,6 @@ def _run_test(
             except Exception:
                 logger.exception("Profiler trace upload failed")
                 _warnings.append("Profiler trace upload failed")
-
-        try:
-            from projects.caliper.orchestration.export import precreate_mlflow_run_if_configured
-
-            mlflow_destination = precreate_mlflow_run_if_configured()
-        except Exception:
-            logger.warning("MLflow run pre-creation failed; continuing", exc_info=True)
-            mlflow_destination = None
 
         # Phase 2: benchmark + post-processing for ALL workloads
         trtllm_cfg = runtime_config.get_trtllm_config() if engine == "trtllm" else None
@@ -666,6 +672,7 @@ def _maybe_send_success_notification(model_key: str, workload_keys: list[str]) -
         version=version,
         workload_keys=workload_keys,
         cluster=config.project.get_config("rhaiis.cluster_tag", ""),
+        engine=engine,
     )
 
 
