@@ -389,12 +389,6 @@ def do_test() -> int:
         logger.warning("MLflow run pre-creation failed; continuing", exc_info=True)
         mlflow_destination = None
 
-    if mlflow_destination:
-        import yaml as _yaml
-
-        mlflow_marker = env.ARTIFACT_DIR / "_mlflow_destination.yaml"
-        mlflow_marker.write_text(_yaml.safe_dump(mlflow_destination, sort_keys=False))
-
     endpoint_url: str | None = None
     primary_exc: tuple[type[BaseException], BaseException, Any] | None = None
     finalizer_exc: tuple[type[BaseException], BaseException, Any] | None = None
