@@ -151,20 +151,11 @@ def extract_kpi_labels_from_config() -> dict[str, str]:
     """
     kpi_labels = {}
 
-    # Extract platform name
-    platform_name = config.project.get_config("cpt.kpi.labels.platform_name")
-    if platform_name:
-        kpi_labels["platform"] = platform_name
+    kpi_labels.update(config.project.get_config("cpt.kpi.labels"))
 
-    # Extract gpu_type
-    gpu_type = config.project.get_config("cpt.kpi.labels.gpu_type")
-    if gpu_type:
-        kpi_labels["gpu_type"] = gpu_type
-
-    # Extract test_harness
-    test_harness = config.project.get_config("cpt.kpi.labels.test_harness")
-    if test_harness:
-        kpi_labels["test_harness"] = test_harness
+    for k, v in list(kpi_labels.items()):
+        if v is None:
+            del kpi_labels[k]
 
     product_version = config.project.get_config("cpt.kpi.labels.product_version")
     if product_version:
