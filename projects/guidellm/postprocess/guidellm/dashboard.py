@@ -91,6 +91,8 @@ DASHBOARD_METADATA_LABEL_KEYS = frozenset(
         "image_tag",
         "router_config",
         "gpu_type",
+        "mlflow_run_id",
+        "mlflow_experiment_id",
     }
 )
 

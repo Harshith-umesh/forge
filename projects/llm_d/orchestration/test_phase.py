@@ -176,7 +176,9 @@ def extract_kpi_labels_from_config() -> dict[str, str]:
     return kpi_labels
 
 
-def create_test_labels() -> None:
+def create_test_labels(
+    mlflow_destination: dict[str, str] | None = None,
+) -> None:
     """Create __test_labels__.yaml with model name and guidellm configuration."""
 
     model_name = runtime_config.get_model_name()
@@ -194,7 +196,12 @@ def create_test_labels() -> None:
     # Extract kpi_labels from config
     kpi_labels = extract_kpi_labels_from_config()
 
-    write_test_labels(env.ARTIFACT_DIR, labels, kpi_labels=kpi_labels if kpi_labels else None)
+    write_test_labels(
+        env.ARTIFACT_DIR,
+        labels,
+        kpi_labels=kpi_labels if kpi_labels else None,
+        mlflow_destination=mlflow_destination,
+    )
     logger.info("Created test labels: %s", labels)
 
     # Dump config.project to config.yaml
@@ -374,6 +381,20 @@ def do_test() -> int:
         # Delete all existing resources if configured
         cleanup_existing_resources(namespace)
 
+    try:
+        from projects.caliper.orchestration.export import precreate_mlflow_run_if_configured
+
+        mlflow_destination = precreate_mlflow_run_if_configured()
+    except Exception:
+        logger.warning("MLflow run pre-creation failed; continuing", exc_info=True)
+        mlflow_destination = None
+
+    if mlflow_destination:
+        import yaml as _yaml
+
+        mlflow_marker = env.ARTIFACT_DIR / "_mlflow_destination.yaml"
+        mlflow_marker.write_text(_yaml.safe_dump(mlflow_destination, sort_keys=False))
+
     endpoint_url: str | None = None
     primary_exc: tuple[type[BaseException], BaseException, Any] | None = None
     finalizer_exc: tuple[type[BaseException], BaseException, Any] | None = None
@@ -381,7 +402,7 @@ def do_test() -> int:
     actual_llmisvc_name = "llmisvc-na-not-computed"
     try:
         # Create test labels with actual model and profile information
-        create_test_labels()
+        create_test_labels(mlflow_destination=mlflow_destination)
 
         # Generate the LLMInferenceService name before deployment
         # so we have it available even if deployment fails

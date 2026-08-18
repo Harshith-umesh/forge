@@ -21,7 +21,17 @@ class RhaiisPlugin(PostProcessingPlugin):
         self.kpi_handler = RhaiisKpiHandler()
 
     def parse(self, nodes: list[TestBaseNode]) -> ParseResult:
-        return self.parser.parse(nodes)
+        parsed = self.parser.parse(nodes)
+        nodes_by_path = {str(node.test_path): node for node in nodes}
+        for record in parsed.records:
+            node = nodes_by_path.get(record.test_base_path)
+            mlflow_dest = node.test_labels.get("mlflow_destination", {}) if node else {}
+            if mlflow_dest:
+                record.metrics.setdefault("mlflow_run_id", mlflow_dest.get("run_id", ""))
+                record.metrics.setdefault(
+                    "mlflow_experiment_id", mlflow_dest.get("experiment_id", "")
+                )
+        return parsed
 
     def get_available_reports(self) -> dict[str, dict[str, str]]:
         return {}
@@ -79,6 +89,8 @@ class RhaiisPlugin(PostProcessingPlugin):
                 "guidellm_start_time_ms": labels.get("guidellm_start_time_ms", ""),
                 "guidellm_end_time_ms": labels.get("guidellm_end_time_ms", ""),
                 "guidellm_version": labels.get("guidellm_version", ""),
+                "mlflow_run_id": labels.get("mlflow_run_id", ""),
+                "mlflow_experiment_id": labels.get("mlflow_experiment_id", ""),
             }
 
         return export_dashboard_kpis_to_csv(

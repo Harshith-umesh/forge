@@ -78,6 +78,8 @@ FIELDNAMES = [
     "guidellm_end_time_ms",
     "image_tag",
     "guidellm_version",
+    "mlflow_run_id",
+    "mlflow_experiment_id",
     "notes",
 ]
 
@@ -96,6 +98,12 @@ class LlmDGuideLLMPlugin(GuideLLMPlugin):
             hf_model_id = test_labels.get("model_name")
             if hf_model_id:
                 record.metrics["hf_model_id"] = hf_model_id
+            mlflow_dest = node.test_labels.get("mlflow_destination", {}) if node else {}
+            if mlflow_dest:
+                record.metrics.setdefault("mlflow_run_id", mlflow_dest.get("run_id", ""))
+                record.metrics.setdefault(
+                    "mlflow_experiment_id", mlflow_dest.get("experiment_id", "")
+                )
             for key, value in deployment_metadata.items():
                 record.metrics.setdefault(key, value)
             records.append(record)
@@ -145,6 +153,8 @@ class LlmDGuideLLMPlugin(GuideLLMPlugin):
                 "guidellm_end_time_ms": labels.get("guidellm_end_time_ms", ""),
                 "image_tag": labels.get("image_tag", ""),
                 "guidellm_version": labels.get("guidellm_version", ""),
+                "mlflow_run_id": labels.get("mlflow_run_id", ""),
+                "mlflow_experiment_id": labels.get("mlflow_experiment_id", ""),
                 "notes": labels.get("notes", ""),
             }
 
