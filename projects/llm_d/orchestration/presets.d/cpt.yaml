@@ -29,8 +29,6 @@ cpt-rhoai-release:
 cpt-release-testing-rhoai:
   extends:
   - cpt-rhoai-release
-  cpt.kpi.labels.gpu_type: H200
-  cpt.kpi.labels.product_version: RHOAI-3.5-EA2
   runtime.deployment_profile:
   - release-distributed-default
   - release-precise-prefix-cache
