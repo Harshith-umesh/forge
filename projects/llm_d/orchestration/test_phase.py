@@ -16,9 +16,6 @@ from projects.core.library import config, env
 from projects.core.library.postprocess import run_and_postprocess, write_test_labels
 from projects.core.library.run import SignalInterrupt
 from projects.core.orchestration.utils.k8s import ensure_namespace
-from projects.guidellm.postprocess.guidellm.dashboard import (
-    deployment_metadata_from_profile,
-)
 from projects.guidellm.toolbox.run_guidellm_benchmark import build_guidellm_args
 from projects.guidellm.toolbox.run_guidellm_benchmark import main as run_guidellm_benchmark_command
 from projects.guidellm.toolbox.run_smoke_request import main as run_smoke_request_command
@@ -160,9 +157,6 @@ def extract_kpi_labels_from_config() -> dict[str, str]:
     product_version = config.project.get_config("cpt.kpi.labels.product_version")
     if product_version:
         kpi_labels["product_version"] = product_version
-
-    deployment_profile = runtime_config.get_deployment_profile()
-    kpi_labels.update(deployment_metadata_from_profile(deployment_profile))
 
     return kpi_labels
 
