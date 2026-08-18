@@ -130,6 +130,11 @@ class GuideLLMParser:
         """Check if path is a config.yaml artifact."""
         return path.name == "config.yaml"
 
+    @staticmethod
+    def _is_node_gpu_mapping_artifact(path: Path) -> bool:
+        """Check if path is a node_gpu_mapping.yaml artifact."""
+        return path.name == "node_gpu_mapping.yaml"
+
     def extract_fields_from_llmisvc(self, file_path: Path) -> dict[str, Any]:
         """
         Extract multiple fields from LLMInferenceService YAML file.
@@ -232,6 +237,44 @@ class GuideLLMParser:
 
         except Exception as e:
             logger.warning(f"Failed to extract fields from {file_path}: {e}")
+
+        return result
+
+    def extract_fields_from_node_gpu_mapping(self, file_path: Path) -> dict[str, str]:
+        """
+        Extract GPU type from node_gpu_mapping.yaml file.
+
+        Args:
+            file_path: Path to node_gpu_mapping.yaml file
+
+        Returns:
+            Dictionary with extracted GPU type field
+
+        Example file structure:
+            node_gpu_mapping:
+              psap-fire-athena-bnfx9-worker-gpu-h200-66lrw: NVIDIA-H200
+        """
+        result = {}
+        try:
+            yaml_data = yaml.safe_load(file_path.read_text(encoding="utf-8"))
+            if not isinstance(yaml_data, dict):
+                return result
+
+            # Extract GPU types from node_gpu_mapping
+            node_gpu_mapping = yaml_data.get("node_gpu_mapping", {})
+            if isinstance(node_gpu_mapping, dict) and node_gpu_mapping:
+                # Get all unique GPU types from the mapping
+                gpu_types = list(set(node_gpu_mapping.values()))
+
+                if gpu_types:
+                    # Concatenate all GPU types with comma separator
+                    result["gpu_type"] = ",".join(sorted(gpu_types))
+                    logger.info(f"Extracted gpu_type '{result['gpu_type']}' from {file_path}")
+                else:
+                    logger.warning(f"Empty node_gpu_mapping found in {file_path}")
+
+        except Exception as e:
+            logger.warning(f"Failed to extract GPU type from {file_path}: {e}")
 
         return result
 
@@ -584,6 +627,9 @@ class GuideLLMParser:
             llmisvc_files = [p for p in node.artifact_paths if self._is_llmisvc_artifact(p)]
             llmisvc_files.sort(key=lambda path: "__capture_llmisvc_state" not in str(path))
             config_files = [p for p in node.artifact_paths if self._is_config_artifact(p)]
+            gpu_mapping_files = [
+                p for p in node.artifact_paths if self._is_node_gpu_mapping_artifact(p)
+            ]
 
             if not benchmarks_files:
                 # No benchmark result JSON found for this node, create empty record
@@ -631,8 +677,23 @@ class GuideLLMParser:
                         if field_value and field_name not in metrics:
                             metrics[field_name] = field_value
 
-                # Extract kpi_labels from test labels
+                # Extract GPU type from node_gpu_mapping.yaml if available
+                for gpu_mapping_file in gpu_mapping_files:
+                    gpu_fields = self.extract_fields_from_node_gpu_mapping(gpu_mapping_file)
+                    for field_name, field_value in gpu_fields.items():
+                        if field_value and field_name not in metrics:
+                            metrics[field_name] = field_value
+
+                # Extract kpi_labels from test labels and add gpu_type if available
                 kpi_labels = _kpi_labels_from_node(node)
+                if not kpi_labels:
+                    kpi_labels = {}
+
+                # Add gpu_type as a KPI label if it was extracted
+                if "gpu_type" in metrics:
+                    kpi_labels["gpu_type"] = metrics["gpu_type"]
+                    logger.info(f"Added gpu_type '{metrics['gpu_type']}' to KPI labels")
+
                 if kpi_labels:
                     metrics["kpi_labels"] = kpi_labels
 
