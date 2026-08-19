@@ -115,6 +115,12 @@ def create_dataframe_from_records(records: list[UnifiedResultRecord]) -> pd.Data
                         i,
                         record.metrics.get("request_concurrency", 1.0),
                     ),
+                    "intended_concurrency": _safe_get_curve_value(
+                        curves,
+                        "intended_concurrency",
+                        i,
+                        record.metrics.get("request_concurrency", 1.0),
+                    ),
                     "request_rate": rate,
                     "completed_requests": _safe_get_curve_value(curves, "completed_requests", i, 0),
                     "failed_requests": _safe_get_curve_value(curves, "failed_requests", i, 0),
@@ -191,6 +197,9 @@ def create_dataframe_from_records(records: list[UnifiedResultRecord]) -> pd.Data
                 "strategy": record.metrics.get("strategy", "unknown"),
                 "duration": record.metrics.get("duration", 0.0),
                 "request_concurrency": record.metrics.get("request_concurrency", 1.0),
+                "intended_concurrency": record.metrics.get(
+                    "intended_concurrency", record.metrics.get("request_concurrency", 1.0)
+                ),
                 "request_rate": request_rate,
                 "completed_requests": record.metrics.get("completed_requests", 0),
                 "failed_requests": record.metrics.get("failed_requests", 0),
@@ -251,7 +260,7 @@ def create_dataframe_from_records(records: list[UnifiedResultRecord]) -> pd.Data
     logger.info("📋 Organizing data by configuration, concurrency, and request rate...")
     # Sort and fill any NaN values in numeric columns with 0 for consistent plotting
     df = df.sort_values(
-        ["test_configuration", "request_concurrency", "request_rate", "rate_point_index"]
+        ["test_configuration", "intended_concurrency", "request_rate", "rate_point_index"]
     )
 
     # Fill NaN values in numeric columns with appropriate defaults
@@ -305,7 +314,7 @@ def create_throughput_scaling_plot(df: pd.DataFrame, title_context: str = ""):
 
         fig = px.scatter(
             df,
-            x="request_concurrency",
+            x="intended_concurrency",
             y="request_rate",
             color="test_configuration",
             size="tokens_per_second",
@@ -314,12 +323,14 @@ def create_throughput_scaling_plot(df: pd.DataFrame, title_context: str = ""):
                 "request_latency_median_ms": ":.1f",
                 "ttft_median_ms": ":.1f",
                 "tokens_per_second": ":.0f",
+                "request_concurrency": ":.1f",  # Show achieved concurrency in hover
             },
             title=title,
             labels={
-                "request_concurrency": "Concurrency Level",
+                "intended_concurrency": "Concurrency Level (Requested)",
                 "request_rate": "Request Rate (req/s)",
                 "test_configuration": "Configuration",
+                "request_concurrency": "Achieved Concurrency",
             },
         )
 
@@ -355,7 +366,12 @@ def create_latency_vs_throughput_plot(df: pd.DataFrame, title_context: str = "")
             y="request_latency_median_ms",
             color="test_configuration",
             size="tokens_per_second",
-            hover_data={"strategy": True, "request_concurrency": True, "ttft_median_ms": ":.1f"},
+            hover_data={
+                "strategy": True,
+                "intended_concurrency": ":.1f",
+                "request_concurrency": ":.1f",
+                "ttft_median_ms": ":.1f",
+            },
             title=title,
             labels={
                 "request_rate": "Request Rate (req/s)",
@@ -415,7 +431,7 @@ def create_token_throughput_vs_concurrency_plot(df: pd.DataFrame, title_context:
 
         fig = px.line(
             df,
-            x="request_concurrency",
+            x="intended_concurrency",
             y="tokens_per_second",
             color="test_configuration",
             markers=True,
@@ -424,12 +440,14 @@ def create_token_throughput_vs_concurrency_plot(df: pd.DataFrame, title_context:
                 "request_rate": ":.1f",
                 "ttft_median_ms": ":.1f",
                 "request_latency_median_ms": ":.1f",
+                "request_concurrency": ":.1f",  # Show achieved concurrency in hover
             },
             title=title,
             labels={
-                "request_concurrency": "Concurrency Level",
+                "intended_concurrency": "Concurrency Level (Requested)",
                 "tokens_per_second": "Tokens per Second",
                 "test_configuration": "Configuration",
+                "request_concurrency": "Achieved Concurrency",
             },
         )
 
@@ -461,16 +479,22 @@ def create_ttft_analysis_plot(df: pd.DataFrame, title_context: str = ""):
 
         fig = px.line(
             df,
-            x="request_concurrency",
+            x="intended_concurrency",
             y="ttft_median_ms",
             color="test_configuration",
             markers=True,
-            hover_data={"strategy": True, "request_rate": ":.1f", "tokens_per_second": ":.0f"},
+            hover_data={
+                "strategy": True,
+                "request_rate": ":.1f",
+                "tokens_per_second": ":.0f",
+                "request_concurrency": ":.1f",  # Show achieved concurrency in hover
+            },
             title=title,
             labels={
-                "request_concurrency": "Concurrency Level",
+                "intended_concurrency": "Concurrency Level (Requested)",
                 "ttft_median_ms": "TTFT P50 (ms)",
                 "test_configuration": "Configuration",
+                "request_concurrency": "Achieved Concurrency",
             },
         )
 
@@ -525,13 +549,13 @@ def create_token_throughput_percentiles_plot(df: pd.DataFrame, title_context: st
         logger.info(f"   Adding {len(percentiles)} percentile lines per configuration...")
 
         for config in configurations:
-            config_df = df[df["test_configuration"] == config].sort_values("request_concurrency")
+            config_df = df[df["test_configuration"] == config].sort_values("intended_concurrency")
 
             for perc_name, perc_col, line_style, opacity in percentiles:
                 if perc_col in config_df.columns and not config_df[perc_col].isna().all():
                     fig.add_trace(
                         go.Scatter(
-                            x=config_df["request_concurrency"],
+                            x=config_df["intended_concurrency"],
                             y=config_df[perc_col],
                             mode="lines+markers",
                             name=f"{config} - {perc_name}",
@@ -542,7 +566,7 @@ def create_token_throughput_percentiles_plot(df: pd.DataFrame, title_context: st
 
         fig.update_layout(
             title=title,
-            xaxis_title="Concurrency Level",
+            xaxis_title="Concurrency Level (Requested)",
             yaxis_title="Output Tokens per Second",
             showlegend=True,
             width=900,
@@ -1630,7 +1654,7 @@ def _generate_performance_summary(df: pd.DataFrame) -> dict[str, Any]:
     # Find best performers
     best_tokens_idx = df["tokens_per_second"].idxmax()
     best_efficiency_idx = (
-        df["tokens_per_second"] / df["request_concurrency"].replace(0, 1)
+        df["tokens_per_second"] / df["intended_concurrency"].replace(0, 1)
     ).idxmax()
     best_ttft_idx = df["ttft_median_ms"].idxmin()
 
@@ -1643,6 +1667,7 @@ def _generate_performance_summary(df: pd.DataFrame) -> dict[str, Any]:
                 "tokens_per_second": "max",
                 "ttft_median_ms": "mean",
                 "request_rate": "max",
+                "intended_concurrency": "max",
                 "request_concurrency": "max",
             }
         )
@@ -1658,11 +1683,11 @@ def _generate_performance_summary(df: pd.DataFrame) -> dict[str, Any]:
             "value": df.loc[best_tokens_idx, "tokens_per_second"],
             "config": df.loc[best_tokens_idx, "test_configuration"],
             "strategy": df.loc[best_tokens_idx, "strategy"],
-            "concurrency": df.loc[best_tokens_idx, "request_concurrency"],
+            "concurrency": df.loc[best_tokens_idx, "intended_concurrency"],
         },
         "best_efficiency": {
             "value": df.loc[best_efficiency_idx, "tokens_per_second"]
-            / max(df.loc[best_efficiency_idx, "request_concurrency"], 1),
+            / max(df.loc[best_efficiency_idx, "intended_concurrency"], 1),
             "config": df.loc[best_efficiency_idx, "test_configuration"],
             "strategy": df.loc[best_efficiency_idx, "strategy"],
         },
