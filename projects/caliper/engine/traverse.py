@@ -58,8 +58,9 @@ def discover_test_bases(
                 labels=labels,
                 version="matrix_benchmarking/settings",
             )
-        # Skip directory if skip: true is set in labels
-        if labels.get("skip") is True:
+        # Skip directory if skip: true is set at the top level of the labels file
+        # or inside the labels section (both conventions are supported).
+        if test_labels.get("skip") is True or labels.get("skip") is True:
             continue
 
         # Apply label filtering if specified
