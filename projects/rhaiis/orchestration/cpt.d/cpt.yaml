@@ -1,29 +1,40 @@
 # CPT Pipeline Definitions
-# Forge repo path: projects/rhaiis/orchestration/presets.d/cpt.yaml
+# Forge repo path: projects/rhaiis/orchestration/cpt.d/cpt.yaml
 #
 # Each top-level key (except __cpt) defines one CPT pipeline.
 # __models: keys are preset names, values are per-model config overrides (null = global only).
+# __tp: GPU count (tensor-parallel-size) for Kueue admission. Falls back to Forge's models.yaml.
 # Non-__ keys at the pipeline level are global overrides applied to every job.
 
 __cpt: true
 
 # ──────────────────────────────────────────────
-# vLLM Release — Release regression testing models
+# vLLM Release — Tier 1 models
 # ──────────────────────────────────────────────
 cpt-vllm-release:
   __description: "vLLM Release CPT — Tier 1 models across all workload profiles"
   __engine: vllm
   __models:
-    llama-70b:
-    llama-70b-bf16:
-    granite-8b:
-      # Per-model overrides — these merge on top of the global overrides below
-      rhaiis.engines.vllm.args.gpu-memory-utilization: 0.95
+    llama-70b/tp4:
+      __tp: 4
+    llama-70b/tp2:
+      __tp: 2
+      rhaiis.engines.vllm.args.tensor-parallel-size: 2
+    llama-70b-bf16/tp4:
+      __tp: 4
+    llama-70b-bf16/tp2:
+      __tp: 2
+      rhaiis.engines.vllm.args.tensor-parallel-size: 2
     granite-8b-bf16:
+      __tp: 1
     mistral-24b:
+      __tp: 1
     mistral-24b-bf16:
+      __tp: 1
     qwen25-7b:
+      __tp: 1
     qwen25-7b-bf16:
+      __tp: 1
   __workloads:
     - ci-quick
     - profile1
@@ -44,13 +55,19 @@ cpt-sglang-competitive:
   __engine: sglang
   __models:
     llama-70b:
+      __tp: 4
     llama-70b-bf16:
-    granite-8b:
+      __tp: 4
     granite-8b-bf16:
+      __tp: 1
     mistral-24b:
+      __tp: 1
     mistral-24b-bf16:
+      __tp: 1
     qwen25-7b:
+      __tp: 1
     qwen25-7b-bf16:
+      __tp: 1
   __workloads:
     - profile1
     - profile2
@@ -71,9 +88,11 @@ cpt-trtllm-competitive:
   __accelerator: nvidia
   __models:
     llama-70b:
-    granite-8b:
+      __tp: 4
     mistral-24b:
+      __tp: 1
     qwen25-7b:
+      __tp: 1
   __workloads:
     - profile1
     - profile2
@@ -93,18 +112,29 @@ cpt-vllm-competitive:
   __engine: vllm
   __models:
     llama-70b:
+      __tp: 4
     llama-70b-bf16:
-    granite-8b:
+      __tp: 4
     granite-8b-bf16:
+      __tp: 1
     mistral-24b:
+      __tp: 1
     mistral-24b-bf16:
+      __tp: 1
     qwen25-7b:
+      __tp: 1
     qwen25-7b-bf16:
+      __tp: 1
     llama-8b:
+      __tp: 1
     llama-4-scout:
+      __tp: 2
     llama-4-maverick:
+      __tp: 8
     qwen3-235b:
+      __tp: 4
     deepseek-r1:
+      __tp: 8
   __workloads:
     - profile1
     - profile2
