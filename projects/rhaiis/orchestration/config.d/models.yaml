@@ -342,3 +342,248 @@ ministral-3-14b-fp8:
   hf_model_id: RedHatAI/Ministral-3-14B-Instruct-2512
   vllm_args:
     tensor-parallel-size: 1
+
+# Phi-4
+phi-4:
+  name: Phi-4
+  hf_model_id: microsoft/phi-4
+  vllm_args:
+    tensor-parallel-size: 1
+
+phi-4-w4a16:
+  name: Phi-4-W4A16
+  hf_model_id: RedHatAI/phi-4-quantized.w4a16
+  vllm_args:
+    tensor-parallel-size: 1
+
+phi-4-w8a8:
+  name: Phi-4-W8A8
+  hf_model_id: RedHatAI/phi-4-quantized.w8a8
+  vllm_args:
+    tensor-parallel-size: 1
+
+phi-4-fp8:
+  name: Phi-4-FP8
+  hf_model_id: RedHatAI/phi-4-FP8-dynamic
+  vllm_args:
+    tensor-parallel-size: 1
+
+# Llama-3.1-8B quants
+llama-3-1-8b-fp8:
+  name: Llama-3.1-8B-Instruct-FP8
+  hf_model_id: RedHatAI/Meta-Llama-3.1-8B-Instruct-FP8-dynamic
+  vllm_args:
+    tensor-parallel-size: 1
+
+llama-3-1-8b-w8a8:
+  name: Llama-3.1-8B-Instruct-W8A8
+  hf_model_id: RedHatAI/Meta-Llama-3.1-8B-Instruct-quantized.w8a8
+  vllm_args:
+    tensor-parallel-size: 1
+
+llama-3-1-8b-w4a16:
+  name: Llama-3.1-8B-Instruct-W4A16
+  hf_model_id: RedHatAI/Meta-Llama-3.1-8B-Instruct-quantized.w4a16
+  vllm_args:
+    tensor-parallel-size: 1
+
+# Llama-3.1-405B
+llama-3-1-405b:
+  name: Llama-3.1-405B-Instruct
+  hf_model_id: meta-llama/Llama-3.1-405B-Instruct
+  vllm_args:
+    tensor-parallel-size: 8
+
+llama-3-1-405b-fp8:
+  name: Llama-3.1-405B-Instruct-FP8
+  hf_model_id: RedHatAI/Meta-Llama-3.1-405B-Instruct-FP8-dynamic
+  vllm_args:
+    tensor-parallel-size: 8
+    kv-cache-dtype: fp8
+
+llama-3-1-405b-w8a8:
+  name: Llama-3.1-405B-Instruct-W8A8
+  hf_model_id: RedHatAI/Meta-Llama-3.1-405B-Instruct-quantized.w8a8
+  vllm_args:
+    tensor-parallel-size: 8
+
+# Qwen 3.5
+qwen3-5-35b-fp8:
+  name: Qwen3.5-35B-A3B-FP8
+  hf_model_id: RedHatAI/Qwen3.5-35B-A3B-FP8-dynamic
+  vllm_args:
+    tensor-parallel-size: 1
+    reasoning-parser: qwen3
+    language-model-only: true
+
+qwen3-5-122b-fp8:
+  name: Qwen3.5-122B-A10B-FP8
+  hf_model_id: RedHatAI/Qwen3.5-122B-A10B-FP8-dynamic
+  vllm_args:
+    tensor-parallel-size: 2
+    reasoning-parser: qwen3
+    language-model-only: true
+
+qwen3-5-397b-fp8:
+  name: Qwen3.5-397B-A17B-FP8
+  hf_model_id: RedHatAI/Qwen3.5-397B-A17B-FP8-dynamic
+  vllm_args:
+    tensor-parallel-size: 4
+    reasoning-parser: qwen3
+    language-model-only: true
+
+# Qwen3 Coder
+qwen3-coder-next-fp8:
+  name: Qwen3-Coder-Next-FP8
+  hf_model_id: RedHatAI/Qwen3-Coder-Next-FP8-dynamic
+  vllm_args:
+    tensor-parallel-size: 1
+    enable-auto-tool-choice: true
+    tool-call-parser: qwen3_coder
+
+# Infomaniak TranslateGemma
+infomaniak-translategemma-12b:
+  name: TranslateGemma-12B
+  hf_model_id: Infomaniak-AI/vllm-translategemma-12b-it
+  vllm_args:
+    tensor-parallel-size: 1
+
+# Kimi-K2.5 NVFP4
+kimi-k2-5-nvfp4:
+  name: Kimi-K2.5-NVFP4
+  hf_model_id: nvidia/Kimi-K2.5-NVFP4
+  vllm_args:
+    tensor-parallel-size: 4
+
+# GLM-5.2 NVFP4+FP8
+glm-5-2-nvfp4:
+  name: GLM-5.2-NVFP4-FP8
+  hf_model_id: RedHatAI/GLM-5.2-NVFP4-FP8
+  vllm_args:
+    tensor-parallel-size: 4
+    kv-cache-dtype: fp8
+    reasoning-parser: glm45
+    tool-call-parser: glm47
+    enable-auto-tool-choice: true
+
+# Nemotron-3-Super-120B NVFP4
+nemotron3super-120b-nvfp4:
+  name: Nemotron-3-Super-120B-A12B-NVFP4
+  hf_model_id: RedHatAI/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
+  vllm_args:
+    tensor-parallel-size: 1
+
+# DeepSeek-V4-Pro NVFP4+FP8
+deepseek-v4-pro-nvfp4:
+  name: DeepSeek-V4-Pro-NVFP4-FP8
+  hf_model_id: RedHatAI/DeepSeek-V4-Pro-NVFP4-FP8
+  vllm_args:
+    tensor-parallel-size: 8
+    kv-cache-dtype: fp8
+
+# Gemma 4
+gemma-4-26b-a4b-nvfp4:
+  name: Gemma-4-26B-A4B-NVFP4
+  hf_model_id: RedHatAI/gemma-4-26B-A4B-it-NVFP4
+  vllm_args:
+    tensor-parallel-size: 1
+
+gemma-4-31b-nvfp4:
+  name: Gemma-4-31B-NVFP4
+  hf_model_id: RedHatAI/gemma-4-31B-it-NVFP4
+  vllm_args:
+    tensor-parallel-size: 1
+
+# Kimi-K3 NVFP4
+kimi-k3-nvfp4:
+  name: Kimi-K3-NVFP4
+  hf_model_id: RedHatAI/Kimi-K3-NVFP4
+  vllm_args:
+    tensor-parallel-size: 4
+
+# Qwen 3.6 35B-A3B
+qwen3-6-35b-a3b:
+  name: Qwen3.6-35B-A3B
+  hf_model_id: Qwen/Qwen3.6-35B-A3B
+  vllm_args:
+    tensor-parallel-size: 1
+    reasoning-parser: qwen3
+    language-model-only: true
+
+qwen3-6-35b-fp8:
+  name: Qwen3.6-35B-A3B-FP8
+  hf_model_id: RedHatAI/Qwen3.6-35B-A3B-FP8
+  vllm_args:
+    tensor-parallel-size: 1
+    reasoning-parser: qwen3
+    language-model-only: true
+
+qwen3-6-35b-nvfp4:
+  name: Qwen3.6-35B-A3B-NVFP4
+  hf_model_id: RedHatAI/Qwen3.6-35B-A3B-NVFP4
+  vllm_args:
+    tensor-parallel-size: 1
+    reasoning-parser: qwen3
+    language-model-only: true
+
+# Qwen 3.8 27B
+qwen3-8-27b:
+  name: Qwen3.8-27B
+  hf_model_id: Qwen/Qwen3.8-27B
+  vllm_args:
+    tensor-parallel-size: 2
+    reasoning-parser: qwen3
+
+qwen3-8-27b-fp8:
+  name: Qwen3.8-27B-FP8
+  hf_model_id: Qwen/Qwen3.8-27B-FP8
+  vllm_args:
+    tensor-parallel-size: 1
+    kv-cache-dtype: fp8
+    reasoning-parser: qwen3
+
+# Qwen 3.8 2.4T-A95B (flagship MoE)
+qwen3-8-2-4t-fp8:
+  name: Qwen3.8-2.4T-A95B-FP8
+  hf_model_id: RedHatAI/Qwen3.8-2.4T-A95B-FP8
+  vllm_args:
+    tensor-parallel-size: 8
+    reasoning-parser: qwen3
+
+# DeepSeek-V4-Flash NVFP4+FP8
+deepseek-v4-flash-nvfp4:
+  name: DeepSeek-V4-Flash-NVFP4-FP8
+  hf_model_id: RedHatAI/DeepSeek-V4-Flash-NVFP4-FP8
+  vllm_args:
+    tensor-parallel-size: 4
+    kv-cache-dtype: fp8
+
+# Gemma 4 26B-A4B
+gemma-4-26b-a4b:
+  name: Gemma-4-26B-A4B-IT
+  hf_model_id: google/gemma-4-26B-A4B-it
+  vllm_args:
+    tensor-parallel-size: 1
+
+gemma-4-26b-a4b-fp8:
+  name: Gemma-4-26B-A4B-IT-FP8
+  hf_model_id: RedHatAI/gemma-4-26B-A4B-it-FP8-dynamic
+  vllm_args:
+    tensor-parallel-size: 2
+    reasoning-parser: gemma4
+    tool-call-parser: gemma4
+    enable-auto-tool-choice: true
+
+# Muse Glimmer 30B
+muse-glimmer-30b:
+  name: Muse-Glimmer-30B
+  hf_model_id: meta-models/Muse-Glimmer-30B
+  vllm_args:
+    tensor-parallel-size: 2
+
+# Inkling Small (276B total / 12B active MoE)
+inkling-small:
+  name: Inkling-Small
+  hf_model_id: thinkingmachines/Inkling-Small
+  vllm_args:
+    tensor-parallel-size: 8

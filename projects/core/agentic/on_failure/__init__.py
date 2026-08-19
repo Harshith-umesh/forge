@@ -193,7 +193,7 @@ def _get_artifact_dir_with_failures():
         return None
 
     # Check for FAILURE files
-    failure_files = list(artifact_dir.glob("**/FAILURE"))
+    failure_files = list(artifact_dir.glob("**/FAILURE.txt"))
     if not failure_files:
         logger.info(f"🤖 No FAILURE files found in {artifact_dir} - agent review not needed")
         return None
