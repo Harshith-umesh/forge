@@ -1044,6 +1044,13 @@ def generate_deployment_profile_report(
             border: 1px solid #ddd;
             border-radius: 4px;
         }}
+
+        .plot-container iframe, iframe {{
+            max-width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin: 10px 0;
+        }}
     </style>
 
     <script>
@@ -1145,7 +1152,7 @@ def generate_deployment_profile_report(
         <div style='padding:20px;'>
             <h4>🚀 {plot_name}</h4>
             <p>Token generation throughput scaling analysis across different concurrency levels.</p>
-            <p><a href='{html_path}' target='_blank' title='Click to access the full-size interactive version.'><img src='{png_path}' alt='{plot_name}'/></a></p>
+            <iframe src='{html_path}' width='100%' height='600' frameborder='0' title='{plot_name} - Interactive Plot'></iframe>
         </div>
     </div>"""
             else:
@@ -1433,6 +1440,13 @@ def generate_comprehensive_performance_report(
             border: 1px solid #ddd;
             border-radius: 4px;
         }}
+
+        .plot-container iframe, iframe {{
+            max-width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin: 10px 0;
+        }}
     </style>
 
     <script>
@@ -1535,7 +1549,7 @@ def generate_comprehensive_performance_report(
                 "Latency vs Throughput": "Trade-off analysis between latency and throughput performance.",
             }
 
-            for tab_idx, (plot_name, png_path, html_path) in enumerate(plots):
+            for tab_idx, (plot_name, _png_path, html_path) in enumerate(plots):
                 active_class = " active" if tab_idx == 0 else ""
                 description = descriptions.get(plot_name, f"{plot_name} performance analysis.")
 
@@ -1544,7 +1558,7 @@ def generate_comprehensive_performance_report(
                 <div style='padding:20px;'>
                     <h4>{plot_name}</h4>
                     <p>{description}</p>
-                    <p><a href='{html_path}' target='_blank' title='Click to access the full-size interactive version.'><img src='{png_path}' alt='{plot_name}'/></a></p>
+                    <iframe src='{html_path}' width='100%' height='600' frameborder='0' title='{plot_name} - Interactive Plot'></iframe>
                 </div>
             </div>"""
 
@@ -1693,6 +1707,14 @@ def _create_comprehensive_html_report_with_images(
             margin: 10px 0;
             cursor: pointer;
         }}
+
+        .plot-section iframe {{
+            width: 100%;
+            height: 600px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            margin: 10px 0;
+        }}
         .plot-link {{
             display: inline-block;
             margin: 10px 15px 10px 0;
@@ -1735,16 +1757,14 @@ def _create_comprehensive_html_report_with_images(
 
     # Analysis plots section
     if plots_data:
-        for plot_name, png_path, html_path in plots_data:
+        for plot_name, _png_path, html_path in plots_data:
             # Image linked to HTML version
             html_parts.append(f"""
     <div class="plot-section">
         <h3>📈 {plot_name}</h3>
-        <a href="{html_path}" target="_blank">
-            <img src="{png_path}" alt="{plot_name}" class="plot-image" title="Click to view interactive version">
-        </a>
+        <iframe src="{html_path}" width="100%" height="600" frameborder="0" title="{plot_name} - Interactive Plot"></iframe>
         <br>
-        <small>💡 Click image to view interactive version</small>
+        <small>💡 Interactive plot - you can zoom, pan, and interact with the data</small>
     </div>""")
 
     # Footer
