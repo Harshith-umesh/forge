@@ -27,6 +27,7 @@ class OverallStatus(StrEnum):
     PASS = "PASS"
     REGRESSION_DETECTED = "REGRESSION_DETECTED"
     NO_BASELINE = "NO_BASELINE"
+    NO_TEST_PERFORMED = "NO_TEST_PERFORMED"
 
 
 @dataclass
@@ -300,7 +301,12 @@ def _build_report(
     passes = [r for r in results if r.verdict == Verdict.PASS]
     skipped = [r for r in results if r.verdict == Verdict.SKIPPED]
 
-    overall_status = OverallStatus.REGRESSION_DETECTED if regressions else OverallStatus.PASS
+    if regressions:
+        overall_status = OverallStatus.REGRESSION_DETECTED
+    elif not passes:
+        overall_status = OverallStatus.NO_TEST_PERFORMED
+    else:
+        overall_status = OverallStatus.PASS
 
     def _serialize_result(r: KpiTestResult) -> dict[str, Any]:
         entry: dict[str, Any] = {
@@ -310,13 +316,15 @@ def _build_report(
         }
         if r.reason:
             entry["reason"] = r.reason
-        if r.verdict != Verdict.SKIPPED:
+        if r.current_value is not None:
             entry["current_value"] = r.current_value
+        if r.baseline_values:
+            entry["baseline_values"] = r.baseline_values
+        if r.verdict != Verdict.SKIPPED:
             entry["baseline_mean"] = r.baseline_mean
             entry["relative_change_pct"] = round(r.relative_change * 100, 2)
             entry["higher_is_better"] = r.higher_is_better
             entry["baseline_count"] = r.baseline_count
-            entry["baseline_values"] = r.baseline_values
         return entry
 
     return {
@@ -463,7 +471,27 @@ def run_kpi_analysis(
             value = rec.get("value")
             labels = rec.get("labels", {})
 
-            # Skip non-scalar values (2D KPIs, lists, etc.)
+            mk = _match_key(labels, config.ignored_keys, config.comparison_keys)
+            key = (kpi_id, mk)
+
+            baselines = baseline_index.get(key, [])
+            # Filter to only scalar baselines
+            scalar_baselines = [b for b in baselines if isinstance(b.get("value"), (int, float))]
+
+            # Build baseline values map now so SKIPPED entries can show what was available
+            baseline_values_by_comparison: dict[str, float] = {}
+            for baseline in scalar_baselines:
+                baseline_value = float(baseline["value"])
+                baseline_labels = baseline.get("labels", {})
+                comparison_parts = [
+                    f"{k}={baseline_labels[k]}"
+                    for k in config.comparison_keys
+                    if k in baseline_labels
+                ]
+                comparison_flag = ", ".join(comparison_parts) if comparison_parts else "default"
+                baseline_values_by_comparison[comparison_flag] = baseline_value
+
+            # Skip non-scalar values (2D KPIs, lists, etc.) — after gathering historical values
             if not isinstance(value, (int, float)):
                 results.append(
                     KpiTestResult(
@@ -471,16 +499,11 @@ def run_kpi_analysis(
                         labels=labels,
                         verdict=Verdict.SKIPPED,
                         reason="non-scalar value",
+                        baseline_count=len(scalar_baselines),
+                        baseline_values=baseline_values_by_comparison,
                     )
                 )
                 continue
-
-            mk = _match_key(labels, config.ignored_keys, config.comparison_keys)
-            key = (kpi_id, mk)
-
-            baselines = baseline_index.get(key, [])
-            # Filter to only scalar baselines
-            scalar_baselines = [b for b in baselines if isinstance(b.get("value"), (int, float))]
 
             if len(scalar_baselines) < config.min_baseline_points:
                 results.append(
@@ -489,6 +512,9 @@ def run_kpi_analysis(
                         labels=labels,
                         verdict=Verdict.SKIPPED,
                         reason=f"insufficient baselines ({len(scalar_baselines)} < {config.min_baseline_points})",
+                        current_value=float(value),
+                        baseline_count=len(scalar_baselines),
+                        baseline_values=baseline_values_by_comparison,
                     )
                 )
                 continue
@@ -531,6 +557,15 @@ def run_kpi_analysis(
                 "regressions_detected": True,  # For orchestration compatibility
                 "output_file": str(output_file),
                 "exit_code": 3,
+                "completed_at": time.time(),
+            }, report
+        elif overall_verdict == OverallStatus.NO_TEST_PERFORMED:
+            return {
+                "status": "warning",
+                "success": True,
+                "message": "all KPIs were skipped, no regression test performed",
+                "output_file": str(output_file),
+                "exit_code": 2,
                 "completed_at": time.time(),
             }, report
         else:  # OverallStatus.PASS

@@ -434,9 +434,11 @@ class TestEndToEnd:
         )
 
         # Without plugin config, default AnalysisConfig has no comparison_keys,
-        # so version must also match → no baselines found → skip
-        assert test_status["exit_code"] in (0, 2)
+        # so version must also match → no baselines found → all KPIs skipped
+        assert test_status["exit_code"] == 2
         with open(output_file) as f:
             report = yaml.safe_load(f)
-        # The version label differs, so with empty comparison_keys they don't match
-        assert report["tested"]["total_kpis"] == 0 or report["overall"]["verdict"] == "NO_BASELINE"
+        # The version label differs, so with empty comparison_keys they don't match → all skipped
+        assert report["tested"]["total_kpis"] == 1
+        assert report["tested"]["skipped"] == 1
+        assert report["overall"]["verdict"] == "NO_TEST_PERFORMED"
