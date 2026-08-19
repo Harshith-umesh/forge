@@ -386,7 +386,32 @@ def create_token_throughput_vs_concurrency_plot(df: pd.DataFrame, title_context:
             logger.info("⚠️  No data available for token throughput vs concurrency plot")
             return None
 
-        title = f"Token Throughput vs Concurrency{title_context}<br><sub>Higher is better</sub>"
+        # Check for deployment_profile values and add to subtitle if not in legend
+        subtitle_parts = ["Higher is better"]
+
+        if "label_deployment_profile" in df.columns:
+            deployment_profiles = df["label_deployment_profile"].dropna().unique()
+            if len(deployment_profiles) > 0:
+                # Check if deployment_profile values are already part of the legend names
+                legend_values = df["test_configuration"].unique()
+                profile_in_legend = any(
+                    any(
+                        str(profile).lower() in str(legend).lower()
+                        for profile in deployment_profiles
+                    )
+                    for legend in legend_values
+                )
+
+                if not profile_in_legend:
+                    if len(deployment_profiles) == 1:
+                        subtitle_parts.append(f"Deployment Profile: {deployment_profiles[0]}")
+                    else:
+                        subtitle_parts.append(
+                            f"Deployment Profiles: {', '.join(deployment_profiles)}"
+                        )
+
+        subtitle = " | ".join(subtitle_parts)
+        title = f"Token Throughput vs Concurrency{title_context}<br><sub>{subtitle}</sub>"
 
         fig = px.line(
             df,
