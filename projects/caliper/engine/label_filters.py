@@ -54,10 +54,15 @@ def matches_filters(
     """
 
     def _matches_value(labels: LabelMap, key: str, filter_value: str) -> bool:
-        """Check if a label matches a filter value, supporting 'not-set' for missing fields."""
+        """Check if a label matches a filter value, supporting 'not-set' for missing fields.
+
+        CLI filter values are always strings, but YAML may parse bare numbers (e.g. 3.4)
+        as int/float. Compare via str() so '3.4' matches float 3.4.
+        """
         if filter_value == "not-set":
             return key not in labels
-        return labels.get(key) == filter_value
+        raw = labels.get(key)
+        return str(raw) == filter_value
 
     for k, v in exclude.items():
         if _matches_value(labels, k, v):
