@@ -22,11 +22,19 @@ logger = logging.getLogger(__name__)
 
 # Analysis configuration for KPI regression testing
 analysis_config = AnalysisConfig(
-    comparison_keys=["product_version", "model_name"],
-    ignored_keys=[],
-    sorting_keys=["product_version"],
-    max_relative_regression=0.15,  # 15% threshold (LLM performance can vary more)
-    min_baseline_points=2,  # Require at least 2 baseline points for reliability
+    comparison_labels=["product_version"],
+    ignored_labels=["cluster"],
+    sorting_labels=["product_version"],
+    regression_config={
+        "SCALAR_RELATIVE_CHANGE": {
+            "max_relative_regression": 0.15,  # 15% threshold (LLM performance can vary more)
+            "min_baseline_points": 2,  # Require at least 2 baseline points for reliability
+        },
+        "TWO_DIM_AUC_CHANGE": {
+            "max_relative_regression": 0.35,  # 35% threshold (LLM performance can vary more)
+            "min_baseline_points": 2,  # Require at least 2 baseline points for reliability
+        },
+    },
 )
 
 
