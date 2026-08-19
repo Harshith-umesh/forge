@@ -28,3 +28,19 @@ profile4:
   rampup: 10
   samples: 50
 
+profile5:
+  data: "prompt_tokens=100000,output_tokens=1000"
+  rates: [1, 2, 5]
+  max_seconds: 450
+  samples: 10
+
+profile6:
+  data: "prompt_tokens=1000,output_tokens=1000,turns=5,prefix_tokens=512,prefix_count=10"
+  rates: [1, 25, 50, 75, 100]
+  max_seconds: 450
+
+profile7:
+  data: "prompt_tokens=8000,prompt_tokens_stdev=8500,prompt_tokens_min=50,prompt_tokens_max=30000,output_tokens=800,output_tokens_stdev=1500,output_tokens_min=20,output_tokens_max=8000"
+  rates: [1, 50, 100, 200, 300]
+  max_seconds: 450
+
