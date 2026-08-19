@@ -19,8 +19,8 @@ def run_kpi_generate(
     use_cache: bool,
     cache_path: Path | None,
     format_type: str = "hierarchical",
-    include_label_filter: list[dict[str, str]] | None = None,
-    exclude_label_filter: list[dict[str, str]] | None = None,
+    include_label_filter: dict[str, list[str]] | None = None,
+    exclude_label_filter: dict[str, list[str]] | None = None,
     verbose_parsing: bool = False,
 ) -> list[dict[str, Any]]:
     """Generate KPI output in specified format.

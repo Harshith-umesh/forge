@@ -17,8 +17,8 @@ MATRIXBENCHMARKING_MARKER = "settings.yaml"
 def discover_test_bases(
     base_dir: Path,
     *,
-    include_label_filter: list[dict[str, str]] | None = None,
-    exclude_label_filter: list[dict[str, str]] | None = None,
+    include_label_filter: dict[str, list[str]] | None = None,
+    exclude_label_filter: dict[str, list[str]] | None = None,
 ) -> list[TestBaseNode]:
     """Walk base_dir; each directory containing MARKER or MATRIXBENCHMARKING_MARKER becomes a TestBaseNode.
 
@@ -65,22 +65,11 @@ def discover_test_bases(
         # Apply label filtering if specified
         from projects.caliper.engine.label_filters import matches_filters
 
-        def _apply_filters(labels, include_filters, exclude_filters):
-            # For exclude filters, ANY match excludes (OR logic)
-            if exclude_filters:
-                for exclude_filter in exclude_filters:
-                    if not matches_filters(labels, include={}, exclude=exclude_filter):
-                        return False
-
-            # For include filters, ALL must match (AND logic)
-            if include_filters:
-                for include_filter in include_filters:
-                    if not matches_filters(labels, include=include_filter, exclude={}):
-                        return False
-
-            return True
-
-        if not _apply_filters(labels, include_label_filter, exclude_label_filter):
+        if not matches_filters(
+            labels,
+            include=include_label_filter or {},
+            exclude=exclude_label_filter or {},
+        ):
             continue
 
         nodes.append(

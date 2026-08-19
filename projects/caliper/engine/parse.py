@@ -33,8 +33,8 @@ def run_parse(
     use_cache: bool,
     force_report_partial: bool = True,
     show_parameter_matrix: bool = True,
-    include_label_filter: list[dict[str, str]] | None = None,
-    exclude_label_filter: list[dict[str, str]] | None = None,
+    include_label_filter: dict[str, list[str]] | None = None,
+    exclude_label_filter: dict[str, list[str]] | None = None,
     verbose_parsing: bool = False,
 ) -> UnifiedRunModel:
     """
