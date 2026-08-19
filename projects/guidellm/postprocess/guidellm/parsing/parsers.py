@@ -678,6 +678,11 @@ class GuideLLMParser:
             if node_benchmarks:
                 # Create aggregated metrics with performance curves for this node
                 labels = _labels_from_node(node)
+                kpi_labels = _kpi_labels_from_node(node)
+
+                # Merge kpi_labels into distinguishing_labels
+                distinguishing_labels = {**labels, **kpi_labels}
+
                 metrics = self._create_aggregated_metrics(node_benchmarks)
                 if node_config:
                     metrics["configuration"] = node_config.to_dict()
@@ -728,7 +733,7 @@ class GuideLLMParser:
                 records.append(
                     UnifiedResultRecord(
                         test_base_path=str(node.test_path),
-                        distinguishing_labels=labels,
+                        distinguishing_labels=distinguishing_labels,
                         metrics=metrics,
                         run_identity={"guidellm": True},
                         parse_notes=[],
