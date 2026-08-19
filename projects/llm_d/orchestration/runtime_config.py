@@ -536,6 +536,20 @@ def get_deployment_profile() -> dict[str, Any]:
         }
         resolved_profile = deep_merge(resolved_profile, scheduler_node_selector)
 
+    # Configure scheduler tolerations from platform config
+    platform_tolerations = config.project.get_config(
+        "platform.inference_service.scheduler.tolerations"
+    )
+    if platform_tolerations:
+        scheduler_tolerations = {
+            "scheduler": {
+                "template": {
+                    "tolerations": platform_tolerations,
+                }
+            }
+        }
+        resolved_profile = deep_merge(resolved_profile, scheduler_tolerations)
+
     return resolved_profile
 
 

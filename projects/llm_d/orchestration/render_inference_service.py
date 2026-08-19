@@ -108,6 +108,8 @@ def render_inference_service_from_parts(
             deployment_profile_name
         )
 
+    model_hostpath = config.project.get_config("runtime.model_hostpath", default_value=None)
+
     if model_name.startswith("oci://"):
         source_uri = model_name
         source_scheme = "oci"
@@ -118,13 +120,16 @@ def render_inference_service_from_parts(
         source_uri = f"hf://{model_name}"
         source_scheme = "hf"
 
-    cache_spec = _create_model_cache_spec(
-        model_cache=model_cache,
-        source_uri=source_uri,
-        source_scheme=source_scheme,
-        model_slug=model_slug,
-        namespace=namespace,
-    )
+    if model_hostpath:
+        cache_spec = None
+    else:
+        cache_spec = _create_model_cache_spec(
+            model_cache=model_cache,
+            source_uri=source_uri,
+            source_scheme=source_scheme,
+            model_slug=model_slug,
+            namespace=namespace,
+        )
 
     # These sentinels are resolved here because VLLM_ADDITIONAL_ARGS is opaque
     # shell input and cannot use controller-time Go-template substitutions.
@@ -152,6 +157,17 @@ def render_inference_service_from_parts(
 
     # Apply Kueue configuration if enabled
     _apply_kueue_configuration(rendered_manifest, deployment_profile)
+
+    # Apply hostpath model configuration if configured
+    if model_hostpath:
+        _apply_hostpath_model_configuration(rendered_manifest, model_hostpath, source_uri)
+
+    # Apply image pull secrets if configured
+    image_pull_secret = config.project.get_config(
+        "platform.inference_service.image_pull_secret", default_value=None
+    )
+    if image_pull_secret:
+        _apply_image_pull_secrets(rendered_manifest, image_pull_secret)
 
     return rendered_manifest
 
@@ -368,6 +384,11 @@ def _render_pd_deployment(
         deployment_profile, deployment_profile_name, is_prefill=False, workload=workload
     )
 
+    # Apply scheduler config (nodeSelector, tolerations, image, …) from deployment profile
+    scheduler = deployment_profile.get("scheduler")
+    if scheduler is not None:
+        manifest["spec"]["router"]["scheduler"] = copy.deepcopy(scheduler)
+
     return manifest
 
 
@@ -520,6 +541,81 @@ def _calculate_total_gpu_usage(deployment_profile: dict[str, Any]) -> int:
         tensor_parallelism = deployment_profile.get("tensor_parallelism", 1)
         replicas = deployment_profile.get("replicas", 1)
         return tensor_parallelism * replicas
+
+
+def _apply_hostpath_model_configuration(
+    manifest: dict[str, Any],
+    hostpath: str,
+    source_uri: str,
+) -> None:
+    """Inject hostPath volume so the node-local HF hub cache is used instead of downloading.
+
+    Mirrors the TOPSAIL apply_hostpath_volume_configuration approach:
+    - disables the storage initializer
+    - mounts the hostPath directory at /hf-cache (readOnly)
+    - sets HF_HUB_CACHE=/hf-cache/hub so vLLM picks up the cached weights
+
+    The model URI in spec.model.uri is kept as-is (hf://…) because vLLM resolves
+    the model name through the HF_HUB_CACHE directory, not by downloading it.
+
+    Args:
+        manifest: The rendered LLMInferenceService manifest to modify in-place.
+        hostpath: Absolute path on the node where the HF hub cache lives
+                  (e.g. /mnt/local-nvme-storage/models).
+        source_uri: The hf:// model URI already set on the manifest (unused here,
+                    kept for symmetry / future logging).
+    """
+    hf_cache_volume = {
+        "name": "hf-cache",
+        "hostPath": {"path": hostpath, "type": "Directory"},
+    }
+    hf_cache_mount = {"name": "hf-cache", "mountPath": "/hf-cache", "readOnly": True}
+    hf_env_var = {"name": "HF_HUB_CACHE", "value": "/hf-cache/hub"}
+
+    def _configure_pod_template(template: dict[str, Any]) -> None:
+        template.setdefault("volumes", [])
+        template["volumes"].append(hf_cache_volume)
+        container = template["containers"][0]
+        container.setdefault("volumeMounts", [])
+        container["volumeMounts"].append(hf_cache_mount)
+        container.setdefault("env", [])
+        container["env"].insert(0, hf_env_var)
+
+    # Apply to main (decode) pod template
+    _configure_pod_template(manifest["spec"]["template"])
+
+    # Apply to prefill pod template for P/D deployments
+    if "prefill" in manifest["spec"]:
+        _configure_pod_template(manifest["spec"]["prefill"]["template"])
+
+
+def _apply_image_pull_secrets(
+    manifest: dict[str, Any],
+    image_pull_secret: str,
+) -> None:
+    """Inject a single imagePullSecret into all pod templates: serving, prefill, and scheduler.
+
+    Args:
+        manifest: The rendered LLMInferenceService manifest to modify in-place.
+        image_pull_secret: Secret name string.
+    """
+    normalized = [{"name": image_pull_secret}]
+
+    def _inject(template: dict[str, Any]) -> None:
+        template.setdefault("imagePullSecrets", [])
+        template["imagePullSecrets"].extend(normalized)
+
+    # Serving (decode) pod template
+    _inject(manifest["spec"]["template"])
+
+    # Prefill pod template (P/D deployments)
+    if "prefill" in manifest["spec"]:
+        _inject(manifest["spec"]["prefill"]["template"])
+
+    # Scheduler (router) pod template
+    if "router" in manifest["spec"] and "scheduler" in manifest["spec"]["router"]:
+        scheduler_template = manifest["spec"]["router"]["scheduler"].setdefault("template", {})
+        _inject(scheduler_template)
 
 
 def _apply_kueue_configuration(

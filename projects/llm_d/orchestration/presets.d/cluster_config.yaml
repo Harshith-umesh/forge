@@ -30,11 +30,19 @@ cluster_janus:
   cpt.kpi.labels.platform_name: OCP
 
 cluster_eks-h100:
-  runtime.namespace: kevin-dev
-
   cpt.kpi.labels.platform_name: EKS
+
+  runtime.namespace: kevin-dev
+  runtime.model_hostpath: /mnt/nvme/models
+  runtime.kserve.wait_readiness: false
+  platform.inference_service.image_pull_secret: rhai-pull-secret
   platform.inference_service.scheduler.node_selector:
     nvidia.com/gpu.accelerator: h100
+  platform.inference_service.scheduler.tolerations:
+  - key: nvidia.com/gpu
+    value: "true"
+    operator: Equal
+    effect: NoSchedule
 
 cluster_athena-fire:
   cpt.kpi.labels.platform_name: OCP

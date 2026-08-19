@@ -12,7 +12,7 @@ from projects.core.dsl.utils.k8s import (
     oc,
     oc_get_json,
 )
-from projects.core.library import env, vault
+from projects.core.library import config, env, vault
 from projects.core.orchestration.utils.k8s import ensure_namespace
 from projects.gpu_operator.toolbox.bootstrap_gpu_clusterpolicy import (
     main as bootstrap_gpu_clusterpolicy,
@@ -260,6 +260,11 @@ def prepare_model_cache() -> None:
 
     if not model_cache.get("enabled", False):
         logger.info("Model cache disabled")
+        return
+
+    model_hostpath = config.project.get_config("runtime.model_hostpath", default_value=None)
+    if model_hostpath:
+        logger.info("Model available via hostpath %s, skipping cache preparation", model_hostpath)
         return
 
     model_uri = runtime_config.get_model_uri()
