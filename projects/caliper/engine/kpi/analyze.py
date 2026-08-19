@@ -6,10 +6,27 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+class Verdict(StrEnum):
+    """Per-KPI test verdict."""
+
+    PASS = "PASS"
+    REGRESSION = "REGRESSION"
+    SKIPPED = "SKIPPED"
+
+
+class OverallStatus(StrEnum):
+    """Overall analysis status."""
+
+    PASS = "PASS"
+    REGRESSION_DETECTED = "REGRESSION_DETECTED"
+    NO_BASELINE = "NO_BASELINE"
 
 
 @dataclass
@@ -39,12 +56,15 @@ class KpiTestResult:
 
     kpi_id: str
     labels: dict[str, Any]
-    current_value: float
-    baseline_mean: float
-    relative_change: float
-    higher_is_better: bool
-    regression: bool
-    baseline_count: int
+    verdict: Verdict
+    reason: str = ""
+
+    # Only populated for non-SKIPPED verdicts
+    current_value: float | None = None
+    baseline_mean: float | None = None
+    relative_change: float | None = None
+    higher_is_better: bool | None = None
+    baseline_count: int = 0
     baseline_values: dict[str, float] = field(default_factory=dict)
 
 
@@ -233,25 +253,38 @@ def _run_regression_test(
     else:
         regression = relative_change > config.max_relative_regression
 
+    if regression:
+        direction = "decrease" if higher_is_better else "increase"
+        reason = (
+            f"relative {direction} of {abs(relative_change * 100):.1f}% "
+            f"exceeds threshold {config.max_relative_regression * 100:.0f}%"
+        )
+    else:
+        reason = ""
+
     return KpiTestResult(
         kpi_id=current["kpi_id"],
         labels=current.get("labels", {}),
+        verdict=Verdict.REGRESSION if regression else Verdict.PASS,
+        reason=reason,
         current_value=current_value,
         baseline_mean=round(baseline_mean, 6),
         relative_change=round(relative_change, 6),
         higher_is_better=higher_is_better,
-        regression=regression,
         baseline_count=len(baseline_values),
         baseline_values=baseline_values_by_comparison,
     )
 
 
 def _sort_results(results: list[KpiTestResult], sorting_keys: list[str]) -> list[KpiTestResult]:
-    """Sort results by sorting keys extracted from labels, then by kpi_id."""
+    """Sort results by sorting keys extracted from labels, then by kpi_id.
+    SKIPPED entries are placed after tested entries."""
+
+    verdict_order = {Verdict.PASS: 0, Verdict.REGRESSION: 1, Verdict.SKIPPED: 2}
 
     def sort_key(r: KpiTestResult):
         label_key = tuple(str(r.labels.get(k, "")) for k in sorting_keys)
-        return (*label_key, r.kpi_id)
+        return (verdict_order.get(r.verdict, 9), *label_key, r.kpi_id)
 
     return sorted(results, key=sort_key)
 
@@ -261,17 +294,32 @@ def _build_report(
     config: AnalysisConfig,
     current_source: str,
     baseline_sources: list[str],
-    skipped: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Build the final report structure."""
-    regressions = [r for r in results if r.regression]
+    regressions = [r for r in results if r.verdict == Verdict.REGRESSION]
+    passes = [r for r in results if r.verdict == Verdict.PASS]
+    skipped = [r for r in results if r.verdict == Verdict.SKIPPED]
 
-    if regressions:
-        overall_status = "REGRESSION_DETECTED"
-    else:
-        overall_status = "PASS"
+    overall_status = OverallStatus.REGRESSION_DETECTED if regressions else OverallStatus.PASS
 
-    report = {
+    def _serialize_result(r: KpiTestResult) -> dict[str, Any]:
+        entry: dict[str, Any] = {
+            "kpi_id": r.kpi_id,
+            "labels": r.labels,
+            "verdict": r.verdict,
+        }
+        if r.reason:
+            entry["reason"] = r.reason
+        if r.verdict != Verdict.SKIPPED:
+            entry["current_value"] = r.current_value
+            entry["baseline_mean"] = r.baseline_mean
+            entry["relative_change_pct"] = round(r.relative_change * 100, 2)
+            entry["higher_is_better"] = r.higher_is_better
+            entry["baseline_count"] = r.baseline_count
+            entry["baseline_values"] = r.baseline_values
+        return entry
+
+    return {
         "analysis": {
             "status": overall_status,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -290,36 +338,18 @@ def _build_report(
         },
         "tested": {
             "total_kpis": len(results),
-            "regressions": len(regressions),
-            "passes": len(results) - len(regressions),
+            "pass": len(passes),
+            "regression": len(regressions),
             "skipped": len(skipped),
         },
-        "results": [
-            {
-                "kpi_id": r.kpi_id,
-                "labels": r.labels,
-                "current_value": r.current_value,
-                "baseline_mean": r.baseline_mean,
-                "relative_change_pct": round(r.relative_change * 100, 2),
-                "higher_is_better": r.higher_is_better,
-                "verdict": "REGRESSION" if r.regression else "PASS",
-                "baseline_count": r.baseline_count,
-                "baseline_values": r.baseline_values,
-            }
-            for r in results
-        ],
+        "results": [_serialize_result(r) for r in results],
         "overall": {
             "verdict": overall_status,
             "regression_count": len(regressions),
-            "total_tested": len(results),
+            "total_tested": len(passes) + len(regressions),
             "total_skipped": len(skipped),
         },
     }
-
-    if skipped:
-        report["skipped"] = skipped
-
-    return report
 
 
 def run_kpi_analysis(
@@ -427,18 +457,24 @@ def run_kpi_analysis(
 
         # Run regression tests
         results: list[KpiTestResult] = []
-        skipped: list[dict[str, Any]] = []
 
         for rec in current_records:
             kpi_id = rec.get("kpi_id")
             value = rec.get("value")
+            labels = rec.get("labels", {})
 
             # Skip non-scalar values (2D KPIs, lists, etc.)
             if not isinstance(value, (int, float)):
-                skipped.append({"kpi_id": kpi_id, "reason": "non-scalar value"})
+                results.append(
+                    KpiTestResult(
+                        kpi_id=kpi_id,
+                        labels=labels,
+                        verdict=Verdict.SKIPPED,
+                        reason="non-scalar value",
+                    )
+                )
                 continue
 
-            labels = rec.get("labels", {})
             mk = _match_key(labels, config.ignored_keys, config.comparison_keys)
             key = (kpi_id, mk)
 
@@ -447,12 +483,13 @@ def run_kpi_analysis(
             scalar_baselines = [b for b in baselines if isinstance(b.get("value"), (int, float))]
 
             if len(scalar_baselines) < config.min_baseline_points:
-                skipped.append(
-                    {
-                        "kpi_id": kpi_id,
-                        "labels": labels,
-                        "reason": f"insufficient baselines ({len(scalar_baselines)} < {config.min_baseline_points})",
-                    }
+                results.append(
+                    KpiTestResult(
+                        kpi_id=kpi_id,
+                        labels=labels,
+                        verdict=Verdict.SKIPPED,
+                        reason=f"insufficient baselines ({len(scalar_baselines)} < {config.min_baseline_points})",
+                    )
                 )
                 continue
 
@@ -469,7 +506,6 @@ def run_kpi_analysis(
             config=config,
             current_source=str(current_kpi_file),
             baseline_sources=baseline_sources,
-            skipped=skipped,
         )
 
         # Write JSON report
@@ -488,7 +524,7 @@ def run_kpi_analysis(
         )
 
         # Return status based on the overall verdict from the report
-        if overall_verdict == "REGRESSION_DETECTED":
+        if overall_verdict == OverallStatus.REGRESSION_DETECTED:
             return {
                 "status": "regression_detected",
                 "success": False,
@@ -497,7 +533,7 @@ def run_kpi_analysis(
                 "exit_code": 3,
                 "completed_at": time.time(),
             }, report
-        else:  # "PASS"
+        else:  # OverallStatus.PASS
             return {
                 "status": "success",
                 "success": True,
@@ -523,7 +559,7 @@ def _write_no_baseline_report(
     """Write a warning-level report when no baselines are available."""
     report = {
         "analysis": {
-            "status": "NO_BASELINE",
+            "status": OverallStatus.NO_BASELINE,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         },
         "processed": {
@@ -534,7 +570,7 @@ def _write_no_baseline_report(
         "tested": {"total_kpis": 0, "regressions": 0, "passes": 0, "skipped": 0},
         "results": [],
         "overall": {
-            "verdict": "NO_BASELINE",
+            "verdict": OverallStatus.NO_BASELINE,
             "message": "No historical KPI files found for regression testing",
             "regression_count": 0,
             "total_tested": 0,
