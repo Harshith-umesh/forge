@@ -290,11 +290,63 @@ def _sort_results(results: list[KpiTestResult], sorting_keys: list[str]) -> list
     return sorted(results, key=sort_key)
 
 
+def _summarize_label_sets(
+    data: dict[str, Any],
+    comparison_keys: list[str],
+    ignored_keys: list[str],
+) -> dict[str, Any]:
+    """Summarize label sets found in a hierarchical KPI doc.
+
+    Returns:
+      - comparison_keys: unique values per comparison key
+      - ignored_keys: unique values per ignored key
+      - common_labels: labels whose value is identical across all test entries (as key=val string)
+      - distinct_labels: per-entry labels that differ (as key=val string), excluding ignored keys
+    """
+    all_labels = [test.get("labels", {}) for test in data.get("tests", [])]
+
+    def _unique_values(key: str) -> list[str]:
+        seen: list[str] = []
+        for labels in all_labels:
+            val = str(labels[key]) if key in labels else None
+            if val is not None and val not in seen:
+                seen.append(val)
+        return sorted(seen)
+
+    # Common / distinct (excluding ignored keys)
+    ignored = set(ignored_keys)
+    seen_filtered = []
+    for labels in all_labels:
+        filtered = {k: v for k, v in labels.items() if k not in ignored}
+        if filtered not in seen_filtered:
+            seen_filtered.append(filtered)
+
+    if seen_filtered:
+        all_keys = set().union(*seen_filtered)
+        common_keys = {
+            k for k in all_keys if all(ls.get(k) == seen_filtered[0].get(k) for ls in seen_filtered)
+        }
+        common = ",".join(f"{k}={seen_filtered[0][k]}" for k in sorted(common_keys))
+        distinct = [
+            ",".join(f"{k}={v}" for k, v in sorted(ls.items()) if k not in common_keys)
+            for ls in seen_filtered
+        ]
+    else:
+        common, distinct = "", []
+
+    return {
+        "comparison_keys": {k: _unique_values(k) for k in comparison_keys},
+        "ignored_keys": {k: _unique_values(k) for k in ignored_keys},
+        "common_labels": common,
+        "distinct_labels": distinct,
+    }
+
+
 def _build_report(
     results: list[KpiTestResult],
     config: AnalysisConfig,
-    current_source: str,
-    baseline_sources: list[str],
+    current_source: dict[str, Any],
+    baseline_sources: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Build the final report structure."""
     regressions = [r for r in results if r.verdict == Verdict.REGRESSION]
@@ -331,13 +383,13 @@ def _build_report(
         "analysis": {
             "status": overall_status,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "config": {
-                "comparison_keys": config.comparison_keys,
-                "ignored_keys": config.ignored_keys,
-                "sorting_keys": config.sorting_keys,
-                "max_relative_regression": config.max_relative_regression,
-                "min_baseline_points": config.min_baseline_points,
-            },
+        },
+        "config": {
+            "comparison_keys": config.comparison_keys,
+            "ignored_keys": config.ignored_keys,
+            "sorting_keys": config.sorting_keys,
+            "max_relative_regression": config.max_relative_regression,
+            "min_baseline_points": config.min_baseline_points,
         },
         "processed": {
             "current_source": current_source,
@@ -526,11 +578,20 @@ def run_kpi_analysis(
         results = _sort_results(results, config.sorting_keys)
 
         # Build report
-        baseline_sources = [str(p) for p in baseline_kpi_data.keys()]
+        baseline_sources = []
+        for path, data in baseline_kpi_data.items():
+            summary = _summarize_label_sets(data, config.comparison_keys, config.ignored_keys)
+            baseline_sources.append({"path": str(path), **summary})
+
+        current_source = {
+            "path": str(current_kpi_file),
+            **_summarize_label_sets(current_data, config.comparison_keys, config.ignored_keys),
+        }
+
         report = _build_report(
             results=results,
             config=config,
-            current_source=str(current_kpi_file),
+            current_source=current_source,
             baseline_sources=baseline_sources,
         )
 
