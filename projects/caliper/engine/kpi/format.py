@@ -231,6 +231,33 @@ def write_kpis_in_format(
         raise ValueError(f"Unknown format type: {format_type}. Use 'hierarchical' or 'jsonl'")
 
 
+def flatten_hierarchical_kpis(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Lossless conversion from schema_version=2 hierarchical KPI doc to flat records.
+
+    Each output record contains:
+    - All test-level fields: run_id, labels, metadata
+    - All kpi-level fields verbatim, with 'id' renamed to 'kpi_id'
+
+    The value is kept as-is (no conversion). Callers that need schema-v1 value
+    representation should apply _convert_to_schema_v1_value() separately.
+    """
+    records: list[dict[str, Any]] = []
+    for test in data.get("tests", []):
+        test_base = {
+            "run_id": test.get("run_id"),
+            "labels": test.get("labels", {}),
+            "metadata": test.get("metadata", {}),
+        }
+        for kpi in test.get("kpis", []):
+            record = dict(test_base)
+            record["kpi_id"] = kpi.get("id")
+            for k, v in kpi.items():
+                if k != "id":
+                    record[k] = v
+            records.append(record)
+    return records
+
+
 def _convert_to_schema_v1_value(raw_value: Any) -> Any:
     """
     Convert structured KPI value back to schema-v1 list-of-pairs representation.
@@ -281,58 +308,9 @@ def read_kpis_from_file(file_path: Path) -> list[dict]:
         data = json.loads(content)
 
         if isinstance(data, dict) and data.get("schema_version") == "2":
-            # Hierarchical format - flatten it
-            # Accumulate records in temporary list to ensure atomicity
-            temp_kpis = []
-
-            for test in data.get("tests", []):
-                test_metadata = test.get("metadata", {})
-                test_labels = test.get("labels", {})
-
-                for kpi_record in test.get("kpis", []):
-                    # Convert structured value to schema-v1 format if needed
-                    raw_value = kpi_record.get("value")
-                    converted_value = _convert_to_schema_v1_value(raw_value)
-
-                    # Merge test-level labels with any per-KPI labels
-                    merged_labels = {
-                        **test_labels,
-                        **kpi_record.get("labels", {}),
-                        "higher_is_better": kpi_record.get("higher_is_better", True),
-                    }
-
-                    run_id = test_metadata.get("run_id")
-
-                    flat_kpi = {
-                        "schema_version": "1",
-                        "kpi_id": kpi_record.get("id"),
-                        "value": converted_value,
-                        "unit": kpi_record.get("unit"),
-                        "run_id": run_id,
-                        "run_path": run_id,
-                        "timestamp": test_metadata.get("timestamp"),
-                        "labels": merged_labels,
-                        "source": test_metadata.get("source", {}),
-                    }
-
-                    # Preserve schema-v2 metadata fields if present
-                    metadata_fields = [
-                        "is_2d",
-                        "name",
-                        "help",
-                        "x_unit",
-                        "y_unit",
-                        "x_help",
-                        "y_help",
-                        "format",
-                    ]
-                    for field in metadata_fields:
-                        if field in kpi_record:
-                            flat_kpi[field] = kpi_record[field]
-                    temp_kpis.append(flat_kpi)
-
-            # Only merge into main kpis list after entire branch succeeds
-            kpis.extend(temp_kpis)
+            for rec in flatten_hierarchical_kpis(data):
+                rec["value"] = _convert_to_schema_v1_value(rec.get("value"))
+                kpis.append(rec)
         else:
             # Unknown JSON format
             raise ValueError("Unknown JSON format")
