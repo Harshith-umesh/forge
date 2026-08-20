@@ -558,7 +558,7 @@ def _build_report(
             "baseline_source_count": len(baseline_sources),
             "baseline_skipped": baseline_skipped,
         },
-        "results": passes,
+        "results": passes + regressions,
         "skipped": skipped,
     }
 
@@ -720,10 +720,15 @@ def run_kpi_analysis(
             mk = _match_key(labels, config.ignored_labels, config.comparison_labels)
             key = (rec.get("kpi_id"), mk)
 
-            current_ck = frozenset((k, labels[k]) for k in config.comparison_labels if k in labels)
             baseline_dict = baseline_index.get(key, {})
-            baselines = [r for ck, r in baseline_dict.items() if ck != current_ck]
-            baseline_skipped_totals["same_version"] += len(baseline_dict) - len(baselines)
+            if config.comparison_labels:
+                current_ck = frozenset(
+                    (k, labels[k]) for k in config.comparison_labels if k in labels
+                )
+                baselines = [r for ck, r in baseline_dict.items() if ck != current_ck]
+                baseline_skipped_totals["same_version"] += len(baseline_dict) - len(baselines)
+            else:
+                baselines = list(baseline_dict.values())
 
             if not baselines:
                 _log_baseline_miss(rec.get("kpi_id"), mk, baseline_index)
