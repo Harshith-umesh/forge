@@ -29,6 +29,7 @@ xks-ocp-pd:
 
 xks-ocp-smoke:
   extends:
+  - cpt-xks
   - llama3-70b
 
   runtime.deployment_profile:

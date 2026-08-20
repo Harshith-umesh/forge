@@ -13,6 +13,7 @@ cpt:
   caliper.export.backend.mlflow.config.experiment: cpt-llm-d
   caliper.postprocess.s3.instance: forge-cpt
   caliper.postprocess.s3.directory: llm-d/default
+  caliper.postprocess.s3.export.enabled: true
 
 cpt-xks:
   extends:
