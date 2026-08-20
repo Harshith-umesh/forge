@@ -84,7 +84,7 @@ caliper:
         include_ai_data: false
         max_downloads: 50
       export:
-        enabled: true
+        enabled: false
         upload_id: null  # use timestamp if null
         dry_run: false
         include_csv: true
