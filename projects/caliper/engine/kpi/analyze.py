@@ -10,6 +10,10 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from projects.caliper.engine.kpi.format import (
+    flatten_hierarchical_kpis as _extract_kpi_records_from_hierarchical,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -153,26 +157,6 @@ def _match_key(
     """Build a hashable match key from labels, excluding ignored and comparison labels."""
     excluded = set(ignored_labels) | set(comparison_labels)
     return tuple(sorted((k, str(v)) for k, v in labels.items() if k not in excluded))
-
-
-def _extract_kpi_records_from_hierarchical(data: dict[str, Any]) -> list[dict[str, Any]]:
-    """Extract flat KPI records from a schema_version=2 hierarchical document."""
-    records = []
-    for test in data.get("tests", []):
-        test_labels = test.get("labels", {})
-        for kpi in test.get("kpis", []):
-            records.append(
-                {
-                    "kpi_id": kpi.get("id"),
-                    "value": kpi.get("value"),
-                    "unit": kpi.get("unit"),
-                    "higher_is_better": kpi.get("higher_is_better", True),
-                    "labels": test_labels,
-                    "run_id": test.get("run_id"),
-                    "metadata": test.get("metadata", {}),
-                }
-            )
-    return records
 
 
 def _is_relevant_baseline(
