@@ -101,7 +101,7 @@ class TestBuildBaselineIndex:
                 ),
             ]
         )
-        config = AnalysisConfig(comparison_keys=["version"])
+        config = AnalysisConfig(comparison_labels=["version"])
         baseline_data = {Path("/fake/kpis.json"): data}
         index = _build_baseline_index(baseline_data, config)
 
