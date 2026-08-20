@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
+import json
+import logging
+
 import yaml
 
 from projects.core.dsl import entrypoint, execute_tasks, retry, task
 from projects.core.dsl.utils.k8s import oc
 
-SERVING_CONTROL_PLANE_DEPLOYMENTS = (
-    "kserve-module-controller-manager",
-    "llmisvc-controller-manager",
-    "model-serving-api",
-    "odh-model-controller",
-)
+logger = logging.getLogger(__name__)
 
 
 @entrypoint
@@ -30,39 +28,68 @@ def run(*, namespace: str) -> str:
     return f"Serving control plane is ready in {namespace}"
 
 
+DEPLOYMENT_NAME_KEYWORDS = ("kserve", "llmisvc", "model")
+
+
+@task
+def discover_deployments(args, ctx):
+    """Discover serving control plane deployments matching known keywords"""
+
+    result = oc(
+        "get",
+        "deploy",
+        "-n",
+        args.namespace,
+        "-oname",
+        log_stdout=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to list deployments in {args.namespace}")
+
+    names = [
+        line.removeprefix("deployment.apps/")
+        for line in result.stdout.splitlines()
+        if any(kw in line for kw in DEPLOYMENT_NAME_KEYWORDS)
+    ]
+
+    if not names:
+        raise RuntimeError(
+            f"No deployments matching {DEPLOYMENT_NAME_KEYWORDS} found in {args.namespace}"
+        )
+
+    ctx.deployment_names = names
+
+
+@retry(attempts=30, delay=10, backoff=1.0)
 @task
 def wait_for_deployments(args, ctx):
     """Wait for all serving control plane deployments to be available"""
 
-    for deployment_name in SERVING_CONTROL_PLANE_DEPLOYMENTS:
-        result = oc(
-            "wait",
-            "--for=condition=Available",
-            "--timeout=300s",
-            f"deployment/{deployment_name}",
-            "-n",
-            args.namespace,
-            check=False,
-        )
-        if result.returncode != 0:
-            status_result = oc(
-                "get",
-                "deployments",
-                "-n",
-                args.namespace,
-                "-o",
-                "wide",
-                check=False,
-            )
-            error_msg = (
-                f"Timeout waiting for serving control plane deployment "
-                f"{deployment_name} in {args.namespace}"
-            )
-            if status_result.returncode == 0:
-                error_msg += f"\n\nCurrent deployment status:\n{status_result.stdout}"
-            raise RuntimeError(error_msg)
+    result = oc(
+        "get",
+        "deploy",
+        *ctx.deployment_names,
+        "-n",
+        args.namespace,
+        "-o",
+        "json",
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to get deployments in {args.namespace}")
 
-    return "All serving control plane deployments are available"
+    not_ready = [
+        f"{d['metadata']['name']} ({d['status'].get('availableReplicas', 0)}/{d['spec'].get('replicas', 1)})"
+        for d in json.loads(result.stdout).get("items", [])
+        if d["status"].get("availableReplicas", 0) < d["spec"].get("replicas", 1)
+    ]
+
+    if not_ready:
+        logger.info("Waiting for: %s", ", ".join(not_ready))
+        return False
+
+    return f"All {len(ctx.deployment_names)} deployments are available"
 
 
 @retry(attempts=40, delay=5, backoff=1.0)
