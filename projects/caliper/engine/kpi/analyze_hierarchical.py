@@ -50,7 +50,7 @@ def _load_kpis_any_format(kpi_file_path: Path) -> dict[str, Any]:
             if kpi_id:
                 value = kpi.get("value")
                 labels = kpi.get("labels", {})
-                higher_is_better = labels.get("higher_is_better", False)
+                higher_is_better = kpi.get("higher_is_better", False)
 
                 metrics[kpi_id] = {
                     "value": value,
@@ -126,10 +126,6 @@ def analyze_hierarchical_kpis(
 
                         # Get direction preference from metric metadata or use default
                         higher_is_better = current_metric.get("higher_is_better", False)
-                        if "labels" in current_metric:
-                            higher_is_better = current_metric["labels"].get(
-                                "higher_is_better", False
-                            )
 
                         # Calculate change
                         change_percent = (

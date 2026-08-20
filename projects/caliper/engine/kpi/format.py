@@ -43,8 +43,6 @@ def transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
     for kpi in kpis:
         run_id = kpi.get("run_id", "unknown")
         for k, v in kpi.get("labels", {}).items():
-            if k == "higher_is_better":
-                continue
             run_label_values[run_id][k].add(str(v))
 
     per_kpi_label_keys: dict[str, set[str]] = {}
@@ -57,11 +55,7 @@ def transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
         varying_keys = per_kpi_label_keys.get(run_id, set())
 
         kpi_labels = kpi.get("labels", {})
-        test_labels = {
-            k: v
-            for k, v in kpi_labels.items()
-            if k not in ("higher_is_better",) and k not in varying_keys
-        }
+        test_labels = {k: v for k, v in kpi_labels.items() if k not in varying_keys}
 
         # KPI handlers may add project-specific labels only to a subset of the
         # records. Preserve every label that is constant for this test instead
@@ -121,7 +115,7 @@ def transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
         kpi_record: dict[str, Any] = {
             "id": kpi_id,
             "value": final_value,
-            "higher_is_better": kpi_labels.get("higher_is_better", True),
+            "higher_is_better": kpi.get("higher_is_better", True),
             "is_2d": is_2d,
         }
 
