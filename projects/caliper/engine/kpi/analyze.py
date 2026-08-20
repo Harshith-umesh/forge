@@ -39,7 +39,7 @@ class Algorithm(StrEnum):
     """Regression testing algorithm identifier."""
 
     SCALAR_RELATIVE_CHANGE = "SCALAR_RELATIVE_CHANGE"
-    TWO_DIM_RELATIVE_CHANGE = "2D_RELATIVE_CHANGE"
+    TWO_DIM_AUC_CHANGE = "TWO_DIM_AUC_CHANGE"
 
 
 @dataclass
@@ -229,11 +229,12 @@ def _run_regression_test(
 
     ignored = set(config.ignored_labels)
     comparison = set(config.comparison_labels)
+    distinct_keys = {
+        k: v for k, v in raw_labels.items() if k not in comparison and k not in ignored
+    }
     labels = {
         "comparison_keys": {k: raw_labels[k] for k in config.comparison_labels if k in raw_labels},
-        "identical_keys": {
-            k: v for k, v in raw_labels.items() if k not in comparison and k not in ignored
-        },
+        "distinct_keys": distinct_keys,
         "ignore_keys": {k: raw_labels[k] for k in config.ignored_labels if k in raw_labels},
     }
 
@@ -251,9 +252,11 @@ def _run_regression_test(
 
     base: dict[str, Any] = {
         "kpi_id": kpi_id,
+        "verdict": None,  # placehold for field order in the JSON
+        "reason": None,  # placehold for field order in the JSON
+        "labels": labels,
         "run_id": run_id,
         "is_2d": is_2d,
-        "labels": labels,
         "higher_is_better": higher_is_better,
         "current_value": {"comparison_keys": current_comparison_keys, "value": value},
         "baseline_values": baseline_values_list,
@@ -261,7 +264,7 @@ def _run_regression_test(
     }
 
     if is_2d:
-        return _2d_relative_change_regression(
+        return _2d_auc_change_regression(
             base, value, higher_is_better, baseline_values_list, config.regression_config
         )
     else:
@@ -328,37 +331,99 @@ def _scalar_relative_change_regression(
     return result
 
 
-def _2d_relative_change_regression(
+def _2d_auc_change_regression(
     base: dict[str, Any],
     current_value: list,
     higher_is_better: bool,
     baseline_values_list: list[dict[str, Any]],
     regression_config: dict[str, Any],
 ) -> dict[str, Any]:
-    """2D curve regression: compare current curve against baseline curves.
+    """2D curve regression via AUC → scalar relative change.
 
-    Placeholder — algorithm not yet implemented.
-    baseline_values_list entries: {"comparison_keys": {...}, "value": [...]}
+    Converts each curve to a scalar Area Under Curve (trapezoidal rule),
+    then applies the same relative change test as SCALAR_RELATIVE_CHANGE.
+    baseline_values_list entries: {"comparison_keys": {...}, "value": [[x, y], ...]}
     """
-    config = regression_config.get(Algorithm.SCALAR_RELATIVE_CHANGE, {})
-    min_baseline_points = config.get("min_baseline_points", 1)
+    curve_config = regression_config.get(Algorithm.TWO_DIM_AUC_CHANGE, {})
+    min_baseline_points = curve_config.get("min_baseline_points", 1)
+    max_relative_regression = curve_config.get("max_relative_regression", 0.1)
 
-    if len(baseline_values_list) < min_baseline_points:
+    current_curve = current_value.get("data_points")
+    if not current_curve:
+        return {**base, "verdict": Verdict.SKIPPED, "reason": "no data points in the KPI"}
+
+    auc_baselines = [e for e in baseline_values_list if e and "data_points" in e["value"]]
+
+    if len(auc_baselines) < min_baseline_points:
         return {
             **base,
             "verdict": Verdict.SKIPPED,
-            "reason": f"insufficient baselines ({len(baseline_values_list)} < {min_baseline_points})",
+            "reason": f"insufficient curve baselines ({len(auc_baselines)} < {min_baseline_points})",
         }
 
-    return {
+    current_auc = _compute_auc(current_curve)
+
+    baseline_auc_entries = [
+        {
+            "value": round(_compute_auc(e["value"]["data_points"]), 6),
+            "comparison_keys": e["comparison_keys"],
+        }
+        for e in auc_baselines
+    ]
+    baseline_auc_values = [entry["value"] for entry in baseline_auc_entries]
+    baseline_mean_auc = sum(baseline_auc_values) / len(baseline_auc_values)
+
+    relative_change = (
+        0.0
+        if baseline_mean_auc == 0
+        else (current_auc - baseline_mean_auc) / abs(baseline_mean_auc)
+    )
+    regression = abs(relative_change) > abs(max_relative_regression)
+    reason = None
+    if regression:
+        direction = "decrease" if higher_is_better else "increase"
+        reason = (
+            f"AUC relative {direction} of {abs(relative_change * 100):.1f}% "
+            f"exceeds threshold {max_relative_regression * 100:.0f}%"
+        )
+
+    result = {
         **base,
-        "verdict": Verdict.PASS,
-        "reason": "curve regression not yet implemented",
+        "verdict": Verdict.REGRESSION if regression else Verdict.PASS,
         "details": {
-            "algorithm": Algorithm.TWO_DIM_RELATIVE_CHANGE,
-            "config": config,
+            "algorithm": Algorithm.TWO_DIM_AUC_CHANGE,
+            "current_auc": round(current_auc, 6),
+            "baseline_mean_auc": round(baseline_mean_auc, 6),
+            "baseline_aucs": baseline_auc_entries,
+            "relative_change": round(relative_change, 6),
+            "config": {"max_relative_regression": max_relative_regression},
         },
     }
+    if reason:
+        result["reason"] = reason
+    return result
+
+
+def _compute_auc(curve: list) -> float:
+    """Compute area under a curve using the trapezoidal rule.
+
+    Accepts a list of [x, y] pairs or {"x": ..., "y": ...} dicts.
+    Points are sorted by x before integration.
+    """
+
+    def _xy(point):
+        if isinstance(point, dict):
+            return float(point["x"]), float(point["y"])
+        return float(point[0]), float(point[1])
+
+    if len(curve) < 2:
+        return 0.0
+
+    points = sorted((_xy(p) for p in curve), key=lambda p: p[0])
+    return sum(
+        (points[i + 1][0] - points[i][0]) * (points[i][1] + points[i + 1][1]) / 2
+        for i in range(len(points) - 1)
+    )
 
 
 def _sort_results(results: list[dict[str, Any]], sorting_labels: list[str]) -> list[dict[str, Any]]:
@@ -385,8 +450,8 @@ def _summarize_label_sets(
     Returns:
       - comparison_labels: unique values per comparison key
       - ignored_labels: unique values per ignored key
-      - relevant_common_labels: labels whose value is identical across all test entries (as key=val string)
-      - relevant_distinct_labels: per-entry labels that differ (as key=val string), relevant entries only
+      - relevant_common_keys: labels whose value is identical across all test entries (as key=val string)
+      - relevant_distinct_keys: per-entry labels that differ (as key=val string), relevant entries only
     """
     all_labels = [test.get("labels", {}) for test in data.get("tests", [])]
 
@@ -425,11 +490,10 @@ def _summarize_label_sets(
         ]
         distinct_labels: list[str] = []
         for ls in seen_filtered:
-            for k, v in sorted(ls.items()):
+            for k in sorted(ls.keys()):
                 if k not in common_keys:
-                    entry = f"{k}={v}"
-                    if entry not in distinct_labels:
-                        distinct_labels.append(entry)
+                    if k not in distinct_labels:
+                        distinct_labels.append(k)
         distinct_labels.sort()
 
     else:
@@ -438,7 +502,7 @@ def _summarize_label_sets(
     return {
         "comparison_keys": sorted(f"{k}={v}" for k in comparison_labels for v in _unique_values(k)),
         "ignored_keys": sorted(f"{k}={v}" for k in ignored_labels for v in _unique_values(k)),
-        "relevant_common_labels": common,
+        "relevant_common_keys": common,
         "relevant_distinct_keys": distinct_keys,
         "relevant_distinct_labels": distinct_labels,
         "relevant_count": len(seen_filtered),
@@ -465,7 +529,7 @@ def _build_report(
     else:
         overall_status = OverallStatus.PASS
 
-    return {
+    report = {
         "analysis": {
             "status": overall_status,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -488,14 +552,22 @@ def _build_report(
             "total_tested": len(passes) + len(regressions),
             "total_skipped": len(skipped),
         },
-        "results": [r for r in results if r["verdict"] != Verdict.SKIPPED],
         "input_data": {
             "current_source": current_source,
             "baseline_sources": baseline_sources,
             "baseline_source_count": len(baseline_sources),
             "baseline_skipped": baseline_skipped,
         },
+        "results": passes,
+        "skipped": skipped,
     }
+
+    if not skipped:
+        report.pop("skipped")
+    if not baseline_skipped:
+        report["input_data"].pop("baseline_skipped")
+
+    return report
 
 
 def _log_baseline_miss(
@@ -657,6 +729,9 @@ def run_kpi_analysis(
                 _log_baseline_miss(rec.get("kpi_id"), mk, baseline_index)
 
             result = _run_regression_test(rec, baselines, config)
+            if not result.get("reason"):
+                result.pop("reason", ...)
+
             results.append(result)
 
         # Sort results
@@ -694,11 +769,25 @@ def run_kpi_analysis(
                     "irrelevant_keys": sorted(irrelevant_keys),
                 }
             )
+            if not unexpected_labels:
+                baseline_sources[-1].pop("unexpected_labels")
+            if not irrelevant_keys:
+                baseline_sources[-1].pop("irrelevant_keys")
 
         current_source = {
             "path": str(current_kpi_file),
             **_summarize_label_sets(current_data, config.comparison_labels, config.ignored_labels),
         }
+
+        if (irr_count := current_source.pop("irrelevant_count")) != 0:
+            logging.error(
+                f"Found {irr_count} irrelevant entries in the current_source. Expected 0."
+            )
+
+        if not baseline_skipped_totals["same_version"]:
+            baseline_skipped_totals.pop("same_version")
+        if not baseline_skipped_totals["duplicate"]:
+            baseline_skipped_totals.pop("duplicate")
 
         report = _build_report(
             results=results,
