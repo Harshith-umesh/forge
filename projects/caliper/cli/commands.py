@@ -599,7 +599,7 @@ def kpi_generate(
             sys.exit(3)
         else:
             # Proceed with KPI generation
-            run_kpi_generate(
+            rows = run_kpi_generate(
                 base_dir=artifact_root,
                 plugin_module=mod,
                 plugin=plugin,
@@ -611,6 +611,16 @@ def kpi_generate(
                 exclude_label_filter=exclude_filter,
                 verbose_parsing=verbose_parsing,
             )
+            if not rows:
+                status_data = {
+                    "success": False,
+                    "message": "No KPIs generated",
+                    "test_directories_count": test_dir_count,
+                    "test_directories": test_directories,
+                }
+                click.echo("❌ No KPIs generated", err=True)
+                sys.exit(3)
+
             status_data = {
                 "success": True,
                 "output_file": str(output),
