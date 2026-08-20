@@ -63,12 +63,6 @@ profile6:
 profile7:
   tests.rhaiis.workload_key: profile7
 
-custom:
-  tests.rhaiis.model_key: custom
-
-custom-profile:
-  tests.rhaiis.workload_key: custom
-
 # ── Models ──────────────────────────────────────────────────
 # Short aliases default to the FP8 variant where available.
 # Use the full name (e.g. llama-70b-w4a16) for other quants.
