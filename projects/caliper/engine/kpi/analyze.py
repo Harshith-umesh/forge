@@ -31,6 +31,12 @@ class OverallStatus(StrEnum):
     NO_TEST_PERFORMED = "NO_TEST_PERFORMED"
 
 
+class Algorithm(StrEnum):
+    """Regression testing algorithm identifier."""
+
+    SCALAR_RELATIVE_CHANGE = "SCALAR_RELATIVE_CHANGE"
+
+
 @dataclass
 class AnalysisConfig:
     """Configuration for KPI regression analysis.
@@ -241,49 +247,76 @@ def _run_regression_test(
         "ignore_keys": {k: raw_labels[k] for k in config.ignored_labels if k in raw_labels},
     }
 
+    current_comparison_keys = labels["comparison_keys"]
+
     scalar_baselines = [b for b in baselines if isinstance(b.get("value"), (int, float))]
-    baseline_values_list = [
-        {
-            "comparison_keys": {
-                k: b["labels"][k] for k in config.comparison_labels if k in b.get("labels", {})
-            },
-            "value": float(b["value"]),
-        }
-        for b in scalar_baselines
-    ]
+
+    # Filter scalar baselines: skip same-version and deduplicate by comparison keys
+    baseline_values_list: list[dict[str, Any]] = []
+    seen_comparison_keys: list[dict] = []
+    skipped_same_version = 0
+    skipped_duplicate = 0
+    for b in scalar_baselines:
+        b_labels = b.get("labels", {})
+        b_ck = {k: b_labels[k] for k in config.comparison_labels if k in b_labels}
+        if b_ck == current_comparison_keys:
+            skipped_same_version += 1
+            continue
+        if b_ck in seen_comparison_keys:
+            skipped_duplicate += 1
+            continue
+        seen_comparison_keys.append(b_ck)
+        baseline_values_list.append({"comparison_keys": b_ck, "value": float(b["value"])})
 
     base: dict[str, Any] = {
         "kpi_id": kpi_id,
         "run_id": run_id,
         "labels": labels,
         "higher_is_better": higher_is_better,
-        "baseline_count": len(scalar_baselines),
+        "current_value": None,  # place holder, for the key order in the JSON
         "baseline_values": baseline_values_list,
+        "baseline_count": len(baseline_values_list),
+        "_baseline_skipped": {"same_version": skipped_same_version, "duplicate": skipped_duplicate},
     }
-    reason = None
 
     if not isinstance(value, (int, float)):
         return {**base, "verdict": Verdict.SKIPPED, "reason": "non-scalar value"}
 
-    base["current_value"] = {"comparison_keys": labels["comparison_keys"], "value": float(value)}
+    base["current_value"] = {"comparison_keys": current_comparison_keys, "value": float(value)}
 
-    min_baseline_points = config.regression_config.get("min_baseline_points", 1)
-    max_relative_regression = config.regression_config.get("max_relative_regression", 0.1)
+    return _scalar_relative_change_regression(
+        base, value, higher_is_better, baseline_values_list, config.regression_config
+    )
 
-    if len(scalar_baselines) < min_baseline_points:
+
+def _scalar_relative_change_regression(
+    base: dict[str, Any],
+    current_value: float | int,
+    higher_is_better: bool,
+    baseline_values_list: list[dict[str, Any]],
+    regression_config: dict[str, Any],
+) -> dict[str, Any]:
+    """Scalar regression mechanism: compare current value against baseline mean via relative change."""
+
+    relative_change_config = regression_config.get(Algorithm.SCALAR_RELATIVE_CHANGE, {})
+    min_baseline_points = relative_change_config.get("min_baseline_points", 1)
+    max_relative_regression = relative_change_config.get("max_relative_regression", 0.1)
+
+    if len(baseline_values_list) < min_baseline_points:
         return {
             **base,
             "verdict": Verdict.SKIPPED,
-            "reason": f"insufficient baselines ({len(scalar_baselines)} < {min_baseline_points})",
+            "reason": f"insufficient baselines ({len(baseline_values_list)} < {min_baseline_points})",
         }
 
-    scalar_values = [float(b["value"]) for b in scalar_baselines]
+    scalar_values = [entry["value"] for entry in baseline_values_list]
     baseline_mean = sum(scalar_values) / len(scalar_values)
     relative_change = (
-        0.0 if baseline_mean == 0 else (float(value) - baseline_mean) / abs(baseline_mean)
+        0.0 if baseline_mean == 0 else (float(current_value) - baseline_mean) / abs(baseline_mean)
     )
 
     regression = abs(relative_change) > abs(max_relative_regression)
+    reason = None
 
     if regression:
         direction = "decrease" if higher_is_better else "increase"
@@ -292,18 +325,21 @@ def _run_regression_test(
             f"exceeds threshold {max_relative_regression * 100:.0f}%"
         )
 
-    if reason:
-        base["reason"] = reason
-
-    return {
+    result = {
         **base,
         "verdict": Verdict.REGRESSION if regression else Verdict.PASS,
         "details": {
+            "algorithm": Algorithm.SCALAR_RELATIVE_CHANGE,
             "baseline_mean": round(baseline_mean, 6),
             "relative_change": round(relative_change, 6),
             "config": {"max_relative_regression": max_relative_regression},
         },
     }
+
+    if reason:
+        result["reason"] = reason
+
+    return result
 
 
 def _sort_results(results: list[dict[str, Any]], sorting_labels: list[str]) -> list[dict[str, Any]]:
@@ -396,6 +432,7 @@ def _build_report(
     config: AnalysisConfig,
     current_source: dict[str, Any],
     baseline_sources: list[dict[str, Any]],
+    baseline_skipped: dict[str, int],
 ) -> dict[str, Any]:
     """Build the final report structure."""
     regressions = [r for r in results if r["verdict"] == Verdict.REGRESSION]
@@ -437,6 +474,7 @@ def _build_report(
             "current_source": current_source,
             "baseline_sources": baseline_sources,
             "baseline_source_count": len(baseline_sources),
+            "baseline_skipped": baseline_skipped,
         },
     }
 
@@ -596,6 +634,13 @@ def run_kpi_analysis(
             result = _run_regression_test(rec, baselines, config)
             results.append(result)
 
+        # Aggregate and strip internal baseline_skipped tracking
+        baseline_skipped_totals: dict[str, int] = {"same_version": 0, "duplicate": 0}
+        for result in results:
+            skipped = result.pop("_baseline_skipped", {})
+            baseline_skipped_totals["same_version"] += skipped.get("same_version", 0)
+            baseline_skipped_totals["duplicate"] += skipped.get("duplicate", 0)
+
         # Sort results
         results = _sort_results(results, config.sorting_labels)
 
@@ -642,6 +687,7 @@ def run_kpi_analysis(
             config=config,
             current_source=current_source,
             baseline_sources=baseline_sources,
+            baseline_skipped=baseline_skipped_totals,
         )
 
         # Write JSON report
