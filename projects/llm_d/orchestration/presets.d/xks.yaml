@@ -1,6 +1,6 @@
 __multiple: true
 
-cks-intelligent:
+xks-intelligent:
   extends:
   - cpt-xks
   - llama3-70b
@@ -13,7 +13,7 @@ cks-intelligent:
   - heavy-heterogeneous
   - multi-turn
 
-cks-pd:
+xks-pd:
   extends:
   - cpt-xks
   - gpt-oss
@@ -27,11 +27,21 @@ cks-pd:
   - heavy-heterogeneous
   - multi-turn
 
-cks-smoke:
+xks-smoke:
+  extends:
+  - cpt-xks
+
   runtime.deployment_profile:
   - intelligentrouting-tp1-x2
-  - simple-tp1-x1
+  - simple-tp1-x2
   - pd-d.x1-p.tp1-d.tp1-p.x1
 
   runtime.benchmark_key:
   - short
+
+xks-smoke-mini:
+  extends:
+  - xks-smoke
+
+  runtime.deployment_profile:
+  - intelligentrouting-tp1-x1
