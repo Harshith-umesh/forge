@@ -35,7 +35,7 @@ class AnalysisConfig:
     """Configuration for KPI regression analysis.
 
     comparison_keys: Label keys that define what we compare against.
-        Records must differ on at least one comparison key to be distinct baselines.
+        Records must differ on at least one comparison key to be relevant baselines.
         E.g. ["version"] means we test the current version against other versions.
     ignored_keys: Label keys excluded when matching current to baseline records.
         E.g. ["os"] means we match across operating systems.
@@ -66,7 +66,7 @@ class KpiTestResult:
     relative_change: float | None = None
     higher_is_better: bool | None = None
     baseline_count: int = 0
-    baseline_values: dict[str, float] = field(default_factory=dict)
+    baseline_values: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -195,20 +195,46 @@ def _extract_kpi_records_from_hierarchical(data: dict[str, Any]) -> list[dict[st
     return records
 
 
+def _is_relevant_baseline(
+    labels: dict[str, Any],
+    current_label_values: dict[str, set[str]],
+    excluded_labels: set[str],
+) -> bool:
+    """Return True if a baseline entry is relevant to the current data.
+
+    A baseline entry is irrelevant if:
+    - It has a label key absent from the current data (unexpected label), or
+    - For a non-excluded key, its value does not appear in the current data.
+    """
+    for k, v in labels.items():
+        if k not in current_label_values:
+            return False
+        if k in excluded_labels:
+            continue
+        if str(v) not in current_label_values[k]:
+            return False
+    return True
+
+
 def _build_baseline_index(
     baseline_kpi_data: dict[Path, dict[str, Any]],
     config: AnalysisConfig,
+    current_label_values: dict[str, set[str]],
 ) -> dict[tuple, list[dict[str, Any]]]:
     """Index baseline records by (kpi_id, match_key) for fast lookup.
 
+    Records with unexpected labels or irrelevant values are excluded.
     Returns mapping from (kpi_id, match_key) -> list of baseline records.
     """
+    excluded_labels = set(config.ignored_keys) | set(config.comparison_keys)
     index: dict[tuple, list[dict[str, Any]]] = {}
     for _path, data in baseline_kpi_data.items():
         records = _extract_kpi_records_from_hierarchical(data)
         for rec in records:
-            kpi_id = rec.get("kpi_id")
             labels = rec.get("labels", {})
+            if not _is_relevant_baseline(labels, current_label_values, excluded_labels):
+                continue
+            kpi_id = rec.get("kpi_id")
             mk = _match_key(labels, config.ignored_keys, config.comparison_keys)
             key = (kpi_id, mk)
             index.setdefault(key, []).append(rec)
@@ -226,21 +252,18 @@ def _run_regression_test(
     baseline_values = [float(b["value"]) for b in baselines if b.get("value") is not None]
     baseline_mean = sum(baseline_values) / len(baseline_values)
 
-    # Build baseline values mapping by comparison flags
-    baseline_values_by_comparison = {}
+    # Build baseline values list with comparison labels and value
+    baseline_values_by_comparison: list[dict[str, Any]] = []
     for baseline in baselines:
-        if baseline.get("value") is not None:
-            baseline_value = float(baseline["value"])
-            baseline_labels = baseline.get("labels", {})
-
-            # Create comparison flag from comparison_keys
-            comparison_parts = []
-            for key in config.comparison_keys:
-                if key in baseline_labels:
-                    comparison_parts.append(f"{key}={baseline_labels[key]}")
-
-            comparison_flag = ", ".join(comparison_parts) if comparison_parts else "default"
-            baseline_values_by_comparison[comparison_flag] = baseline_value
+        if baseline.get("value") is None:
+            continue
+        baseline_labels = baseline.get("labels", {})
+        comparison_labels = {
+            k: baseline_labels[k] for k in config.comparison_keys if k in baseline_labels
+        }
+        baseline_values_by_comparison.append(
+            {"comparison_labels": comparison_labels, "value": float(baseline["value"])}
+        )
 
     if baseline_mean == 0:
         relative_change = 0.0
@@ -294,14 +317,15 @@ def _summarize_label_sets(
     data: dict[str, Any],
     comparison_keys: list[str],
     ignored_keys: list[str],
+    current_label_values: dict[str, set[str]] | None = None,
 ) -> dict[str, Any]:
     """Summarize label sets found in a hierarchical KPI doc.
 
     Returns:
       - comparison_keys: unique values per comparison key
       - ignored_keys: unique values per ignored key
-      - common_labels: labels whose value is identical across all test entries (as key=val string)
-      - distinct_labels: per-entry labels that differ (as key=val string), excluding ignored keys
+      - relevant_common_labels: labels whose value is identical across all test entries (as key=val string)
+      - relevant_distinct_labels: per-entry labels that differ (as key=val string), relevant entries only
     """
     all_labels = [test.get("labels", {}) for test in data.get("tests", [])]
 
@@ -313,12 +337,19 @@ def _summarize_label_sets(
                 seen.append(val)
         return sorted(seen)
 
-    # Common / distinct (excluding ignored keys)
+    # For relevant_labels, keep only relevant entries and exclude ignored keys
     ignored = set(ignored_keys)
+    excluded_labels = ignored | set(comparison_keys)
+    seen_all = []
     seen_filtered = []
     for labels in all_labels:
         filtered = {k: v for k, v in labels.items() if k not in ignored}
-        if filtered not in seen_filtered:
+        if filtered and filtered not in seen_all:
+            seen_all.append(filtered)
+        if current_label_values is not None:
+            if not _is_relevant_baseline(labels, current_label_values, excluded_labels):
+                continue
+        if filtered and filtered not in seen_filtered:
             seen_filtered.append(filtered)
 
     if seen_filtered:
@@ -326,19 +357,31 @@ def _summarize_label_sets(
         common_keys = {
             k for k in all_keys if all(ls.get(k) == seen_filtered[0].get(k) for ls in seen_filtered)
         }
-        common = ",".join(f"{k}={seen_filtered[0][k]}" for k in sorted(common_keys))
-        distinct = [
+        common = [f"{k}={seen_filtered[0][k]}" for k in sorted(common_keys)]
+        distinct_keys = [
             ",".join(f"{k}={v}" for k, v in sorted(ls.items()) if k not in common_keys)
             for ls in seen_filtered
         ]
+        distinct_labels: list[str] = []
+        for ls in seen_filtered:
+            for k, v in sorted(ls.items()):
+                if k not in common_keys:
+                    entry = f"{k}={v}"
+                    if entry not in distinct_labels:
+                        distinct_labels.append(entry)
+        distinct_labels.sort()
+
     else:
-        common, distinct = "", []
+        common, distinct_keys, distinct_labels = [], [], []
 
     return {
-        "comparison_keys": {k: _unique_values(k) for k in comparison_keys},
-        "ignored_keys": {k: _unique_values(k) for k in ignored_keys},
-        "common_labels": common,
-        "distinct_labels": distinct,
+        "comparison_labels": sorted(f"{k}={v}" for k in comparison_keys for v in _unique_values(k)),
+        "ignored_labels": sorted(f"{k}={v}" for k in ignored_keys for v in _unique_values(k)),
+        "relevant_common_labels": common,
+        "relevant_distinct_keys": distinct_keys,
+        "relevant_distinct_labels": distinct_labels,
+        "relevant_count": len(seen_filtered),
+        "irrelevant_count": len(seen_all) - len(seen_filtered),
     }
 
 
@@ -361,6 +404,7 @@ def _build_report(
         overall_status = OverallStatus.PASS
 
     def _serialize_result(r: KpiTestResult) -> dict[str, Any]:
+        comparison_labels = {k: r.labels[k] for k in config.comparison_keys if k in r.labels}
         entry: dict[str, Any] = {
             "kpi_id": r.kpi_id,
             "labels": r.labels,
@@ -369,7 +413,10 @@ def _build_report(
         if r.reason:
             entry["reason"] = r.reason
         if r.current_value is not None:
-            entry["current_value"] = r.current_value
+            entry["current_value"] = {
+                "comparison_labels": comparison_labels,
+                "value": r.current_value,
+            }
         if r.baseline_values:
             entry["baseline_values"] = r.baseline_values
         if r.verdict != Verdict.SKIPPED:
@@ -385,8 +432,8 @@ def _build_report(
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         },
         "config": {
-            "comparison_keys": config.comparison_keys,
-            "ignored_keys": config.ignored_keys,
+            "comparison_labels": config.comparison_keys,
+            "ignored_labels": config.ignored_keys,
             "sorting_keys": config.sorting_keys,
             "max_relative_regression": config.max_relative_regression,
             "min_baseline_points": config.min_baseline_points,
@@ -410,6 +457,37 @@ def _build_report(
             "total_skipped": len(skipped),
         },
     }
+
+
+def _log_baseline_miss(
+    kpi_id: str,
+    current_mk: tuple,
+    baseline_index: dict[tuple, list[dict[str, Any]]],
+) -> None:
+    """Log why no baseline matched for a KPI record."""
+    candidate_keys = [k for k in baseline_index if k[0] == kpi_id]
+    logger.debug("")
+    if not candidate_keys:
+        logger.debug("  No baseline entry at all for kpi_id=%r", kpi_id)
+        return
+
+    current_mk_dict = dict(current_mk)
+    logger.debug("  kpi_id=%r: no match. current match_key=\n%s", kpi_id, current_mk_dict)
+
+    for ck in candidate_keys:
+        baseline_mk_dict = dict(ck[1])
+        in_baseline_not_current = {
+            k: v for k, v in baseline_mk_dict.items() if current_mk_dict.get(k) != v
+        }
+        in_current_not_baseline = {
+            k: v for k, v in current_mk_dict.items() if baseline_mk_dict.get(k) != v
+        }
+        logger.debug(
+            "    candidate=\n%s\n| baseline_differs=\n%s\n| current_differs=\n%s",
+            baseline_mk_dict,
+            in_baseline_not_current,
+            in_current_not_baseline,
+        )
 
 
 def run_kpi_analysis(
@@ -512,8 +590,14 @@ def run_kpi_analysis(
                 "completed_at": time.time(),
             }, None
 
-        # Build baseline index
-        baseline_index = _build_baseline_index(baseline_kpi_data, config)
+        # Build label universe from current data for baseline filtering
+        current_label_values: dict[str, set[str]] = {}
+        for test in current_data.get("tests", []):
+            for k, v in test.get("labels", {}).items():
+                current_label_values.setdefault(k, set()).add(str(v))
+
+        # Build baseline index (irrelevant entries are filtered out)
+        baseline_index = _build_baseline_index(baseline_kpi_data, config, current_label_values)
 
         # Run regression tests
         results: list[KpiTestResult] = []
@@ -527,21 +611,23 @@ def run_kpi_analysis(
             key = (kpi_id, mk)
 
             baselines = baseline_index.get(key, [])
+
+            if not baselines:
+                _log_baseline_miss(kpi_id, mk, baseline_index)
+
             # Filter to only scalar baselines
             scalar_baselines = [b for b in baselines if isinstance(b.get("value"), (int, float))]
 
-            # Build baseline values map now so SKIPPED entries can show what was available
-            baseline_values_by_comparison: dict[str, float] = {}
+            # Build baseline values list now so SKIPPED entries can show what was available
+            baseline_values_by_comparison: list[dict[str, Any]] = []
             for baseline in scalar_baselines:
-                baseline_value = float(baseline["value"])
                 baseline_labels = baseline.get("labels", {})
-                comparison_parts = [
-                    f"{k}={baseline_labels[k]}"
-                    for k in config.comparison_keys
-                    if k in baseline_labels
-                ]
-                comparison_flag = ", ".join(comparison_parts) if comparison_parts else "default"
-                baseline_values_by_comparison[comparison_flag] = baseline_value
+                comparison_labels = {
+                    k: baseline_labels[k] for k in config.comparison_keys if k in baseline_labels
+                }
+                baseline_values_by_comparison.append(
+                    {"comparison_labels": comparison_labels, "value": float(baseline["value"])}
+                )
 
             # Skip non-scalar values (2D KPIs, lists, etc.) — after gathering historical values
             if not isinstance(value, (int, float)):
@@ -578,10 +664,37 @@ def run_kpi_analysis(
         results = _sort_results(results, config.sorting_keys)
 
         # Build report
+        excluded_labels = set(config.ignored_keys) | set(config.comparison_keys)
         baseline_sources = []
         for path, data in baseline_kpi_data.items():
-            summary = _summarize_label_sets(data, config.comparison_keys, config.ignored_keys)
-            baseline_sources.append({"path": str(path), **summary})
+            summary = _summarize_label_sets(
+                data, config.comparison_keys, config.ignored_keys, current_label_values
+            )
+
+            unexpected_labels: list[str] = []
+            irrelevant_label_values: list[str] = []
+            for test in data.get("tests", []):
+                for k, v in test.get("labels", {}).items():
+                    if k not in current_label_values:
+                        if k not in unexpected_labels:
+                            unexpected_labels.append(k)
+                        continue
+                    if k in excluded_labels:
+                        continue
+                    sv = str(v)
+                    if sv not in current_label_values[k]:
+                        entry = f"{k}={sv}"
+                        if entry not in irrelevant_label_values:
+                            irrelevant_label_values.append(entry)
+
+            baseline_sources.append(
+                {
+                    "path": str(path),
+                    **summary,
+                    "unexpected_labels": sorted(unexpected_labels),
+                    "irrelevant_label_values": sorted(irrelevant_label_values),
+                }
+            )
 
         current_source = {
             "path": str(current_kpi_file),
