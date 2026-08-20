@@ -238,9 +238,16 @@ class Config:
     def get_preset(self, name):
         return self.config["presets"].get(name)
 
-    def apply_presets_from_project_args(self):
+    def apply_presets_from_project_args(self, *, lenient=False):
         for arg_name in self.get_config("project.args", print=False) or []:
-            self.apply_preset(arg_name)
+            try:
+                self.apply_preset(arg_name)
+            except Exception as e:
+                if not lenient:
+                    raise
+                logger.warning(
+                    "apply_presets_from_project_args: failed to apply preset %r: %s", arg_name, e
+                )
 
     def apply_presets_from_cluster_config(self):
         """Apply cluster-specific configuration if ci_job.cluster matches cluster_config keys."""
@@ -585,10 +592,16 @@ def init(orchestration_dir, *, apply_config_overrides=True):
     presets_applied_file.parent.mkdir(parents=True, exist_ok=True)
     presets_applied_file.touch(exist_ok=True)
 
-    project.apply_config_overrides()
-    project.apply_presets_from_project_args()
+    import sys
+
+    lenient_presets = len(sys.argv) > 1 and sys.argv[1] == "resolve-fournos-config"
+
+    project.apply_config_overrides(ignore_not_found=lenient_presets)
+    project.apply_presets_from_project_args(lenient=lenient_presets)
     project.apply_presets_from_cluster_config()
-    project.apply_config_overrides()  # reapply so that the value overrides are applied last
+    project.apply_config_overrides(
+        ignore_not_found=lenient_presets
+    )  # reapply so that the value overrides are applied last
 
 
 def reload(orchestration_dir, *, apply_config_overrides=True):
