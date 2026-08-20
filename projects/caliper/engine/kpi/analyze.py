@@ -39,6 +39,7 @@ class Algorithm(StrEnum):
     """Regression testing algorithm identifier."""
 
     SCALAR_RELATIVE_CHANGE = "SCALAR_RELATIVE_CHANGE"
+    TWO_DIM_RELATIVE_CHANGE = "2D_RELATIVE_CHANGE"
 
 
 @dataclass
@@ -184,14 +185,18 @@ def _build_baseline_index(
     baseline_kpi_data: dict[Path, dict[str, Any]],
     config: AnalysisConfig,
     current_keys: dict[str, set[str]],
-) -> dict[tuple, list[dict[str, Any]]]:
+) -> dict[tuple, dict[frozenset, dict[str, Any]]]:
     """Index baseline records by (kpi_id, match_key) for fast lookup.
 
     Records with unexpected labels or irrelevant values are excluded.
-    Returns mapping from (kpi_id, match_key) -> list of baseline records.
+    Deduplication by comparison keys: only one record per unique comparison
+    key combination is kept (last one wins across baseline files).
+
+    Returns mapping from (kpi_id, match_key) -> {comparison_keys_frozenset: record}.
+    Same-version entries are excluded at query time by the caller.
     """
     excluded_labels = set(config.ignored_labels) | set(config.comparison_labels)
-    index: dict[tuple, list[dict[str, Any]]] = {}
+    index: dict[tuple, dict[frozenset, dict[str, Any]]] = {}
     for _path, data in baseline_kpi_data.items():
         records = _extract_kpi_records_from_hierarchical(data)
         for rec in records:
@@ -200,8 +205,8 @@ def _build_baseline_index(
                 continue
             kpi_id = rec.get("kpi_id")
             mk = _match_key(labels, config.ignored_labels, config.comparison_labels)
-            key = (kpi_id, mk)
-            index.setdefault(key, []).append(rec)
+            ck = frozenset((k, labels[k]) for k in config.comparison_labels if k in labels)
+            index.setdefault((kpi_id, mk), {})[ck] = rec
     return index
 
 
@@ -220,6 +225,7 @@ def _run_regression_test(
     raw_labels = current.get("labels", {})
     value = current.get("value")
     higher_is_better = current.get("higher_is_better", True)
+    is_2d = current.get("is_2d", False)
 
     ignored = set(config.ignored_labels)
     comparison = set(config.comparison_labels)
@@ -233,44 +239,35 @@ def _run_regression_test(
 
     current_comparison_keys = labels["comparison_keys"]
 
-    scalar_baselines = [b for b in baselines if isinstance(b.get("value"), (int, float))]
-
-    # Filter scalar baselines: skip same-version and deduplicate by comparison keys
-    baseline_values_list: list[dict[str, Any]] = []
-    seen_comparison_keys: list[dict] = []
-    skipped_same_version = 0
-    skipped_duplicate = 0
-    for b in scalar_baselines:
-        b_labels = b.get("labels", {})
-        b_ck = {k: b_labels[k] for k in config.comparison_labels if k in b_labels}
-        if b_ck == current_comparison_keys:
-            skipped_same_version += 1
-            continue
-        if b_ck in seen_comparison_keys:
-            skipped_duplicate += 1
-            continue
-        seen_comparison_keys.append(b_ck)
-        baseline_values_list.append({"comparison_keys": b_ck, "value": float(b["value"])})
+    baseline_values_list = [
+        {
+            "comparison_keys": {
+                k: b["labels"][k] for k in config.comparison_labels if k in b.get("labels", {})
+            },
+            "value": b["value"],
+        }
+        for b in baselines
+    ]
 
     base: dict[str, Any] = {
         "kpi_id": kpi_id,
         "run_id": run_id,
+        "is_2d": is_2d,
         "labels": labels,
         "higher_is_better": higher_is_better,
-        "current_value": None,  # place holder, for the key order in the JSON
+        "current_value": {"comparison_keys": current_comparison_keys, "value": value},
         "baseline_values": baseline_values_list,
         "baseline_count": len(baseline_values_list),
-        "_baseline_skipped": {"same_version": skipped_same_version, "duplicate": skipped_duplicate},
     }
 
-    if not isinstance(value, (int, float)):
-        return {**base, "verdict": Verdict.SKIPPED, "reason": "non-scalar value"}
-
-    base["current_value"] = {"comparison_keys": current_comparison_keys, "value": float(value)}
-
-    return _scalar_relative_change_regression(
-        base, value, higher_is_better, baseline_values_list, config.regression_config
-    )
+    if is_2d:
+        return _2d_relative_change_regression(
+            base, value, higher_is_better, baseline_values_list, config.regression_config
+        )
+    else:
+        return _scalar_relative_change_regression(
+            base, value, higher_is_better, baseline_values_list, config.regression_config
+        )
 
 
 def _scalar_relative_change_regression(
@@ -286,14 +283,19 @@ def _scalar_relative_change_regression(
     min_baseline_points = relative_change_config.get("min_baseline_points", 1)
     max_relative_regression = relative_change_config.get("max_relative_regression", 0.1)
 
-    if len(baseline_values_list) < min_baseline_points:
+    scalar_entries = [e for e in baseline_values_list if isinstance(e["value"], (int, float))]
+
+    if not isinstance(current_value, (int, float)):
+        return {**base, "verdict": Verdict.SKIPPED, "reason": "non-scalar current value"}
+
+    if len(scalar_entries) < min_baseline_points:
         return {
             **base,
             "verdict": Verdict.SKIPPED,
-            "reason": f"insufficient baselines ({len(baseline_values_list)} < {min_baseline_points})",
+            "reason": f"insufficient baselines ({len(scalar_entries)} < {min_baseline_points})",
         }
 
-    scalar_values = [entry["value"] for entry in baseline_values_list]
+    scalar_values = [entry["value"] for entry in scalar_entries]
     baseline_mean = sum(scalar_values) / len(scalar_values)
     relative_change = (
         0.0 if baseline_mean == 0 else (float(current_value) - baseline_mean) / abs(baseline_mean)
@@ -324,6 +326,39 @@ def _scalar_relative_change_regression(
         result["reason"] = reason
 
     return result
+
+
+def _2d_relative_change_regression(
+    base: dict[str, Any],
+    current_value: list,
+    higher_is_better: bool,
+    baseline_values_list: list[dict[str, Any]],
+    regression_config: dict[str, Any],
+) -> dict[str, Any]:
+    """2D curve regression: compare current curve against baseline curves.
+
+    Placeholder — algorithm not yet implemented.
+    baseline_values_list entries: {"comparison_keys": {...}, "value": [...]}
+    """
+    config = regression_config.get(Algorithm.SCALAR_RELATIVE_CHANGE, {})
+    min_baseline_points = config.get("min_baseline_points", 1)
+
+    if len(baseline_values_list) < min_baseline_points:
+        return {
+            **base,
+            "verdict": Verdict.SKIPPED,
+            "reason": f"insufficient baselines ({len(baseline_values_list)} < {min_baseline_points})",
+        }
+
+    return {
+        **base,
+        "verdict": Verdict.PASS,
+        "reason": "curve regression not yet implemented",
+        "details": {
+            "algorithm": Algorithm.TWO_DIM_RELATIVE_CHANGE,
+            "config": config,
+        },
+    }
 
 
 def _sort_results(results: list[dict[str, Any]], sorting_labels: list[str]) -> list[dict[str, Any]]:
@@ -466,7 +501,7 @@ def _build_report(
 def _log_baseline_miss(
     kpi_id: str,
     current_mk: tuple,
-    baseline_index: dict[tuple, list[dict[str, Any]]],
+    baseline_index: dict[tuple, dict[frozenset, dict[str, Any]]],
 ) -> None:
     """Log why no baseline matched for a KPI record."""
     candidate_keys = [k for k in baseline_index if k[0] == kpi_id]
@@ -478,8 +513,8 @@ def _log_baseline_miss(
     current_mk_dict = dict(current_mk)
     logger.debug("  kpi_id=%r: no match. current match_key=\n%s", kpi_id, current_mk_dict)
 
-    for ck in candidate_keys:
-        baseline_mk_dict = dict(ck[1])
+    for _, baseline_mk in candidate_keys:
+        baseline_mk_dict = dict(baseline_mk)
         in_baseline_not_current = {
             k: v for k, v in baseline_mk_dict.items() if current_mk_dict.get(k) != v
         }
@@ -606,24 +641,23 @@ def run_kpi_analysis(
         # Run regression tests
         results: list[dict[str, Any]] = []
 
+        baseline_skipped_totals: dict[str, int] = {"same_version": 0, "duplicate": 0}
+
         for rec in current_records:
             labels = rec.get("labels", {})
             mk = _match_key(labels, config.ignored_labels, config.comparison_labels)
             key = (rec.get("kpi_id"), mk)
 
-            baselines = baseline_index.get(key, [])
+            current_ck = frozenset((k, labels[k]) for k in config.comparison_labels if k in labels)
+            baseline_dict = baseline_index.get(key, {})
+            baselines = [r for ck, r in baseline_dict.items() if ck != current_ck]
+            baseline_skipped_totals["same_version"] += len(baseline_dict) - len(baselines)
+
             if not baselines:
                 _log_baseline_miss(rec.get("kpi_id"), mk, baseline_index)
 
             result = _run_regression_test(rec, baselines, config)
             results.append(result)
-
-        # Aggregate and strip internal baseline_skipped tracking
-        baseline_skipped_totals: dict[str, int] = {"same_version": 0, "duplicate": 0}
-        for result in results:
-            skipped = result.pop("_baseline_skipped", {})
-            baseline_skipped_totals["same_version"] += skipped.get("same_version", 0)
-            baseline_skipped_totals["duplicate"] += skipped.get("duplicate", 0)
 
         # Sort results
         results = _sort_results(results, config.sorting_labels)
@@ -853,9 +887,7 @@ def _convert_v1_to_v2(v1_records: list[dict]) -> dict:
             "labels": labels,
         }
 
-        # Determine if higher is better from labels or default to false
-        higher_is_better = labels.get("higher_is_better", False)
-        metric_entry["higher_is_better"] = higher_is_better
+        metric_entry["higher_is_better"] = record.get("higher_is_better", False)
 
         metrics[metric_name] = metric_entry
 
