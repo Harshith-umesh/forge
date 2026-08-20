@@ -18,6 +18,7 @@ class Verdict(StrEnum):
 
     PASS = "PASS"
     REGRESSION = "REGRESSION"
+    IMPROVEMENT = "IMPROVEMENT"
     SKIPPED = "SKIPPED"
 
 
@@ -47,8 +48,7 @@ class AnalysisConfig:
     comparison_labels: list[str] = field(default_factory=list)
     ignored_labels: list[str] = field(default_factory=list)
     sorting_labels: list[str] = field(default_factory=list)
-    max_relative_regression: float = 0.1
-    min_baseline_points: int = 1
+    regression_config: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -134,18 +134,10 @@ def _validate_analysis_config(config: AnalysisConfig, plugin_module: str) -> Non
                     f"must contain only strings, got {type(item).__name__} at index {i}: {item}"
                 )
 
-    # Validate max_relative_regression is numeric
-    if not isinstance(config.max_relative_regression, (int, float)):
+    if not isinstance(config.regression_config, dict):
         raise ValueError(
-            f"Plugin module '{plugin_module}' analysis config field 'max_relative_regression' "
-            f"must be numeric, got {type(config.max_relative_regression).__name__}: {config.max_relative_regression}"
-        )
-
-    # Validate min_baseline_points is at least 1
-    if not isinstance(config.min_baseline_points, int) or config.min_baseline_points < 1:
-        raise ValueError(
-            f"Plugin module '{plugin_module}' analysis config field 'min_baseline_points' "
-            f"must be an integer >= 1, got {type(config.min_baseline_points).__name__}: {config.min_baseline_points}"
+            f"Plugin module '{plugin_module}' analysis config field 'regression_config' "
+            f"must be a dict, got {type(config.regression_config).__name__}"
         )
 
 
@@ -268,17 +260,21 @@ def _run_regression_test(
         "baseline_count": len(scalar_baselines),
         "baseline_values": baseline_values_list,
     }
+    reason = None
 
     if not isinstance(value, (int, float)):
         return {**base, "verdict": Verdict.SKIPPED, "reason": "non-scalar value"}
 
-    base["current_value"] = float(value)
+    base["current_value"] = {"comparison_keys": labels["comparison_keys"], "value": float(value)}
 
-    if len(scalar_baselines) < config.min_baseline_points:
+    min_baseline_points = config.regression_config.get("min_baseline_points", 1)
+    max_relative_regression = config.regression_config.get("max_relative_regression", 0.1)
+
+    if len(scalar_baselines) < min_baseline_points:
         return {
             **base,
             "verdict": Verdict.SKIPPED,
-            "reason": f"insufficient baselines ({len(scalar_baselines)} < {config.min_baseline_points})",
+            "reason": f"insufficient baselines ({len(scalar_baselines)} < {min_baseline_points})",
         }
 
     scalar_values = [float(b["value"]) for b in scalar_baselines]
@@ -287,27 +283,25 @@ def _run_regression_test(
         0.0 if baseline_mean == 0 else (float(value) - baseline_mean) / abs(baseline_mean)
     )
 
-    if higher_is_better:
-        regression = relative_change < -config.max_relative_regression
-    else:
-        regression = relative_change > config.max_relative_regression
+    regression = abs(relative_change) > abs(max_relative_regression)
 
     if regression:
         direction = "decrease" if higher_is_better else "increase"
         reason = (
             f"relative {direction} of {abs(relative_change * 100):.1f}% "
-            f"exceeds threshold {config.max_relative_regression * 100:.0f}%"
+            f"exceeds threshold {max_relative_regression * 100:.0f}%"
         )
-    else:
-        reason = ""
+
+    if reason:
+        base["reason"] = reason
 
     return {
         **base,
         "verdict": Verdict.REGRESSION if regression else Verdict.PASS,
-        "reason": reason,
         "details": {
             "baseline_mean": round(baseline_mean, 6),
             "relative_change": round(relative_change, 6),
+            "config": {"max_relative_regression": max_relative_regression},
         },
     }
 
@@ -424,13 +418,7 @@ def _build_report(
             "comparison_labels": config.comparison_labels,
             "ignored_labels": config.ignored_labels,
             "sorting_labels": config.sorting_labels,
-            "max_relative_regression": config.max_relative_regression,
-            "min_baseline_points": config.min_baseline_points,
-        },
-        "processed": {
-            "current_source": current_source,
-            "baseline_sources": baseline_sources,
-            "baseline_source_count": len(baseline_sources),
+            "regression_config": config.regression_config,
         },
         "tested": {
             "total_kpis": len(results),
@@ -438,12 +426,17 @@ def _build_report(
             "regression": len(regressions),
             "skipped": len(skipped),
         },
-        "results": [r for r in results if r["verdict"] != Verdict.SKIPPED],
         "overall": {
             "verdict": overall_status,
             "regression_count": len(regressions),
             "total_tested": len(passes) + len(regressions),
             "total_skipped": len(skipped),
+        },
+        "results": [r for r in results if r["verdict"] != Verdict.SKIPPED],
+        "input_data": {
+            "current_source": current_source,
+            "baseline_sources": baseline_sources,
+            "baseline_source_count": len(baseline_sources),
         },
     }
 
