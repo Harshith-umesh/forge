@@ -106,7 +106,7 @@ def format_postprocess_status_notification(
                 lines.append(f"  > {step_result.reason}")
 
             # Add specific file links for certain steps
-            if step_result.status == "success" and get_file_link:
+            if get_file_link:
                 if (
                     step_name == "artifacts_to_kpis"
                     and hasattr(step_result, "output_file")
