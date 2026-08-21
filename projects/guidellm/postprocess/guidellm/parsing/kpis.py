@@ -216,7 +216,7 @@ class GuideLLMKpiHandler:
             "cluster": "metrics.cluster",
             "deployment_profile": "metrics.deployment_profile",
             "model_name": "metrics.model_name",
-            "load_shape": "metrics.benchmark_key",
+            "guidellm_loadshape": "metrics.benchmark_key",
         }
 
         for label_key, path in artifact_fields.items():
