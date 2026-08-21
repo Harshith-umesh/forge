@@ -415,32 +415,23 @@ def run_analyse_kpis(
             step_logs_dir=step_logs_dir,
         )
 
-        # Check success condition, accounting for regression override
-        # Regression detection with exit code 3 is considered successful analysis
-        regression_analysis_success = (
-            result.returncode == 3
-            and status_data.get("regressions_detected")
-            and "output_file" in status_data
-        )
+        orchestration_success = result.returncode == 0 and status_data.get("success")
 
-        orchestration_success = (
-            result.returncode == 0 and status_data.get("success")
-        ) or regression_analysis_success
+        summary_fields = [
+            "success",
+            "regressions_detected",
+            "baseline_source_count",
+            "tested",
+            "overall",
+        ]
+        analysis_summary = {k: v for k, v in status_data.items() if k in summary_fields}
 
         if not orchestration_success:
-            # Include only summary data in failure case too
-            summary_fields = [
-                "success",
-                "regressions_detected",
-                "baseline_source_count",
-                "tested",
-                "overall",
-            ]
-            analysis_summary = {k: v for k, v in status_data.items() if k in summary_fields}
-
+            fail_on_regression = postprocess_config.analyze.fail_on_regression
+            non_success_status = "failed" if fail_on_regression else "warning"
             return {
-                "status": "failed",
-                "error": status_data.get("error", "Unknown error"),
+                "status": non_success_status,
+                "message": status_data.get("error") or status_data.get("message", "Unknown error"),
                 "completed_at": time.time(),
                 "log_file": log_file,
                 **analysis_summary,
