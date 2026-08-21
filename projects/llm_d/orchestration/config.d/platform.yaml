@@ -80,7 +80,7 @@ gateway:
   namespace: openshift-ingress
   name: openshift-ai-inference
   gateway_class_name: data-science-gateway-class
-  status_address_name: gateway-external
+  status_address_name: gateway-internal
   create_if_missing: true
 
 inference_service:
