@@ -1300,7 +1300,10 @@ class CaliperPostprocessOrchestrator:
                 result["status"] = "success"
                 logger.info("fail_on_regression is not set, setting the status to 'success'")
 
-        self._check_step_result_and_set_failure("analyse_kpis", result)
+        if not self.config.analyze.fail_on_regression:
+            logger.info("analyse_kpis warning ignored: fail_on_regression is not set")
+        else:
+            self._check_step_result_and_set_failure("analyse_kpis", result)
 
     def _run_s3_export_step(self, output_dir: Path) -> None:
         """Execute the S3 export step."""
