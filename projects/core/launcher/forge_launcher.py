@@ -408,19 +408,19 @@ def cli(ctx, verbose):
     ctx.obj["launcher"] = ForgeLauncher(verbose)
 
 
-@cli.command()
+@cli.command("build-image")
 @click.option("--extra-packages", "-p", multiple=True, help="Extra packages to install")
 @click.pass_context
-def build(ctx, extra_packages):
+def build_image(ctx, extra_packages):
     """Build the FORGE container image."""
     launcher = ctx.obj["launcher"]
     sys.exit(launcher.build_image(list(extra_packages)))
 
 
-@cli.command()
+@cli.command("build-toolbx")
 @click.pass_context
-def recreate(ctx):
-    """Recreate the FORGE toolbox container."""
+def build_toolbx(ctx):
+    """Build the FORGE toolbox container."""
     launcher = ctx.obj["launcher"]
     sys.exit(launcher.recreate_container())
 
@@ -510,7 +510,7 @@ def status(ctx):
         click.echo(f"📦 Container Image: ✅ {image_name} available")
     else:
         click.echo(f"📦 Container Image: ❌ {image_name} not found")
-        click.echo("   💡 Run 'build' to create the image")
+        click.echo("   💡 Run 'build-image' to create the image")
 
     # Check container
     container_name = launcher.config["forge_toolbox_name"]
@@ -518,7 +518,7 @@ def status(ctx):
         click.echo(f"🏗️  Container: ✅ {container_name} exists")
     else:
         click.echo(f"🏗️  Container: ❌ {container_name} not found")
-        click.echo("   💡 Run 'recreate' to create the container")
+        click.echo("   💡 Run 'build-toolbx' to create the container")
 
     # Check Containerfile
     containerfile = Path(launcher.config["container_file"])
@@ -540,9 +540,9 @@ def status(ctx):
         if not forge_home.exists():
             click.echo("   📝 Set forge_home: config --set forge_home /path/to/forge")
         if not launcher._image_exists():
-            click.echo("   🔨 Build image: build")
+            click.echo("   🔨 Build image: build-image")
         if not launcher._container_exists():
-            click.echo("   ♻️  Create container: recreate")
+            click.echo("   ♻️  Create container: build-toolbx")
 
 
 @cli.command()
