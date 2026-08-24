@@ -167,7 +167,7 @@ def apply_inference_service(args, ctx):
 
 
 @on_failure(on_wait_pods_appear_failure)
-@retry(attempts=12, delay=5, backoff=1.0)
+@retry(attempts=30, delay=5, backoff=1.0)
 @task
 def wait_pods_appear(args, ctx):
     """Wait for llm-d pods to appear"""
