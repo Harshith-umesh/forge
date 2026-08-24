@@ -2,7 +2,6 @@ apiVersion: serving.kserve.io/v1alpha1
 kind: LLMInferenceService
 metadata:
   name: llm-d
-  namespace: llm-d
   annotations:
     security.opendatahub.io/enable-auth: "false"
     prometheus.io/path: /metrics
