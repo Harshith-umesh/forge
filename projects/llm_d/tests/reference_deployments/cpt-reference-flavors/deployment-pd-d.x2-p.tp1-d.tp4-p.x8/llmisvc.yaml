@@ -2,12 +2,12 @@ apiVersion: serving.kserve.io/v1alpha1
 kind: LLMInferenceService
 metadata:
   name: llm-d-pd-d-x2-p-tp-bfb506
-  namespace: forge-llm-d
   annotations:
     security.opendatahub.io/enable-auth: 'false'
     prometheus.io/path: /metrics
     prometheus.io/port: '8000'
     forge.openshift.io/deployment-profile: pd-d.x2-p.tp1-d.tp4-p.x8
+  namespace: forge-llm-d
   labels:
     app.kubernetes.io/managed-by: forge
     forge.openshift.io/project: llm_d
