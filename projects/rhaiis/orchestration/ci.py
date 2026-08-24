@@ -9,9 +9,11 @@ import click
 import prepare_rhaiis
 import test_rhaiis
 
+from projects.core.agentic.config_review import trigger_config_review_for_ci
+from projects.core.agentic.on_failure import agent_review_on_failure
 from projects.core.ci_entrypoint.fournos_resolve import create_fournos_resolve_entrypoint
 from projects.core.library import ci as ci_lib
-from projects.core.library import vault
+from projects.core.library import env, vault
 from projects.core.library.export import caliper_export_entrypoint
 from projects.rhaiis.orchestration import runtime_config
 
@@ -139,8 +141,10 @@ def prepare(ctx):
 @main.command()
 @click.pass_context
 @ci_lib.safe_ci_entrypoint
+@agent_review_on_failure
 def test(ctx):
     """Test phase - Deploy model, run benchmarks, capture results."""
+    trigger_config_review_for_ci(env.BASE_ARTIFACT_DIR, async_mode=True)
     return test_rhaiis.test()
 
 

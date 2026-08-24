@@ -3,6 +3,7 @@ vaults:
 - psap-forge-mlflow-export
 - psap-forge-aws-s3-export
 - psap-forge-dashboard-s3
+- psap-models-corp-rh
 
 benchmarks:
   guidellm:
@@ -77,3 +78,11 @@ caliper:
           tags: {}
           parameters: {}
           metrics: {}
+
+agentic:
+  enabled: true
+  model_key: qwen-3-6-35b
+  on_failure:
+    enabled: true
+  config_review:
+    enabled: true

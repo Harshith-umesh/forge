@@ -5,6 +5,13 @@ qwen3-0_6b:
   vllm_args:
     tensor-parallel-size: 1
 
+# Dashboard override stub (set hf_model_id and vllm_args at runtime)
+custom:
+  name: custom
+  hf_model_id: ""
+  vllm_args:
+    tensor-parallel-size: 1
+
 # Llama-4 Scout (MoE)
 llama-4-scout:
   name: Llama-4-Scout-17B-16E-Instruct
