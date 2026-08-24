@@ -90,6 +90,7 @@ llama-3-3-70b-fp8:
   hf_model_id: RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
   vllm_args:
     tensor-parallel-size: 4
+    kv-cache-dtype: fp8
 
 llama-3-3-70b-w8a8:
   name: Llama-3.3-70B-Instruct-W8A8
