@@ -242,6 +242,9 @@ def update_test_labels_with_status(success: bool, message: str) -> None:
         "Updated test labels with completion status: success=%s, message=%s", success, message
     )
 
+    if not success:
+        (test_labels_path.parent / "FAILURE.txt").write_text(message)
+
 
 def run_all_tests(stop_on_error: bool = False) -> int:
     """Run tests for all run specifications without post-processing.
