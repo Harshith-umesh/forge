@@ -664,7 +664,7 @@ def _generate_restart_script(function_args: dict, caller_frame, meta_dir):
     script_content += "\n"
 
     # Write restart script
-    restart_file = meta_dir / "restart.sh"
+    restart_file = meta_dir / "restart.sh.txt"
     with open(restart_file, "w") as f:
         f.write(script_content)
 
