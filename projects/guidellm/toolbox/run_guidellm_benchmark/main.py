@@ -224,6 +224,29 @@ def wait_guidellm_benchmark_task(args, ctx):
             raise TimeoutError(
                 f"GuideLLM benchmark {ctx.benchmark_name} did not complete within {args.timeout}s"
             )
+
+        # Show pod status while waiting
+        oc(
+            "get",
+            "pods",
+            "-n",
+            ctx.target_namespace,
+            "-l",
+            f"job-name={ctx.benchmark_name}",
+            "-o",
+            "wide",
+        )
+
+        # Capture pod descriptions for debugging
+        oc(
+            "describe",
+            "pods",
+            "-n",
+            ctx.target_namespace,
+            "-l",
+            f"job-name={ctx.benchmark_name}",
+        )
+
         logger.info("Job %s is still active, retrying...", ctx.benchmark_name)
         return False  # Retry immediately
 
@@ -266,7 +289,7 @@ def wait_guidellm_benchmark_task(args, ctx):
         failure_message = f"""GuideLLM benchmark job '{ctx.benchmark_name}' failed.
 
 Check the job logs for detailed error information:
-  artifacts/guidellm_benchmark_job.logs
+  artifacts/guidellm_benchmark_job.log
 """
         write_text(failure_file, failure_message)
         logger.error(
@@ -583,43 +606,7 @@ def capture_guidellm_state(*, artifact_dir: Path, namespace: str, benchmark_name
         namespace,
         check=False,
         log_stdout=False,
-        stdout_dest=artifacts_dir / "guidellm_benchmark_job.logs",
-    )
-
-    # Capture additional debugging info
-    oc(
-        "get",
-        "pods",
-        "-n",
-        namespace,
-        "-l",
-        f"job-name={benchmark_name}",
-        "-oyaml",
-        check=False,
-        log_stdout=False,
-        stdout_dest=artifacts_dir / "guidellm_benchmark_pods.yaml",
-    )
-
-    oc(
-        "get",
-        "job",
-        benchmark_name,
-        "-n",
-        namespace,
-        "-oyaml",
-        check=False,
-        log_stdout=False,
-        stdout_dest=artifacts_dir / "guidellm_benchmark_job_detailed.yaml",
-    )
-
-    oc(
-        "logs",
-        f"job/{benchmark_name}",
-        "-n",
-        namespace,
-        check=False,
-        log_stdout=False,
-        stdout_dest=artifacts_dir / "guidellm_benchmark_job_logs.txt",
+        stdout_dest=artifacts_dir / "guidellm_benchmark_job.log",
     )
 
 
