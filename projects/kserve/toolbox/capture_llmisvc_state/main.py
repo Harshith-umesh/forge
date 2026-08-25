@@ -392,8 +392,21 @@ def capture_node_gpu_mapping(args, context):
             gpu_class = result.stdout.strip()
             if gpu_class:
                 gpu_type = f"NVIDIA-{gpu_class}"
-            else:
-                gpu_type = "unknown"
+
+        # If still not found, try nvidia.com/gpu.accelerator as fallback
+        if not gpu_type:
+            result = shell.run(
+                f'oc get node {node_name} -o jsonpath="{{.metadata.labels.nvidia\\.com/gpu\\.accelerator}}"',
+                check=False,
+                log_stdout=False,
+            )
+            gpu_accelerator = result.stdout.strip()
+            if gpu_accelerator:
+                gpu_type = f"NVIDIA-{gpu_accelerator.upper()}"
+
+        # Final fallback
+        if not gpu_type:
+            gpu_type = "unknown"
 
         node_gpu_mapping[node_name] = gpu_type
 
