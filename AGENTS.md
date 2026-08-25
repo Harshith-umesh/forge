@@ -45,7 +45,7 @@ Key paths:
 
 7. **Use the vault module.**
     Use the project `projects.core.library.vault` module to access the secrets, stored in files. Consider all the content of these files as secret.
-    
+
 8. **Never pass secrets via environment variables**
     For transparency and post-mortem troubleshooting, the environment variables are saved to disk at multiple locations. Do not use environment variables to pass a secret between two components. There might be few exceptions to this rule (MLFlow, AWS), but they must be handled with care.
 
@@ -250,3 +250,7 @@ finally:
     else:
         os.environ["MLFLOW_WORKSPACE"] = old_value
 ```
+
+## Legacy support
+
+Overall, we do not want legacy support. Do not implement legacy fallback, unless explicitly requested by the user.
