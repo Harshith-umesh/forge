@@ -251,6 +251,10 @@ def handle_pd_resources(
     # Add IB resources if enabled
     if ib_config.get("enabled", False):
         ib_resources = ib_config.get("resources", {})
+        if not isinstance(ib_resources, dict):
+            raise ValueError(
+                f"IB resources must be a dictionary, got {type(ib_resources)}: {ib_resources}"
+            )
         for bound in ("requests", "limits"):
             if bound not in base_resources:
                 base_resources[bound] = {}
@@ -259,6 +263,10 @@ def handle_pd_resources(
     # Add EFA resources if enabled
     if efa_config.get("enabled", False):
         efa_resources = efa_config.get("resources", {})
+        if not isinstance(efa_resources, dict):
+            raise ValueError(
+                f"EFA resources must be a dictionary, got {type(efa_resources)}: {efa_resources}"
+            )
         for bound in ("requests", "limits"):
             if bound not in base_resources:
                 base_resources[bound] = {}
@@ -527,6 +535,14 @@ def _build_pd_pod_template(
     # Add P/D extra environment variables
     pd_extra_env = pd_vllm_extra.get("env", [])
     all_env = base_env + copy.deepcopy(pd_extra_env)
+
+    # Add ROCE extra environment variables if enabled
+    roce_config = config.project.get_config("deployments.pd.roce", default_value={})
+    if roce_config.get("enabled", False):
+        roce_extra_env = roce_config.get("vllm_extra", {}).get("env", [])
+        if roce_extra_env:
+            all_env.extend(copy.deepcopy(roce_extra_env))
+            logger.info(f"Added ROCE environment variables: {roce_extra_env}")
 
     # Build base resources with correct tensor parallelism
     effective_profile = deployment_profile

@@ -36,6 +36,16 @@ pd:
     resources:
       rdma/ib: '1'
 
+  roce:
+    enabled: false
+    vllm_extra:
+      env:
+      - name: KSERVE_INFER_ROCE
+        value: "true"
+      - name: NCCL_IB_GID_INDEX
+        value: "3"
+
+
   efa:
     enabled: false
     image: quay.io/rajjoshi/libfabric-addon:3.5.0-1784900545
