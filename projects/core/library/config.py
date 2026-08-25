@@ -264,9 +264,14 @@ class Config:
             cluster_name = self._get_cluster_from_configmap()
 
         if not cluster_name:
-            logger.debug(
+            logger.info(
                 "apply_presets_from_cluster_config: no cluster name found (ci_job.cluster or forge-config ConfigMap), skipping cluster config application."
             )
+            logging.info(
+                "Use this command to configure the cluster name in the current namespace:\n"
+                "oc create configmap forge-config --from-literal=cluster=$CLUSTER_NAME"
+            )
+
             return
 
         # Apply preset named cluster_{cluster_name}
