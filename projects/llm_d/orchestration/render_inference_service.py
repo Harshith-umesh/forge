@@ -19,6 +19,66 @@ def _load_yaml(path: Path) -> Any:
         return yaml.safe_load(handle)
 
 
+def _is_efa_enabled() -> bool:
+    """Check if EFA is enabled for PD deployments."""
+    return config.project.get_config("deployments.pd.efa.enabled", default_value=False)
+
+
+def _load_efa_config(config_dir: str | Path) -> dict[str, Any]:
+    """Load EFA configuration from manifest file."""
+    efa_config = config.project.get_config("deployments.pd.efa", default_value={})
+    manifest_path = Path(config_dir) / efa_config["manifest"]
+
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"EFA manifest not found at {manifest_path}")
+
+    efa_manifest = _load_yaml(manifest_path)
+
+    # Set the image from config
+    efa_manifest["init_container"]["image"] = efa_config["image"]
+
+    return efa_manifest
+
+
+def _apply_efa_configuration(pod_template: dict[str, Any], efa_config: dict[str, Any]) -> None:
+    """Apply EFA configuration to a pod template.
+
+    Args:
+        pod_template: Pod template to modify in-place
+        efa_config: EFA configuration from manifest
+    """
+    logger.info("Applying EFA configuration to pod template")
+    # Add init container
+    if "initContainers" not in pod_template:
+        pod_template["initContainers"] = []
+    pod_template["initContainers"].append(copy.deepcopy(efa_config["init_container"]))
+
+    # Add volumes
+    if "volumes" not in pod_template:
+        pod_template["volumes"] = []
+    pod_template["volumes"].extend(copy.deepcopy(efa_config["volumes"]))
+
+    # Add volume mounts to main container
+    main_container = pod_template["containers"][0]
+    if "volumeMounts" not in main_container:
+        main_container["volumeMounts"] = []
+    main_container["volumeMounts"].extend(copy.deepcopy(efa_config["volume_mounts"]))
+
+    # Add EFA environment variables to main container
+    if "env" in efa_config:
+        if "env" not in main_container:
+            main_container["env"] = []
+        efa_env_vars = copy.deepcopy(efa_config["env"])
+        main_container["env"].extend(efa_env_vars)
+        logger.info(f"Applied EFA environment variables: {efa_env_vars}")
+    else:
+        logger.info("No EFA environment variables found in config")
+
+    # Add security context for EFA
+    main_container["securityContext"] = {"capabilities": {"add": ["IPC_LOCK"]}}
+    logger.info("Applied EFA security context with IPC_LOCK capability")
+
+
 def _replace_placeholders(value: Any, replacements: dict[str, str]) -> Any:
     """Replace Python-time deployment placeholders while preserving value types."""
     if isinstance(value, dict):
@@ -148,7 +208,7 @@ def render_inference_service_from_parts(
 
     if is_pd_deployment:
         rendered_manifest = _render_pd_deployment(
-            manifest, deployment_profile, deployment_profile_name, workload
+            manifest, deployment_profile, deployment_profile_name, workload, config_dir
         )
     else:
         rendered_manifest = _render_standard_deployment(
@@ -177,43 +237,32 @@ def handle_pd_resources(
     deployment_profile: dict[str, Any],
     is_prefill: bool = False,
 ) -> None:
-    """Handle P/D resource configuration, including DRA support.
+    """Handle P/D resource configuration for IB and EFA networking.
 
     Args:
         base_resources: Base resources dict to modify in-place
         deployment_profile: Deployment profile configuration
         is_prefill: Whether this is for a prefill container
     """
-    pd_resources = config.project.get_config("deployments.pd.resources")
+    # Handle IB and EFA resources based on their enabled status
+    ib_config = config.project.get_config("deployments.pd.ib", default_value={})
+    efa_config = config.project.get_config("deployments.pd.efa", default_value={})
 
-    if pd_resources == "composite.dra.io/gpu-nic-pair":
-        # Handle DRA (Dynamic Resource Allocation) case
-        if is_prefill:
-            # For prefill pods, use prefill tensor parallelism
-            tensor_parallelism = deployment_profile["prefill"]["tensor_parallelism"]
-        else:
-            # For decode pods, use decode tensor parallelism
-            tensor_parallelism = deployment_profile["decode"]["tensor_parallelism"]
-
-        # Override GPU resources for DRA
+    # Add IB resources if enabled
+    if ib_config.get("enabled", False):
+        ib_resources = ib_config.get("resources", {})
         for bound in ("requests", "limits"):
             if bound not in base_resources:
                 base_resources[bound] = {}
-            # Set nvidia.com/gpu to 0 and add composite DRA resource
-            base_resources[bound]["nvidia.com/gpu"] = "0"
-            base_resources[bound][pd_resources] = str(tensor_parallelism)
-    elif isinstance(pd_resources, dict):
-        # Normal case: pd_resources is a dictionary to merge
+            base_resources[bound].update(ib_resources)
+
+    # Add EFA resources if enabled
+    if efa_config.get("enabled", False):
+        efa_resources = efa_config.get("resources", {})
         for bound in ("requests", "limits"):
             if bound not in base_resources:
                 base_resources[bound] = {}
-            base_resources[bound].update(pd_resources)
-    elif pd_resources is not None:
-        # Handle unexpected pd_resources type
-        raise ValueError(
-            f"Unexpected type for deployments.pd.resources: {type(pd_resources)}, value: {pd_resources}"
-        )
-    # If pd_resources is None, do nothing
+            base_resources[bound].update(efa_resources)
 
 
 def _build_serving_resources(deployment_profile: dict[str, Any]) -> dict[str, Any]:
@@ -358,6 +407,7 @@ def _render_pd_deployment(
     deployment_profile: dict[str, Any],
     deployment_profile_name: str | None = None,
     workload: dict[str, Any] | None = None,
+    config_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Render P/D (Prefill/Decode) deployment configuration."""
     from .runtime_config import get_decode_pod_count, get_prefill_pod_count
@@ -373,7 +423,11 @@ def _render_pd_deployment(
         "replicas": get_prefill_pod_count(),
         "parallelism": {"tensor": deployment_profile["prefill"]["tensor_parallelism"]},
         "template": _build_pd_pod_template(
-            deployment_profile, deployment_profile_name, is_prefill=True, workload=workload
+            deployment_profile,
+            deployment_profile_name,
+            is_prefill=True,
+            workload=workload,
+            config_dir=config_dir,
         ),
     }
 
@@ -381,7 +435,11 @@ def _render_pd_deployment(
     manifest["spec"]["replicas"] = get_decode_pod_count()
     manifest["spec"]["parallelism"] = {"tensor": deployment_profile["decode"]["tensor_parallelism"]}
     manifest["spec"]["template"] = _build_pd_pod_template(
-        deployment_profile, deployment_profile_name, is_prefill=False, workload=workload
+        deployment_profile,
+        deployment_profile_name,
+        is_prefill=False,
+        workload=workload,
+        config_dir=config_dir,
     )
 
     # Apply scheduler config (nodeSelector, tolerations, image, …) from deployment profile
@@ -397,6 +455,7 @@ def _build_pd_pod_template(
     deployment_profile_name: str | None = None,
     is_prefill: bool = False,
     workload: dict[str, Any] | None = None,
+    config_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Build pod template for P/D deployment."""
 
@@ -426,9 +485,37 @@ def _build_pd_pod_template(
         base_vllm_args = _build_vllm_additional_args(deployment_profile, workload)
 
     # Add P/D extra args
-
     pd_extra_args = pd_vllm_extra.get("args", [])
-    all_vllm_args = base_vllm_args.split() + pd_extra_args
+
+    # Handle kv_transfer_config
+    kv_transfer_config = pd_vllm_extra.get("kv_transfer_config", {})
+    logger.info(f"Base kv_transfer_config: {kv_transfer_config}")
+
+    # Merge EFA-specific kv_transfer_config if EFA is enabled
+    efa_enabled = _is_efa_enabled()
+    logger.info(f"EFA enabled: {efa_enabled}, config_dir: {config_dir}")
+    if efa_enabled and config_dir is not None:
+        efa_pd_config = config.project.get_config("deployments.pd.efa", default_value={})
+        efa_vllm_extra = efa_pd_config.get("vllm_extra", {})
+        efa_kv_config = efa_vllm_extra.get("kv_transfer_config", {})
+        logger.info(f"EFA kv_transfer_config: {efa_kv_config}")
+
+        if efa_kv_config:
+            # Simple merge: EFA config adds to base config
+            kv_transfer_config = {**kv_transfer_config, **efa_kv_config}
+            logger.info(f"Merged kv_transfer_config: {kv_transfer_config}")
+        else:
+            logger.info("No EFA kv_transfer_config found")
+
+    # Add kv_transfer_config as argument if it exists
+    kv_transfer_args = []
+    if kv_transfer_config:
+        import json
+
+        kv_transfer_json = json.dumps(kv_transfer_config, separators=(",", ":"))
+        kv_transfer_args = ["--kv-transfer-config", f"'{kv_transfer_json}'"]
+
+    all_vllm_args = base_vllm_args.split() + pd_extra_args + kv_transfer_args
 
     vllm_additional_args = " ".join(all_vllm_args)
 
@@ -442,6 +529,7 @@ def _build_pd_pod_template(
     all_env = base_env + copy.deepcopy(pd_extra_env)
 
     # Build base resources with correct tensor parallelism
+    effective_profile = deployment_profile
     if is_prefill and deployment_profile_name:
         # For prefill pods, use prefill tensor parallelism
         from .runtime_config import _extract_value_from_profile_name
@@ -453,6 +541,7 @@ def _build_pd_pod_template(
             # Create modified profile with prefill tensor parallelism
             prefill_profile = copy.deepcopy(deployment_profile)
             prefill_profile["tensor_parallelism"] = prefill_tp
+            effective_profile = prefill_profile
             base_resources = _build_serving_resources(prefill_profile)
         except ValueError:
             # Fallback to main tensor parallelism if extraction fails
@@ -461,8 +550,8 @@ def _build_pd_pod_template(
         # For decode pods, use main tensor parallelism
         base_resources = _build_serving_resources(deployment_profile)
 
-    # Handle P/D extra resources
-    handle_pd_resources(base_resources, deployment_profile, is_prefill)
+    # Handle P/D extra resources with the effective profile
+    handle_pd_resources(base_resources, effective_profile, is_prefill)
 
     # Build container configuration
     container = {
@@ -511,6 +600,33 @@ def _build_pd_pod_template(
     }
 
     pod_template["affinity"] = affinity
+
+    # Apply EFA configuration if enabled
+    if _is_efa_enabled() and config_dir is not None:
+        efa_config = _load_efa_config(config_dir)
+        _apply_efa_configuration(pod_template, efa_config)
+
+    # Add shared memory volume if configured
+    shmem_size = config.project.get_config("deployments.pd.shmem.size", default_value=None)
+    if shmem_size is not None:
+        logger.info(f"Adding shared memory volume with size: {shmem_size}")
+
+        # Add shared memory volume
+        if "volumes" not in pod_template:
+            pod_template["volumes"] = []
+
+        shm_volume = {"name": "shm", "emptyDir": {"medium": "Memory", "sizeLimit": str(shmem_size)}}
+        pod_template["volumes"].append(shm_volume)
+
+        # Add volume mount to main container
+        main_container = pod_template["containers"][0]
+        if "volumeMounts" not in main_container:
+            main_container["volumeMounts"] = []
+
+        shm_mount = {"name": "shm", "mountPath": "/dev/shm"}
+        main_container["volumeMounts"].append(shm_mount)
+
+        logger.info("Applied shared memory volume and mount")
 
     return pod_template
 

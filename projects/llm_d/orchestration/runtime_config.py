@@ -599,6 +599,11 @@ def is_pd_deployment() -> bool:
     return "pd_config" in profile
 
 
+def is_pd_efa_enabled() -> bool:
+    """Check if EFA is enabled for PD deployments."""
+    return config.project.get_config("deployments.pd.efa.enabled", default_value=False)
+
+
 def get_smoke_request() -> dict[str, Any]:
     """Get the smoke request configuration"""
     smoke_request_key = config.project.get_config("runtime.smoke_request_key")

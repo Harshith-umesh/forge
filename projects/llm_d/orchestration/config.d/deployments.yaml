@@ -17,15 +17,40 @@ pd:
   vllm_extra:
     args:
     - --block-size 128
-    - --kv-transfer-config '{"kv_connector":"NixlConnector", "kv_role":"kv_both"}'
+    kv_transfer_config:
+      kv_connector: NixlConnector
+      kv_role: kv_both
     env:
     - name: VLLM_NIXL_SIDE_CHANNEL_HOST
       valueFrom:
         fieldRef:
           apiVersion: v1
           fieldPath: status.podIP
-  resources:
-    rdma/ib: '1'
+    - name: VLLM_HOST_IP
+      valueFrom:
+        fieldRef:
+          apiVersion: v1
+          fieldPath: status.podIP
+  ib:
+    enabled: true
+    resources:
+      rdma/ib: '1'
+
+  efa:
+    enabled: false
+    image: quay.io/rajjoshi/libfabric-addon:3.5.0-1784900545
+    manifest: manifests/pd-efa-config.yaml
+
+    vllm_extra:
+      kv_transfer_config:
+        kv_connector_extra_config:
+          backends: [LIBFABRIC]
+
+    resources:
+      vpc.amazonaws.com/efa: "8"
+
+  shmem:
+    size: null
 
 profiles:
   approximate-prefix-cache:
