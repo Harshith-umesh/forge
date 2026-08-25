@@ -107,7 +107,7 @@ def test_benchmark_workloads_are_available() -> None:
         assert benchmark["timeout_seconds"] == 3600
     assert multi_turn["timeout_seconds"] == 7200
 
-    assert concurrent["args"]["rate"] == [300, 200, 100, 50, 1]
+    assert concurrent["args"]["rate"] == [1, 50, 100, 200, 300]
     assert heavy["args"]["max_seconds"] == 600
     assert "prompt_tokens_stdev=8500" in heavy["args"]["data"]
     assert "output_tokens_max=8000" in heavy["args"]["data"]
@@ -174,6 +174,11 @@ def test_release_preset_expands_benchmark_list_and_merges_workload_args() -> Non
     assert (
         core_config.project.get_config("cpt.kpi.labels.test_harness", print=False)
         == "rhoai-release"
+    )
+    assert core_config.project.get_config("cpt.kpi.labels.gpu_type", print=False) == "H200"
+    assert (
+        core_config.project.get_config("cpt.kpi.labels.product_version", print=False)
+        == "RHOAI-3.5-EA2"
     )
 
     assert core_config.project.get_config("runtime.deployment_profile", print=False) == [

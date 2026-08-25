@@ -16,11 +16,6 @@ from projects.caliper.engine.model import (
 
 from .ai_eval import GuideLLMAIEvaluator
 from .parsing import GuideLLMKpiHandler, GuideLLMParser
-from .plotting.kpi_report import generate_kpi_report
-from .plotting.performance_analysis import (
-    generate_comprehensive_performance_report,
-    generate_deployment_profile_report,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -35,36 +30,50 @@ analysis_config = AnalysisConfig(
 )
 
 
-# Plot registry - maps report names to their generator functions and parameters
-PLOT_REGISTRY = {
-    "report_performance_analysis": {
-        "function": generate_comprehensive_performance_report,
-        "type": "report",
-        "kwargs": {
-            "report_number": 0,
-            "report_title": "GuideLLM Performance Analysis",
-        },
-        "description": "comprehensive performance analysis report (recommended)",
-    },
-    "report_kpi_summary": {
-        "function": generate_kpi_report,
-        "type": "report",
-        "kwargs": {
-            "report_number": 1,
-            "report_title": "GuideLLM KPI Summary",
-        },
-        "description": "KPI summary with test conditions and metrics",
-    },
-    "report_deployment_profile": {
-        "function": generate_deployment_profile_report,
-        "type": "report",
-        "kwargs": {
-            "report_number": 2,
-            "report_title": "GuideLLM Deployment Profile Analysis",
-        },
-        "description": "performance analysis comparing different product versions/models under identical test conditions",
-    },
-}
+PLOT_REGISTRY: dict[str, dict[str, Any]] = {}
+
+
+def _ensure_plot_registry() -> None:
+    """Populate PLOT_REGISTRY on first use, keeping pandas out of module load."""
+    if PLOT_REGISTRY:
+        return
+    from .plotting.kpi_report import generate_kpi_report
+    from .plotting.performance_analysis import (
+        generate_comprehensive_performance_report,
+        generate_deployment_profile_report,
+    )
+
+    PLOT_REGISTRY.update(
+        {
+            "report_performance_analysis": {
+                "function": generate_comprehensive_performance_report,
+                "type": "report",
+                "kwargs": {
+                    "report_number": 0,
+                    "report_title": "GuideLLM Performance Analysis",
+                },
+                "description": "comprehensive performance analysis report (recommended)",
+            },
+            "report_kpi_summary": {
+                "function": generate_kpi_report,
+                "type": "report",
+                "kwargs": {
+                    "report_number": 1,
+                    "report_title": "GuideLLM KPI Summary",
+                },
+                "description": "KPI summary with test conditions and metrics",
+            },
+            "report_deployment_profile": {
+                "function": generate_deployment_profile_report,
+                "type": "report",
+                "kwargs": {
+                    "report_number": 2,
+                    "report_title": "GuideLLM Deployment Profile Analysis",
+                },
+                "description": "performance analysis comparing different product versions/models under identical test conditions",
+            },
+        }
+    )
 
 
 class GuideLLMPlugin(PostProcessingPlugin):
@@ -83,6 +92,7 @@ class GuideLLMPlugin(PostProcessingPlugin):
 
     def get_available_reports(self) -> dict[str, dict[str, str]]:
         """Get a structured dictionary of available reports and plots with their types and descriptions."""
+        _ensure_plot_registry()
         return {
             name: {
                 "type": config["type"],
@@ -93,6 +103,7 @@ class GuideLLMPlugin(PostProcessingPlugin):
 
     def get_available_reports_by_type(self) -> dict[str, dict[str, str]]:
         """Get reports and plots grouped by type."""
+        _ensure_plot_registry()
         result = {"reports": {}, "plots": {}}
         for name, config in PLOT_REGISTRY.items():
             type_key = "reports" if config["type"] == "report" else "plots"
@@ -101,6 +112,7 @@ class GuideLLMPlugin(PostProcessingPlugin):
 
     def get_reports_only(self) -> dict[str, str]:
         """Get only comprehensive reports (HTML files with multiple plots)."""
+        _ensure_plot_registry()
         return {
             name: config["description"]
             for name, config in PLOT_REGISTRY.items()
@@ -109,6 +121,7 @@ class GuideLLMPlugin(PostProcessingPlugin):
 
     def get_plots_only(self) -> dict[str, str]:
         """Get only individual plots (single visualizations)."""
+        _ensure_plot_registry()
         return {
             name: config["description"]
             for name, config in PLOT_REGISTRY.items()
@@ -116,7 +129,7 @@ class GuideLLMPlugin(PostProcessingPlugin):
         }
 
     @staticmethod
-    def register_plot(
+    def register_plot(  # noqa: FBT001
         name: str, function: callable, description: str, type_: str = "plot", **kwargs
     ) -> None:
         """Register a new plot or report generator function.
@@ -137,6 +150,7 @@ class GuideLLMPlugin(PostProcessingPlugin):
                 report_number=10
             )
         """
+        _ensure_plot_registry()
         PLOT_REGISTRY[name] = {
             "function": function,
             "type": type_,
@@ -153,6 +167,7 @@ class GuideLLMPlugin(PostProcessingPlugin):
         visualize_config: dict[str, Any] | None,
     ) -> list[str]:
         """Generate visualization reports for GuideLLM benchmarks."""
+        _ensure_plot_registry()
         output_dir.mkdir(parents=True, exist_ok=True)
         paths: list[str] = []
         wanted = frozenset(report_ids or ())

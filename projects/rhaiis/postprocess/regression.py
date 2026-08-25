@@ -337,56 +337,9 @@ def _build_mlflow_run_url() -> str:
     from projects.caliper.orchestration.export import build_mlflow_run_url_from_config
 
     try:
-        url = build_mlflow_run_url_from_config()
-        if url:
-            return url
+        return build_mlflow_run_url_from_config() or ""
     except Exception:
         logger.warning("Failed to build MLflow run URL from test labels", exc_info=True)
-
-    # Fallback: check pre-created marker written before deployment
-    try:
-        from pathlib import Path
-        from urllib.parse import quote
-
-        import yaml
-
-        from projects.caliper.public.file_export import load_mlflow_secrets_yaml
-        from projects.core.library import config as _cfg
-        from projects.core.library import env
-        from projects.core.library import vault as vault_lib
-
-        marker = Path(env.ARTIFACT_DIR) / "_mlflow_destination.yaml"
-        if not marker.exists():
-            return ""
-        dest = yaml.safe_load(marker.read_text())
-        if not isinstance(dest, dict) or not dest.get("run_id"):
-            return ""
-
-        run_id = dest["run_id"]
-        experiment_id = dest.get("experiment_id", "")
-        if not experiment_id:
-            return ""
-
-        vault_name = _cfg.project.get_config("caliper.export.backend.mlflow.secrets.vault.name", "")
-        vault_key = _cfg.project.get_config(
-            "caliper.export.backend.mlflow.secrets.vault.mlflow_secret", ""
-        )
-        if not vault_name or not vault_key:
-            return ""
-        secrets_path = vault_lib.get_vault_content_path(vault_name, vault_key)
-        if not secrets_path or not secrets_path.exists():
-            return ""
-
-        secrets_data = load_mlflow_secrets_yaml(secrets_path)
-        tracking_uri = secrets_data.get("tracking_uri", "").rstrip("/")
-        if not tracking_uri.startswith(("http://", "https://")):
-            return ""
-
-        workspace = _cfg.project.get_config("caliper.export.backend.mlflow.config.workspace", "")
-        qs = f"?workspace={quote(workspace, safe='')}" if workspace else ""
-        return f"{tracking_uri}/#/experiments/{experiment_id}/runs/{run_id}/artifacts{qs}"
-    except Exception:
-        logger.warning("Failed to build MLflow run URL from marker", exc_info=True)
         return ""
 
 

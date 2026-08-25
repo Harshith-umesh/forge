@@ -201,12 +201,6 @@ def _run_test(
         logger.warning("MLflow run pre-creation failed; continuing", exc_info=True)
         mlflow_destination = None
 
-    if mlflow_destination:
-        import yaml as _yaml
-
-        mlflow_marker = env.ARTIFACT_DIR / "_mlflow_destination.yaml"
-        mlflow_marker.write_text(_yaml.safe_dump(mlflow_destination, sort_keys=False))
-
     try:
         isvc_labels = {"opendatahub.io/dashboard": "true"}
         if profiler_enabled and engine == "vllm":
