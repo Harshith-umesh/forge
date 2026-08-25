@@ -39,8 +39,13 @@ spec:
       - name: VLLM_ADDITIONAL_ARGS
         value: --gpu-memory-utilization=0.92 --trust-remote-code --no-enable-log-requests
           --enable-prefix-caching --max-model-len=4096 --block-size 128 --kv-transfer-config
-          '{"kv_connector":"NixlConnector", "kv_role":"kv_both"}'
+          '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
       - name: VLLM_NIXL_SIDE_CHANNEL_HOST
+        valueFrom:
+          fieldRef:
+            apiVersion: v1
+            fieldPath: status.podIP
+      - name: VLLM_HOST_IP
         valueFrom:
           fieldRef:
             apiVersion: v1
@@ -75,8 +80,13 @@ spec:
         - name: VLLM_ADDITIONAL_ARGS
           value: --gpu-memory-utilization=0.92 --trust-remote-code --no-enable-log-requests
             --enable-prefix-caching --max-model-len=4096 --block-size 128 --kv-transfer-config
-            '{"kv_connector":"NixlConnector", "kv_role":"kv_both"}'
+            '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
         - name: VLLM_NIXL_SIDE_CHANNEL_HOST
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: status.podIP
+        - name: VLLM_HOST_IP
           valueFrom:
             fieldRef:
               apiVersion: v1
