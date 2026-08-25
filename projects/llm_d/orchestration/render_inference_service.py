@@ -267,10 +267,20 @@ def handle_pd_resources(
             raise ValueError(
                 f"EFA resources must be a dictionary, got {type(efa_resources)}: {efa_resources}"
             )
+
+        # Calculate EFA resources based on tensor parallelism (1:4 GPU-to-EFA ratio)
+        tensor_parallelism = deployment_profile.get("tensor_parallelism", 1)
+        efa_count = 4 * tensor_parallelism
+
+        # Override EFA count with calculated value
+        calculated_efa_resources = efa_resources.copy()
+        if "vpc.amazonaws.com/efa" in calculated_efa_resources:
+            calculated_efa_resources["vpc.amazonaws.com/efa"] = str(efa_count)
+
         for bound in ("requests", "limits"):
             if bound not in base_resources:
                 base_resources[bound] = {}
-            base_resources[bound].update(efa_resources)
+            base_resources[bound].update(calculated_efa_resources)
 
 
 def _build_serving_resources(deployment_profile: dict[str, Any]) -> dict[str, Any]:
@@ -680,38 +690,60 @@ def _apply_hostpath_model_configuration(
     hostpath: str,
     source_uri: str,
 ) -> None:
-    """Inject hostPath volume so the node-local HF hub cache is used instead of downloading.
+    """Configure hostPath model loading with link-model init container.
 
-    Mirrors the TOPSAIL apply_hostpath_volume_configuration approach:
+    This approach:
     - disables the storage initializer
-    - mounts the hostPath directory at /hf-cache (readOnly)
-    - sets HF_HUB_CACHE=/hf-cache/hub so vLLM picks up the cached weights
-
-    The model URI in spec.model.uri is kept as-is (hf://…) because vLLM resolves
-    the model name through the HF_HUB_CACHE directory, not by downloading it.
+    - adds a link-model init container that creates symlinks from hostpath to /mnt/models
+    - mounts the hostPath directory for the init container and main container
 
     Args:
         manifest: The rendered LLMInferenceService manifest to modify in-place.
-        hostpath: Absolute path on the node where the HF hub cache lives
-                  (e.g. /mnt/local-nvme-storage/models).
-        source_uri: The hf:// model URI already set on the manifest (unused here,
-                    kept for symmetry / future logging).
+        hostpath: Absolute path on the node where the model store lives
+                  (e.g. /mnt/nvme/models).
+        source_uri: The model URI (e.g. hf://model-name) used to determine model path.
     """
-    hf_cache_volume = {
-        "name": "hf-cache",
-        "hostPath": {"path": hostpath, "type": "Directory"},
-    }
-    hf_cache_mount = {"name": "hf-cache", "mountPath": "/hf-cache", "readOnly": True}
-    hf_env_var = {"name": "HF_HUB_CACHE", "value": "/hf-cache/hub"}
+    # Disable storage initializer
+    manifest["spec"]["storageInitializer"] = {"enabled": False}
+
+    # Extract model name from URI
+    if source_uri.startswith("hf://"):
+        model_name = source_uri.removeprefix("hf://")
+    else:
+        model_name = source_uri
+
+    # Load hostpath configuration from manifest
+    config_dir = Path(__file__).parent
+    hostpath_manifest_path = config_dir / "manifests" / "hostpath-model-config.yaml"
+    hostpath_config = _load_yaml(hostpath_manifest_path)
+
+    # Replace placeholders
+    hostpath_config = _replace_placeholders(
+        hostpath_config,
+        {
+            "__MODEL_NAME__": model_name,
+            "__HOSTPATH__": hostpath,
+        },
+    )
 
     def _configure_pod_template(template: dict[str, Any]) -> None:
+        # Add volumes
         template.setdefault("volumes", [])
-        template["volumes"].append(hf_cache_volume)
+        template["volumes"].extend(copy.deepcopy(hostpath_config["volumes"]))
+
+        # Add init container
+        template.setdefault("initContainers", [])
+        template["initContainers"].append(copy.deepcopy(hostpath_config["init_container"]))
+
+        # Add volume mounts to main container
+        if not template.get("containers"):
+            raise ValueError("No containers found in template for volume mount configuration")
         container = template["containers"][0]
         container.setdefault("volumeMounts", [])
-        container["volumeMounts"].append(hf_cache_mount)
-        container.setdefault("env", [])
-        container["env"].insert(0, hf_env_var)
+        volume_mounts = hostpath_config.get("volume_mounts", [])
+        if not volume_mounts:
+            raise ValueError("No volume_mounts found in hostpath_config")
+        container["volumeMounts"].extend(copy.deepcopy(volume_mounts))
 
     # Apply to main (decode) pod template
     _configure_pod_template(manifest["spec"]["template"])

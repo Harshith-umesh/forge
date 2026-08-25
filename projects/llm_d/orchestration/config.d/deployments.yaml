@@ -57,7 +57,7 @@ pd:
           backends: [LIBFABRIC]
 
     resources:
-      vpc.amazonaws.com/efa: "8"
+      vpc.amazonaws.com/efa: "8"  # Default value, automatically calculated as 4 × TP in production
 
   shmem:
     size: null

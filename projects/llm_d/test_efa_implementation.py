@@ -57,7 +57,7 @@ def test_efa_configuration():
                     "value": "/opt/efa-libs:/usr/local/cuda/lib64:/opt/app-root/lib/python3.12/site-packages/.nixl_cu13.mesonpy.libs",
                 },
             ],
-            "resources": {"vpc.amazonaws.com/efa": "8"},
+            "resources": {"vpc.amazonaws.com/efa": "8"},  # Will be overridden to 4 × TP = 4
         }
 
         with open(manifest_dir / "pd-efa-config.yaml", "w") as f:
