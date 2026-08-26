@@ -22,8 +22,6 @@ from projects.caliper.engine.traverse import discover_test_bases
 
 logger = logging.getLogger(__name__)
 
-# Validation functions no longer needed - using per-test-base caching
-
 
 def run_parse(
     *,
