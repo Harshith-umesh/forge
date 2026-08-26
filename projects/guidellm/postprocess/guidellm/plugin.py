@@ -6,7 +6,6 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from projects.caliper.engine.kpi.analyze import AnalysisConfig
 from projects.caliper.engine.model import (
     ParseResult,
     PostProcessingPlugin,
@@ -18,24 +17,6 @@ from .ai_eval import GuideLLMAIEvaluator
 from .parsing import GuideLLMKpiHandler, GuideLLMParser
 
 logger = logging.getLogger(__name__)
-
-
-# Analysis configuration for KPI regression testing
-analysis_config = AnalysisConfig(
-    comparison_labels=["product_version"],
-    ignored_labels=["cluster"],
-    sorting_labels=["product_version"],
-    regression_config={
-        "SCALAR_RELATIVE_CHANGE": {
-            "max_relative_regression": 0.15,  # 15% threshold (LLM performance can vary more)
-            "min_baseline_points": 2,  # Require at least 2 baseline points for reliability
-        },
-        "TWO_DIM_AUC_CHANGE": {
-            "max_relative_regression": 0.35,  # 35% threshold (LLM performance can vary more)
-            "min_baseline_points": 2,  # Require at least 2 baseline points for reliability
-        },
-    },
-)
 
 
 class _PlotRegistry:
@@ -273,10 +254,9 @@ class GuideLLMPlugin(PostProcessingPlugin):
         Returns:
             Path to the generated CSV file
         """
-        from .csv_export import KPICsvExporter
+        from projects.llm_d.postprocess.llm_d import csv_dashboard
 
-        exporter = KPICsvExporter()
-        return exporter.export_kpis_to_csv(kpi_records, output_path, include_header_comments)
+        return csv_dashboard.export_kpis_to_csv(kpi_records, output_path, include_header_comments)
 
     def build_ai_data_payload(self, model: UnifiedRunModel) -> dict[str, Any]:
         """Build AI evaluation payload from the unified model."""
