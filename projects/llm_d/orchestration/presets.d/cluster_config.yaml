@@ -30,6 +30,7 @@ cluster_janus:
   cpt.kpi.labels.platform: OCP
 
   deployments.pd.roce.enabled: true
+  cpt.kpi.labels.gpu_type: NVIDIA-H200
 
 cluster_eks-h100:
   cpt.kpi.labels.platform: EKS
