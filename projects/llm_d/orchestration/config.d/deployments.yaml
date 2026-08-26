@@ -32,19 +32,19 @@ pd:
           apiVersion: v1
           fieldPath: status.podIP
   ib:
-    enabled: true
-    resources:
-      rdma/ib: '1'
+    enabled: false
+    resources: rdma/ib
 
   roce:
     enabled: false
+    resources: composite.dra.io/gpu-nic-pair
+
     vllm_extra:
       env:
       - name: KSERVE_INFER_ROCE
         value: "true"
       - name: NCCL_IB_GID_INDEX
         value: "3"
-
 
   efa:
     enabled: false
@@ -56,8 +56,7 @@ pd:
         kv_connector_extra_config:
           backends: [LIBFABRIC]
 
-    resources:
-      vpc.amazonaws.com/efa: "8"  # Default value, automatically calculated as 4 × TP in production
+    resources: vpc.amazonaws.com/efa
 
   shmem:
     size: null

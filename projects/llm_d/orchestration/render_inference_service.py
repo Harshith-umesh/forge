@@ -237,50 +237,94 @@ def handle_pd_resources(
     deployment_profile: dict[str, Any],
     is_prefill: bool = False,
 ) -> None:
-    """Handle P/D resource configuration for IB and EFA networking.
+    """Handle P/D resource configuration for mutually exclusive networking technologies.
+
+    Supports IB, RoCE, and EFA networking - only one can be enabled at a time.
 
     Args:
         base_resources: Base resources dict to modify in-place
         deployment_profile: Deployment profile configuration
         is_prefill: Whether this is for a prefill container
     """
-    # Handle IB and EFA resources based on their enabled status
+    # Get networking configurations - they are mutually exclusive
     ib_config = config.project.get_config("deployments.pd.ib", default_value={})
+    roce_config = config.project.get_config("deployments.pd.roce", default_value={})
     efa_config = config.project.get_config("deployments.pd.efa", default_value={})
 
-    # Add IB resources if enabled
+    # Check which networking technology is enabled
+    enabled_configs = []
     if ib_config.get("enabled", False):
-        ib_resources = ib_config.get("resources", {})
-        if not isinstance(ib_resources, dict):
-            raise ValueError(
-                f"IB resources must be a dictionary, got {type(ib_resources)}: {ib_resources}"
-            )
-        for bound in ("requests", "limits"):
-            if bound not in base_resources:
-                base_resources[bound] = {}
-            base_resources[bound].update(ib_resources)
-
-    # Add EFA resources if enabled
+        enabled_configs.append("ib")
+    if roce_config.get("enabled", False):
+        enabled_configs.append("roce")
     if efa_config.get("enabled", False):
-        efa_resources = efa_config.get("resources", {})
-        if not isinstance(efa_resources, dict):
-            raise ValueError(
-                f"EFA resources must be a dictionary, got {type(efa_resources)}: {efa_resources}"
-            )
+        enabled_configs.append("efa")
 
-        # Calculate EFA resources based on tensor parallelism (1:4 GPU-to-EFA ratio)
+    # Validate mutual exclusivity
+    if len(enabled_configs) > 1:
+        raise ValueError(
+            f"Multiple networking technologies enabled: {enabled_configs}. "
+            "IB, RoCE, and EFA are mutually exclusive."
+        )
+
+    if not enabled_configs:
+        return  # No networking technology enabled
+
+    networking_type = enabled_configs[0]
+
+    if networking_type == "ib":
+        # Add IB resources
+        ib_resources = ib_config.get("resources", {})
+        resource_dict = _normalize_resources(ib_resources, "IB")
+        _apply_resources(base_resources, resource_dict)
+        logger.info(f"Applied IB resources: {resource_dict}")
+
+    elif networking_type == "roce":
+        # Add RoCE resources
+        roce_resources = roce_config.get("resources", {})
+        resource_dict = _normalize_resources(roce_resources, "RoCE")
+        _apply_resources(base_resources, resource_dict)
+        logger.info(f"Applied RoCE resources: {resource_dict}")
+
+    elif networking_type == "efa":
+        # Add EFA resources with calculated count (1:4 GPU-to-EFA ratio)
+        efa_resources = efa_config.get("resources", {})
         tensor_parallelism = deployment_profile.get("tensor_parallelism", 1)
         efa_count = 4 * tensor_parallelism
 
-        # Override EFA count with calculated value
-        calculated_efa_resources = efa_resources.copy()
-        if "vpc.amazonaws.com/efa" in calculated_efa_resources:
-            calculated_efa_resources["vpc.amazonaws.com/efa"] = str(efa_count)
+        if isinstance(efa_resources, dict):
+            resource_dict = efa_resources.copy()
+            # Override with calculated count for any EFA resource
+            for key in resource_dict:
+                if "efa" in key.lower():
+                    resource_dict[key] = str(efa_count)
+        elif isinstance(efa_resources, str):
+            resource_dict = {efa_resources: str(efa_count)}
+        else:
+            logger.warning(f"Unexpected EFA resources format: {type(efa_resources)}")
+            return
 
-        for bound in ("requests", "limits"):
-            if bound not in base_resources:
-                base_resources[bound] = {}
-            base_resources[bound].update(calculated_efa_resources)
+        _apply_resources(base_resources, resource_dict)
+        logger.info(f"Applied EFA resources: {resource_dict} (TP={tensor_parallelism}, ratio=1:4)")
+
+
+def _normalize_resources(resources: Any, technology: str) -> dict[str, str]:
+    """Normalize resource specification to dictionary format."""
+    if isinstance(resources, dict):
+        return {k: str(v) for k, v in resources.items()}
+    elif isinstance(resources, str):
+        return {resources: "1"}
+    else:
+        logger.warning(f"Unexpected {technology} resources format: {type(resources)}")
+        return {}
+
+
+def _apply_resources(base_resources: dict[str, Any], resource_dict: dict[str, str]) -> None:
+    """Apply resource dictionary to both requests and limits."""
+    for bound in ("requests", "limits"):
+        if bound not in base_resources:
+            base_resources[bound] = {}
+        base_resources[bound].update(resource_dict)
 
 
 def _build_serving_resources(deployment_profile: dict[str, Any]) -> dict[str, Any]:
