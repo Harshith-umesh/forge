@@ -12,9 +12,10 @@ from projects.caliper.engine.model import (
     TestBaseNode,
     UnifiedRunModel,
 )
+from projects.llm_d.postprocess.llm_d.parsing.kpis import GuideLLMKpiHandler
 
 from .ai_eval import GuideLLMAIEvaluator
-from .parsing import GuideLLMKpiHandler, GuideLLMParser
+from .parsing import GuideLLMParser
 
 logger = logging.getLogger(__name__)
 
