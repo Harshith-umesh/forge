@@ -38,12 +38,14 @@ logger = logging.getLogger(__name__)
 def run(
     *,
     platform_config: dict[str, Any],
+    scheduling_node_selector: dict[str, str] | None = None,
 ) -> int:
     """
     Install the full MCP Gateway platform stack.
 
     Args:
         platform_config: Platform configuration dict from infrastructure.yaml
+        scheduling_node_selector: Labels to apply to worker nodes before install
     """
     execute_tasks(locals())
     return 0
@@ -75,7 +77,66 @@ def validate_config(args, ctx):
     logger.info("MCP Gateway namespace: %s", ctx.mcp_gateway_namespace)
     logger.info("Gateway namespace: %s", ctx.gateway_namespace)
 
+    ctx.node_selector = args.scheduling_node_selector or {}
+
     return f"Config validated: {len(ctx.steps)} steps, kustomize_base={ctx.kustomize_base}"
+
+
+@task
+def label_worker_nodes(args, ctx):
+    """Select the worker node with the most allocatable resources and label it."""
+    selector = ctx.node_selector
+    if not selector:
+        return "No node_selector configured, skipping"
+
+    import json
+
+    result = oc(
+        "get",
+        "nodes",
+        "-l",
+        "node-role.kubernetes.io/worker",
+        "-o",
+        "json",
+        check=False,
+        log_stdout=False,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return "No worker nodes found"
+
+    nodes_data = json.loads(result.stdout)
+    best_node = None
+    best_score = -1
+
+    for node in nodes_data.get("items", []):
+        conditions = node.get("status", {}).get("conditions", [])
+        ready = any(c.get("type") == "Ready" and c.get("status") == "True" for c in conditions)
+        if not ready:
+            continue
+
+        alloc = node.get("status", {}).get("allocatable", {})
+        cpu_str = alloc.get("cpu", "0")
+        cpu_milli = _parse_cpu_to_milli(cpu_str)
+        mem_str = alloc.get("memory", "0")
+        mem_bytes = _parse_mem_to_bytes(mem_str)
+
+        score = cpu_milli * 1_000_000 + mem_bytes
+        if score > best_score:
+            best_score = score
+            best_node = node["metadata"]["name"]
+
+    if not best_node:
+        return "No Ready worker nodes found"
+
+    oc(
+        "label",
+        "node",
+        best_node,
+        "--overwrite",
+        *[f"{k}={v}" for k, v in selector.items()],
+        log_stdout=False,
+    )
+    return f"Labeled strongest worker node with {selector}"
 
 
 @task
@@ -545,6 +606,31 @@ def _version_gte(version: str, minimum: str) -> bool:
             minimum,
         )
         return False
+
+
+def _parse_cpu_to_milli(cpu: str) -> int:
+    """Convert a Kubernetes CPU string to millicores."""
+    if cpu.endswith("m"):
+        return int(cpu[:-1])
+    return int(float(cpu) * 1000)
+
+
+def _parse_mem_to_bytes(mem: str) -> int:
+    """Convert a Kubernetes memory string to bytes."""
+    suffixes = {
+        "Ki": 1024,
+        "Mi": 1024**2,
+        "Gi": 1024**3,
+        "Ti": 1024**4,
+        "K": 1000,
+        "M": 1000**2,
+        "G": 1000**3,
+        "T": 1000**4,
+    }
+    for suffix, multiplier in suffixes.items():
+        if mem.endswith(suffix):
+            return int(mem[: -len(suffix)]) * multiplier
+    return int(mem)
 
 
 def _version_spec(version: str) -> dict[str, Any]:
