@@ -225,8 +225,10 @@ class GuideLLMPlugin(PostProcessingPlugin):
 
         return paths
 
-    def compute_kpis(self, model: UnifiedRunModel) -> list[dict[str, Any]]:
-        """Compute KPI values from the unified model."""
+    def compute_kpis(
+        self, model: UnifiedRunModel
+    ) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Compute KPI values from the unified model with optional status details."""
         return self.kpi_handler.compute_kpis(model)
 
     def export_kpis_to_csv(

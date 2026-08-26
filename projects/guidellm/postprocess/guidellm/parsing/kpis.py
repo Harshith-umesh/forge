@@ -252,7 +252,9 @@ class GuideLLMKpiHandler:
         return build_catalog_from_functions(current_module)
 
     @staticmethod
-    def compute_kpis(model: UnifiedRunModel) -> list[dict[str, Any]]:
+    def compute_kpis(
+        model: UnifiedRunModel,
+    ) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], dict[str, Any]]:
         """
         Compute KPI values from the unified model.
 
@@ -260,7 +262,7 @@ class GuideLLMKpiHandler:
             model: Unified model containing parsed test results
 
         Returns:
-            List of KPI records
+            List of KPI records, or tuple of (KPI records, status details) if warnings present
         """
         ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         out: list[dict[str, Any]] = []
@@ -276,6 +278,32 @@ class GuideLLMKpiHandler:
 
         if not valid_records:
             return out
+
+        # Check for unknown gpu_type in records
+        unknown_gpu_records = []
+        for r in valid_records:
+            test_condition_labels = GuideLLMKpiHandler.LABEL_EXTRACTOR.extract(r)
+            gpu_type = test_condition_labels.get("gpu_type")
+            if gpu_type and gpu_type.lower() == "unknown":
+                unknown_gpu_records.append(r.test_base_path)
+
+        # If unknown GPU types found, return empty KPIs with error status
+        if unknown_gpu_records:
+            error_msg = (
+                f"Found gpu_type='unknown' in {len(unknown_gpu_records)} test paths: "
+                f"{', '.join(unknown_gpu_records[:3])}{'...' if len(unknown_gpu_records) > 3 else ''}. "
+                "Unknown GPU types prevent reliable KPI analysis. "
+                "Please ensure GPU detection is working correctly or set gpu_type manually in test labels."
+            )
+
+            status_details = {
+                "status": "failed",
+                "success": False,
+                "message": error_msg,
+                "warnings": [],
+            }
+
+            return [], status_details
 
         # Group records by test path for 2D KPIs (same test, different rates)
         from collections import defaultdict
