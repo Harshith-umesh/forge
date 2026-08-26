@@ -415,7 +415,7 @@ def run_analyse_kpis(
             step_logs_dir=step_logs_dir,
         )
 
-        orchestration_success = result.returncode == 0 and status_data.get("success")
+        command_succeeded = result.returncode == 0 and status_data.get("success")
 
         summary_fields = [
             "success",
@@ -426,34 +426,26 @@ def run_analyse_kpis(
         ]
         analysis_summary = {k: v for k, v in status_data.items() if k in summary_fields}
 
-        if not orchestration_success:
-            fail_on_regression = postprocess_config.analyze.fail_on_regression
-            non_success_status = "failed" if fail_on_regression else "warning"
-            return {
-                "status": non_success_status,
-                "message": status_data.get("error") or status_data.get("message", "Unknown error"),
-                "completed_at": time.time(),
-                "log_file": log_file,
-                **analysis_summary,
-            }
-
-        # Include only summary data, not detailed results
-        summary_fields = [
-            "success",
-            "regressions_detected",
-            "baseline_source_count",
-            "tested",
-            "overall",
-        ]
-        analysis_summary = {k: v for k, v in status_data.items() if k in summary_fields}
-
-        return {
-            "status": "success",
-            "output_file": _make_path_relative_to_base(output_file, env.ARTIFACT_DIR),
+        # Build result data
+        result_data = {
             "completed_at": time.time(),
             "log_file": log_file,
+            "output_file": _make_path_relative_to_base(output_file, env.ARTIFACT_DIR),
+            "status": status_data["message"],
             **analysis_summary,
         }
+
+        if status_data.get("message"):
+            result_data["message"] = status_data["message"]
+
+        if not command_succeeded:
+            fail_on_regression = postprocess_config.analyze.fail_on_regression
+            result_data["status"] = "failed" if fail_on_regression else "warning"
+            result_data["message"] = status_data.get("error") or status_data.get(
+                "message", "Unknown error"
+            )
+
+        return result_data
 
     except Exception as e:
         logger.exception("KPI analysis failed in run_analyse_kpis")
