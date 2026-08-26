@@ -4,6 +4,8 @@ __multiple: true
 cpt-reference-flavors:
   extends:
   - gpt-oss
+
+  deployments.pd.ib.enabled: true
   runtime.deployment_profile:
   - pd-d.x2-p.tp1-d.tp4-p.x8
   - intelligentrouting-tp4-x4
