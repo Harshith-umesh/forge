@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import UTC, datetime
+from pathlib import Path
 
 import yaml
 
@@ -75,15 +77,53 @@ def wait_for_deployments(args, ctx):
         "-o",
         "json",
         check=False,
+        log_stdout=False,
     )
     if result.returncode != 0:
         raise RuntimeError(f"Failed to get deployments in {args.namespace}")
 
-    not_ready = [
-        f"{d['metadata']['name']} ({d['status'].get('availableReplicas', 0)}/{d['spec'].get('replicas', 1)})"
-        for d in json.loads(result.stdout).get("items", [])
-        if d["status"].get("availableReplicas", 0) < d["spec"].get("replicas", 1)
-    ]
+    deployments = json.loads(result.stdout).get("items", [])
+
+    # Process deployment status information
+    deployment_status = []
+    not_ready = []
+
+    for d in deployments:
+        name = d["metadata"]["name"]
+        available_replicas = d["status"].get("availableReplicas", 0)
+        desired_replicas = d["spec"].get("replicas", 1)
+        is_ready = available_replicas >= desired_replicas
+
+        status_info = {
+            "name": name,
+            "namespace": args.namespace,
+            "ready": is_ready,
+            "available_replicas": available_replicas,
+            "desired_replicas": desired_replicas,
+            "status": f"{available_replicas}/{desired_replicas}",
+        }
+
+        deployment_status.append(status_info)
+
+        if not is_ready:
+            not_ready.append(f"{name} ({available_replicas}/{desired_replicas})")
+
+    # Save deployment status to artifacts
+    artifacts_dir = Path("artifacts")
+    artifacts_dir.mkdir(exist_ok=True)
+
+    deployment_data = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "namespace": args.namespace,
+        "total_deployments": len(deployments),
+        "ready_deployments": len(deployments) - len(not_ready),
+        "not_ready_deployments": len(not_ready),
+        "deployments": deployment_status,
+    }
+
+    artifacts_file = artifacts_dir / "kserve_deployments.yaml"
+    with open(artifacts_file, "w") as f:
+        yaml.dump(deployment_data, f, default_flow_style=False, sort_keys=False)
 
     if not_ready:
         logger.info("Waiting for: %s", ", ".join(not_ready))
