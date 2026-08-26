@@ -15,8 +15,6 @@ from projects.caliper.engine.model import (
     UnifiedRunModel,
 )
 from projects.guidellm.postprocess.guidellm.dashboard import (
-    compute_dashboard_kpis,
-    dashboard_kpi_catalog,
     deployment_metadata_from_profile,
     enrich_guidellm_parse_result,
     export_dashboard_kpis_to_csv,
@@ -110,10 +108,10 @@ class LlmDGuideLLMPlugin(GuideLLMPlugin):
         return ParseResult(records=records, warnings=parsed.warnings)
 
     def kpi_catalog(self) -> list[dict[str, Any]]:
-        return self.kpi_handler.get_catalog() + dashboard_kpi_catalog(prefix="llmd")
+        return self.kpi_handler.get_catalog()
 
     def compute_kpis(self, model: UnifiedRunModel) -> list[dict[str, Any]]:
-        return super().compute_kpis(model) + compute_dashboard_kpis(model, prefix="llmd")
+        return super().compute_kpis(model)
 
     def export_kpis_to_csv(
         self,
