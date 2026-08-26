@@ -38,7 +38,7 @@ def _generate_automatic_status_file_path(artifacts_dir: Path, operation: str) ->
     status_dir.mkdir(parents=True, exist_ok=True)
 
     # Find next available index
-    existing_files = list(status_dir.glob(f"*__{operation}.yaml"))
+    existing_files = list(status_dir.glob("*__*.yaml"))
     if existing_files:
         # Extract indices from existing files
         indices = []
