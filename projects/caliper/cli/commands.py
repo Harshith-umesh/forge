@@ -599,7 +599,7 @@ def kpi_generate(
             sys.exit(3)
         else:
             # Proceed with KPI generation
-            rows = run_kpi_generate(
+            rows, status_details = run_kpi_generate(
                 base_dir=artifact_root,
                 plugin_module=mod,
                 plugin=plugin,
@@ -611,12 +611,29 @@ def kpi_generate(
                 exclude_label_filter=exclude_filter,
                 verbose_parsing=verbose_parsing,
             )
+
+            # Check for KPI generation failure
+            if not status_details.get("success", True):
+                status_data = {
+                    "success": False,
+                    "message": status_details.get("message", "KPI generation failed"),
+                    "test_directories_count": test_dir_count,
+                    "test_directories": test_directories,
+                    "status_details": status_details,
+                }
+                click.echo(
+                    f"❌ KPI generation failed: {status_details.get('message', 'Unknown error')}",
+                    err=True,
+                )
+                sys.exit(2)
+
             if not rows:
                 status_data = {
                     "success": False,
                     "message": "No KPIs generated",
                     "test_directories_count": test_dir_count,
                     "test_directories": test_directories,
+                    "status_details": status_details,
                 }
                 click.echo("❌ No KPIs generated", err=True)
                 sys.exit(3)
@@ -626,9 +643,15 @@ def kpi_generate(
                 "output_file": str(output),
                 "test_directories_count": test_dir_count,
                 "test_directories": test_directories,
+                "status_details": status_details,
             }
             click.echo(f"Generated {output}")
             click.echo(f"📁 Processed {test_dir_count} test directories")
+
+            # Log any warnings from KPI generation
+            if status_details and status_details.get("warnings"):
+                for warning in status_details["warnings"]:
+                    click.echo(f"⚠️  Warning: {warning}", err=True)
 
     except Exception as e:  # noqa: BLE001
         import traceback
