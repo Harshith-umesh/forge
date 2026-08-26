@@ -174,5 +174,69 @@ def probe_webhook_ready(args, ctx):
     return False
 
 
+@task
+def capture_kserve_objects(args, ctx):
+    """Capture KServe objects in YAML format (ignoring errors)"""
+
+    # Create artifacts directory
+    artifacts_dir = Path("artifacts")
+    artifacts_dir.mkdir(exist_ok=True)
+
+    # Capture ServingRuntimes (namespaced)
+    oc(
+        "get",
+        "servingruntimes",
+        "-n",
+        args.namespace,
+        "-oyaml",
+        stdout_dest=artifacts_dir / "kserve.servingruntimes.yaml",
+        check=False,
+    )
+
+    # Capture ClusterServingRuntimes (cluster-scoped)
+    oc(
+        "get",
+        "clusterservingruntimes",
+        "-oyaml",
+        stdout_dest=artifacts_dir / "kserve.clusterservingruntimes.yaml",
+        check=False,
+    )
+
+    # Capture InferenceServices (if any exist alongside LLMInferenceServices)
+    oc(
+        "get",
+        "inferenceservices",
+        "-n",
+        args.namespace,
+        "-oyaml",
+        stdout_dest=artifacts_dir / "kserve.inferenceservices.yaml",
+        check=False,
+    )
+
+    # Capture KServe MutatingWebhookConfigurations
+    oc(
+        "get",
+        "mutatingwebhookconfigurations",
+        "-l",
+        "app.kubernetes.io/part-of=kserve",
+        "-oyaml",
+        stdout_dest=artifacts_dir / "kserve.mutatingwebhooks.yaml",
+        check=False,
+    )
+
+    # Capture KServe ValidatingWebhookConfigurations
+    oc(
+        "get",
+        "validatingwebhookconfigurations",
+        "-l",
+        "app.kubernetes.io/part-of=kserve",
+        "-oyaml",
+        stdout_dest=artifacts_dir / "kserve.validatingwebhooks.yaml",
+        check=False,
+    )
+
+    return "KServe objects captured"
+
+
 if __name__ == "__main__":
     run.main()
