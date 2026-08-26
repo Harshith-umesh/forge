@@ -63,8 +63,10 @@ def transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
             if k not in ("higher_is_better",) and k not in varying_keys
         }
 
-        if not test_data["labels"]:
-            test_data["labels"] = test_labels
+        # KPI handlers may add project-specific labels only to a subset of the
+        # records. Preserve every label that is constant for this test instead
+        # of freezing the set from whichever KPI happened to be emitted first.
+        test_data["labels"].update(test_labels)
 
         # Store test metadata from first KPI
         if not test_data["metadata"]:

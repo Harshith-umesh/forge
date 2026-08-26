@@ -16,6 +16,9 @@ from projects.core.library import config, env
 from projects.core.library.postprocess import run_and_postprocess, write_test_labels
 from projects.core.library.run import SignalInterrupt
 from projects.core.orchestration.utils.k8s import ensure_namespace
+from projects.guidellm.postprocess.guidellm.dashboard import (
+    deployment_metadata_from_profile,
+)
 from projects.guidellm.toolbox.run_guidellm_benchmark import build_guidellm_args
 from projects.guidellm.toolbox.run_guidellm_benchmark import main as run_guidellm_benchmark_command
 from projects.guidellm.toolbox.run_smoke_request import main as run_smoke_request_command
@@ -163,10 +166,19 @@ def extract_kpi_labels_from_config() -> dict[str, str]:
     if test_harness:
         kpi_labels["test_harness"] = test_harness
 
+    product_version = config.project.get_config("cpt.kpi.labels.product_version")
+    if product_version:
+        kpi_labels["product_version"] = product_version
+
+    deployment_profile = runtime_config.get_deployment_profile()
+    kpi_labels.update(deployment_metadata_from_profile(deployment_profile))
+
     return kpi_labels
 
 
-def create_test_labels() -> None:
+def create_test_labels(
+    mlflow_destination: dict[str, str] | None = None,
+) -> None:
     """Create __test_labels__.yaml with model name and guidellm configuration."""
 
     model_name = runtime_config.get_model_name()
@@ -184,7 +196,12 @@ def create_test_labels() -> None:
     # Extract kpi_labels from config
     kpi_labels = extract_kpi_labels_from_config()
 
-    write_test_labels(env.ARTIFACT_DIR, labels, kpi_labels=kpi_labels if kpi_labels else None)
+    write_test_labels(
+        env.ARTIFACT_DIR,
+        labels,
+        kpi_labels=kpi_labels if kpi_labels else None,
+        mlflow_destination=mlflow_destination,
+    )
     logger.info("Created test labels: %s", labels)
 
     # Dump config.project to config.yaml
@@ -364,6 +381,14 @@ def do_test() -> int:
         # Delete all existing resources if configured
         cleanup_existing_resources(namespace)
 
+    try:
+        from projects.caliper.orchestration.export import precreate_mlflow_run_if_configured
+
+        mlflow_destination = precreate_mlflow_run_if_configured()
+    except Exception:
+        logger.warning("MLflow run pre-creation failed; continuing", exc_info=True)
+        mlflow_destination = None
+
     endpoint_url: str | None = None
     primary_exc: tuple[type[BaseException], BaseException, Any] | None = None
     finalizer_exc: tuple[type[BaseException], BaseException, Any] | None = None
@@ -371,7 +396,7 @@ def do_test() -> int:
     actual_llmisvc_name = "llmisvc-na-not-computed"
     try:
         # Create test labels with actual model and profile information
-        create_test_labels()
+        create_test_labels(mlflow_destination=mlflow_destination)
 
         # Generate the LLMInferenceService name before deployment
         # so we have it available even if deployment fails

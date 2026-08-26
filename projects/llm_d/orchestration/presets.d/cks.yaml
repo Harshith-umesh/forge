@@ -18,6 +18,7 @@ cks:
     gpu.nvidia.com/class: H200
 
   cpt.kpi.labels.platform_name: CKS
+  cpt.kpi.labels.gpu_type: H200
 
 cks-intelligent:
   extends:
