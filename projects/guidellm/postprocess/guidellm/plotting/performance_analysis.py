@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,25 @@ from projects.caliper.postprocess.helpers.visualization_utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _image_to_base64(image_path: str | Path) -> str:
+    """Convert an image file to a base64 data URI.
+
+    Args:
+        image_path: Path to the image file
+
+    Returns:
+        Base64 data URI string
+    """
+    try:
+        with open(image_path, "rb") as img_file:
+            img_data = img_file.read()
+            img_b64 = base64.b64encode(img_data).decode("utf-8")
+            return f"data:image/png;base64,{img_b64}"
+    except Exception as e:
+        logger.warning(f"Failed to convert image to base64: {e}")
+        return ""
 
 
 # Filesystem-unsafe characters for path sanitization
@@ -1023,12 +1043,6 @@ def generate_deployment_profile_report(
             border-radius: 4px;
         }}
 
-        .plot-container iframe, iframe {{
-            max-width: 100%;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            margin: 10px 0;
-        }}
     </style>
 
     <script>
@@ -1126,11 +1140,13 @@ def generate_deployment_profile_report(
 
             if throughput_plot:
                 plot_name, png_path, html_path = throughput_plot
+                # Convert PNG to base64 data URI
+                png_base64 = _image_to_base64(Path(output_dir) / png_path)
                 html_content += f"""
         <div style='padding:20px;'>
             <h4>🚀 {plot_name}</h4>
             <p>Token generation throughput scaling analysis across different concurrency levels.</p>
-            <iframe src='{html_path}' width='100%' height='600' frameborder='0' title='{plot_name} - Interactive Plot'></iframe>
+            <img src='{png_base64}' style='width: 100%; max-width: 800px; height: auto; border: 1px solid #ddd; border-radius: 4px;' alt='{plot_name}' title='{plot_name}'/>
         </div>
     </div>"""
             else:
@@ -1419,12 +1435,6 @@ def generate_comprehensive_performance_report(
             border-radius: 4px;
         }}
 
-        .plot-container iframe, iframe {{
-            max-width: 100%;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            margin: 10px 0;
-        }}
     </style>
 
     <script>
@@ -1527,16 +1537,18 @@ def generate_comprehensive_performance_report(
                 "Latency vs Throughput": "Trade-off analysis between latency and throughput performance.",
             }
 
-            for tab_idx, (plot_name, _png_path, html_path) in enumerate(plots):
+            for tab_idx, (plot_name, png_path, _html_path) in enumerate(plots):
                 active_class = " active" if tab_idx == 0 else ""
                 description = descriptions.get(plot_name, f"{plot_name} performance analysis.")
+                # Convert PNG to base64 data URI
+                png_base64 = _image_to_base64(Path(output_dir) / png_path)
 
                 html_content += f"""
             <div id='tab-{container_id}-{tab_idx}' class='tab-content{active_class}'>
                 <div style='padding:20px;'>
                     <h4>{plot_name}</h4>
                     <p>{description}</p>
-                    <iframe src='{html_path}' width='100%' height='600' frameborder='0' title='{plot_name} - Interactive Plot'></iframe>
+                    <img src='{png_base64}' style='width: 100%; max-width: 800px; height: auto; border: 1px solid #ddd; border-radius: 4px;' alt='{plot_name}' title='{plot_name}'/>
                 </div>
             </div>"""
 
@@ -1633,6 +1645,7 @@ def _create_comprehensive_html_report_with_images(
     plots_data: list[tuple[str, str, str]],
     summary_stats: dict[str, Any],
     title_context: str,
+    output_dir: Path,
     display_title: str = "GuideLLM Performance Analysis",
 ) -> str:
     """Create comprehensive HTML performance analysis report with embedded or linked images."""
@@ -1687,13 +1700,6 @@ def _create_comprehensive_html_report_with_images(
             cursor: pointer;
         }}
 
-        .plot-section iframe {{
-            width: 100%;
-            height: 600px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            margin: 10px 0;
-        }}
         .plot-link {{
             display: inline-block;
             margin: 10px 15px 10px 0;
@@ -1736,14 +1742,15 @@ def _create_comprehensive_html_report_with_images(
 
     # Analysis plots section
     if plots_data:
-        for plot_name, _png_path, html_path in plots_data:
-            # Image linked to HTML version
+        for plot_name, png_path, _html_path in plots_data:
+            # Convert PNG to base64 data URI for embedding
+            png_base64 = _image_to_base64(Path(output_dir) / png_path)
             html_parts.append(f"""
     <div class="plot-section">
         <h3>📈 {plot_name}</h3>
-        <iframe src="{html_path}" width="100%" height="600" frameborder="0" title="{plot_name} - Interactive Plot"></iframe>
+        <img src="{png_base64}" style="width: 100%; max-width: 800px; height: auto; border: 1px solid #ddd; border-radius: 5px; margin: 10px 0;" alt="{plot_name}" title="{plot_name}"/>
         <br>
-        <small>💡 Interactive plot - you can zoom, pan, and interact with the data</small>
+        <small>💡 Performance visualization with comprehensive metrics analysis</small>
     </div>""")
 
     # Footer
