@@ -45,7 +45,7 @@ def run_parse(
     base_dir = base_dir.resolve()
 
     # Discover test bases
-    nodes = discover_test_bases(
+    nodes, excluded_dirs = discover_test_bases(
         base_dir,
         include_label_filter=include_label_filter,
         exclude_label_filter=exclude_label_filter,
@@ -136,6 +136,26 @@ def run_parse(
             f"⏱️  Parse timing summary: {total_parse_time:.3f}s total ({cached_count} cached, {parsed_count} parsed)"
         )
 
+    # Log excluded directories if verbose parsing is enabled or if there are exclusions
+    if excluded_dirs and (verbose_parsing or len(excluded_dirs) > 0):
+        logger.info(
+            f"📁 Found {len(nodes)} test directories, excluded {len(excluded_dirs)} directories:"
+        )
+
+        # Group by exclusion reason
+        by_reason = {}
+        for excluded in excluded_dirs:
+            reason = excluded["reason"]
+            by_reason.setdefault(reason, []).append(excluded)
+
+        for reason, dirs in by_reason.items():
+            logger.info(f"   • {reason}: {len(dirs)} directories")
+            if verbose_parsing:
+                for d in dirs[:5]:  # Show first 5 examples
+                    logger.info(f"     - {d['path']}: {d['detail']}")
+                if len(dirs) > 5:
+                    logger.info(f"     ... and {len(dirs) - 5} more")
+
     # Create unified model with all records
     cache_ref_summary = f"per-test-base: {len(cache_refs)} cache files"
     model = UnifiedRunModel(
@@ -144,6 +164,7 @@ def run_parse(
         test_nodes=nodes,
         unified_result_records=all_records,
         parse_cache_ref=cache_ref_summary,
+        excluded_test_directories=excluded_dirs,
     )
 
     if all_warnings and force_report_partial:

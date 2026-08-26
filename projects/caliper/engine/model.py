@@ -47,6 +47,7 @@ class UnifiedRunModel:
     unified_result_records: list[UnifiedResultRecord]
     parse_cache_ref: str | None = None
     schema_version: str = "1"
+    excluded_test_directories: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
