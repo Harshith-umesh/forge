@@ -161,6 +161,48 @@ def capture_podmonitors(args, context):
     return "PodMonitors captured"
 
 
+@task
+def capture_kserve_objects(args, context):
+    """Capture KServe objects in YAML format (ignoring errors)"""
+
+    # Capture ServingRuntimes (namespaced)
+    shell.run(
+        f"oc get servingruntimes -n {context.target_namespace} -oyaml",
+        stdout_dest=args.artifact_dir / "artifacts/kserve.servingruntimes.yaml",
+        check=False,
+    )
+
+    # Capture ClusterServingRuntimes (cluster-scoped)
+    shell.run(
+        "oc get clusterservingruntimes -oyaml",
+        stdout_dest=args.artifact_dir / "artifacts/kserve.clusterservingruntimes.yaml",
+        check=False,
+    )
+
+    # Capture InferenceServices (if any exist alongside LLMInferenceServices)
+    shell.run(
+        f"oc get inferenceservices -n {context.target_namespace} -oyaml",
+        stdout_dest=args.artifact_dir / "artifacts/kserve.inferenceservices.yaml",
+        check=False,
+    )
+
+    # Capture KServe MutatingWebhookConfigurations
+    shell.run(
+        'oc get mutatingwebhookconfigurations -l "app.kubernetes.io/part-of=kserve" -oyaml',
+        stdout_dest=args.artifact_dir / "artifacts/kserve.mutatingwebhooks.yaml",
+        check=False,
+    )
+
+    # Capture KServe ValidatingWebhookConfigurations
+    shell.run(
+        'oc get validatingwebhookconfigurations -l "app.kubernetes.io/part-of=kserve" -oyaml',
+        stdout_dest=args.artifact_dir / "artifacts/kserve.validatingwebhooks.yaml",
+        check=False,
+    )
+
+    return "KServe objects captured (errors ignored)"
+
+
 def _capture_pod_container_logs(
     args, context, output_dir, file_suffix="", oc_flags="", description="logs"
 ):
