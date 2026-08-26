@@ -418,9 +418,11 @@ def do_test() -> int:
     except Exception as e:
         primary_exc = sys.exc_info()
         update_test_labels_with_status(False, f"Test failed with exception: {str(e)}")
+        logger.exception("Test failed with exception")
     except SignalInterrupt as e:
         primary_exc = sys.exc_info()
         update_test_labels_with_status(False, f"Test interrupted: {str(e)}")
+        logger.error("Test interrupted")
     finally:
         do_finalizers = config.project.get_config("runtime.run_test_finalizers")
         if primary_exc and isinstance(primary_exc[1], SignalInterrupt):
