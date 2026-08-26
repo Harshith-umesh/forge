@@ -449,23 +449,25 @@ def _run_analyse_kpis(
         )
 
         # Convert to expected format
+        result_data = {
+            "status": status_data.get(
+                "status", "failed" if not status_data.get("success") else "success"
+            ),
+            "completed_at": time.time(),
+            "log_file": log_file,
+        }
+
+        # Add success-specific fields
         if status_data.get("success"):
-            return {
-                "status": "success",
-                "output_file": _make_path_relative_to_base(output_file, env.ARTIFACT_DIR),
-                "findings_count": status_data.get("findings_count", 0),
-                "regressions_count": status_data.get("regressions_count", 0),
-                "improvements_count": status_data.get("improvements_count", 0),
-                "completed_at": time.time(),
-                "log_file": log_file,
-            }
-        else:
-            return {
-                "status": "failed",
-                "error": result.get("error", "Analysis failed"),
-                "completed_at": time.time(),
-                "log_file": None,
-            }
+            result_data["output_file"] = _make_path_relative_to_base(output_file, env.ARTIFACT_DIR)
+
+        # Add optional fields if present
+        if status_data.get("message"):
+            result_data["message"] = status_data["message"]
+        if status_data.get("error"):
+            result_data["error"] = status_data["error"]
+
+        return result_data
 
     except Exception as e:
         logger.exception("KPI analysis failed in _run_analyse_kpis")
