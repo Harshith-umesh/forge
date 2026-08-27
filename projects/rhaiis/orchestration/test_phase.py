@@ -678,7 +678,7 @@ def _upload_predictor_log(run_uuid: str) -> None:
     from projects.rhaiis.postprocess.s3_dashboard import upload_predictor_log_to_s3
 
     matches = sorted(
-        Path(env.ARTIFACT_DIR).glob("*__capture_isvc_state/artifacts/inferenceservice.pods.logs")
+        Path(env.ARTIFACT_DIR).glob("*__capture_isvc_state/artifacts/inferenceservice.pods.log")
     )
     log_path = matches[-1] if matches else None
     if not log_path or not log_path.exists():

@@ -123,7 +123,7 @@ def capture_pod_logs(args, context):
     if not pod_names or not result.stdout.strip():
         return "No pods found to capture logs"
 
-    log_file = args.artifact_dir / "artifacts/inferenceservice.pods.logs"
+    log_file = args.artifact_dir / "artifacts/inferenceservice.pods.log"
 
     with open(log_file, "w") as f:
         for pod_name in pod_names:
@@ -152,7 +152,7 @@ def capture_pod_previous_logs(args, context):
     if not pod_names or not result.stdout.strip():
         return "No pods found to capture previous logs"
 
-    log_file = args.artifact_dir / "artifacts/inferenceservice.pods.previous.logs"
+    log_file = args.artifact_dir / "artifacts/inferenceservice.pods.previous.log"
 
     with open(log_file, "w") as f:
         for pod_name in pod_names:
