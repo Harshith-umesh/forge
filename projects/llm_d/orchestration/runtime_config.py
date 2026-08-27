@@ -536,6 +536,20 @@ def get_deployment_profile() -> dict[str, Any]:
         }
         resolved_profile = deep_merge(resolved_profile, scheduler_node_selector)
 
+    # Configure scheduler tolerations from platform config
+    platform_tolerations = config.project.get_config(
+        "platform.inference_service.scheduler.tolerations"
+    )
+    if platform_tolerations:
+        scheduler_tolerations = {
+            "scheduler": {
+                "template": {
+                    "tolerations": platform_tolerations,
+                }
+            }
+        }
+        resolved_profile = deep_merge(resolved_profile, scheduler_tolerations)
+
     return resolved_profile
 
 
@@ -583,6 +597,11 @@ def is_pd_deployment() -> bool:
     """Check if current deployment profile is a P/D deployment."""
     profile = get_deployment_profile()
     return "pd_config" in profile
+
+
+def is_pd_efa_enabled() -> bool:
+    """Check if EFA is enabled for PD deployments."""
+    return config.project.get_config("deployments.pd.efa.enabled", default_value=False)
 
 
 def get_smoke_request() -> dict[str, Any]:

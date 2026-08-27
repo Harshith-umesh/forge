@@ -698,14 +698,14 @@ def _build_enhanced_notification(
         status_emoji = _get_overall_status_from_steps()
 
     base_status = f"**{status_emoji} Execution of `{fjob_project}` {fjob_args_str} {status_emoji}**"
-    notification_parts = [base_status]
+
+    notification_parts = [base_status, "---"]
 
     # Add job abort message right below overall status if applicable
     if shutdown_status and shutdown_status.get("is_aborted"):
         shutdown_value = shutdown_status.get("shutdown_value", "Stop")
         notification_parts.append(f"🛑 **JOB ABORTED** - `spec.shutdown={shutdown_value}`")
-
-    notification_parts.append("---")
+        notification_parts.append("")
 
     execution_engine_config = _get_execution_engine_config()
     if execution_engine_config:

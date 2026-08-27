@@ -4,6 +4,8 @@ __multiple: true
 cpt-reference-flavors:
   extends:
   - gpt-oss
+
+  deployments.pd.ib.enabled: true
   runtime.deployment_profile:
   - pd-d.x2-p.tp1-d.tp4-p.x8
   - intelligentrouting-tp4-x4
@@ -13,6 +15,7 @@ cpt:
   caliper.export.backend.mlflow.config.experiment: cpt-llm-d
   caliper.postprocess.s3.instance: forge-cpt
   caliper.postprocess.s3.directory: llm-d/default
+  caliper.postprocess.s3.export.enabled: true
 
 cpt-xks:
   extends:
@@ -29,8 +32,6 @@ cpt-rhoai-release:
 cpt-release-testing-rhoai:
   extends:
   - cpt-rhoai-release
-  cpt.kpi.labels.gpu_type: H200
-  cpt.kpi.labels.product_version: RHOAI-3.5-EA2
   runtime.deployment_profile:
   - release-distributed-default
   - release-precise-prefix-cache

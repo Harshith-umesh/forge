@@ -1,0 +1,37 @@
+init_container:
+  name: inject-libfabric
+  imagePullPolicy: Always
+  command: ["/bin/bash", "/artifacts/inject.sh", "/target/plugins", "/target/efa-libs"]
+  volumeMounts:
+    - name: nixl-plugins
+      mountPath: /target/plugins
+    - name: efa-libs
+      mountPath: /target/efa-libs
+
+volumes:
+  - name: nixl-plugins
+    emptyDir: {}
+  - name: efa-libs
+    emptyDir: {}
+
+volume_mounts:
+  - name: nixl-plugins
+    mountPath: /opt/nixl-plugins
+  - name: efa-libs
+    mountPath: /opt/efa-libs
+
+env:
+  - name: FI_PROVIDER
+    value: efa
+  - name: FI_EFA_USE_DEVICE_RDMA
+    value: "1"
+  - name: NIXL_PLUGIN_DIR
+    value: /opt/nixl-plugins
+  - name: LD_LIBRARY_PATH
+    value: "/opt/efa-libs:/usr/local/cuda/lib64:/opt/app-root/lib/python3.12/site-packages/.nixl_cu13.mesonpy.libs"
+
+# Note: Security context with IPC_LOCK capability is applied programmatically
+# securityContext:
+#   capabilities:
+#     add:
+#       - IPC_LOCK

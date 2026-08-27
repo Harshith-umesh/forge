@@ -1,3 +1,5 @@
+__multiple: true
+
 rhoai-rc:
   platform.rhoai.custom_catalog.enabled: true
   platform.operators.rhods-operator.channel: beta
@@ -6,3 +8,9 @@ rhoai-3.5-ea.2:
   extends: [rhoai-rc]
   cpt.kpi.labels.product_version: RHOAI-3.5-EA2
   platform.rhoai.custom_catalog.image: quay.io/rhoai/rhoai-fbc-fragment@sha256:e213152dc5bdaaf5724d269484914f3e1d7b4a4959d4405cb3eca9dd6297b310
+
+rhoai-3.5:
+  extends: [rhoai-rc]
+  platform.operators.rhods-operator.channel: stable-3.5
+  cpt.kpi.labels.product_version: RHOAI-3.5.0-RC2
+  platform.rhoai.custom_catalog.image: quay.io/rhoai/rhoai-fbc-fragment@sha256:97f5ab3316dce79c2e12839b2c7186eac4700abd9e17aa098d1d7ce9655f9cf6

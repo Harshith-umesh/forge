@@ -20,6 +20,7 @@ from pydantic import ValidationError
 
 from projects.caliper.orchestration.caliper_invocation import (
     _execute_caliper_command,
+    _generate_automatic_status_file_path,
     run_analyse_kpis,
 )
 from projects.caliper.orchestration.cli_builder import (
@@ -158,8 +159,7 @@ def _run_artifacts_to_kpis(
         output_file = output_dir / configured_output
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
-        # Create temporary status file for subprocess communication
-        status_file = output_dir / "kpi_generate_status.yaml"
+        status_file = _generate_automatic_status_file_path(output_dir, "kpi_generate")
 
         # Build CLI command
         command = build_kpi_generate_command(
@@ -177,12 +177,6 @@ def _run_artifacts_to_kpis(
             status_file=status_file,
             step_logs_dir=step_logs_dir,
         )
-
-        # Clean up temporary status file
-        try:
-            status_file.unlink()
-        except FileNotFoundError:
-            pass
 
         # Convert to expected format
         if status_data.get("success"):
@@ -238,7 +232,7 @@ def _run_artifacts_to_ai_data(
         output_file = ai_data_dir / "ai_data_payload.json"
 
         # Create temporary status file for subprocess communication
-        status_file = output_dir / "ai_eval_export_status.yaml"
+        status_file = _generate_automatic_status_file_path(output_dir, "ai_eval_export")
 
         # Build CLI command
         command = build_ai_eval_export_command(
@@ -257,12 +251,6 @@ def _run_artifacts_to_ai_data(
             status_file=status_file,
             step_logs_dir=step_logs_dir,
         )
-
-        # Clean up temporary status file
-        try:
-            status_file.unlink()
-        except FileNotFoundError:
-            pass
 
         # Convert to expected format
         if status_data.get("success"):
@@ -357,7 +345,7 @@ def _run_kpis_to_csv(
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
         # Create temporary status file for subprocess communication
-        status_file = output_dir / "kpi_csv_export_status.yaml"
+        status_file = _generate_automatic_status_file_path(output_dir, "kpi_csv_export")
 
         # Build CLI command
         command = build_kpi_csv_export_command(
@@ -376,12 +364,6 @@ def _run_kpis_to_csv(
             status_file=status_file,
             step_logs_dir=step_logs_dir,
         )
-
-        # Clean up temporary status file
-        try:
-            status_file.unlink()
-        except FileNotFoundError:
-            pass
 
         # Convert to expected format
         if status_data.get("success"):
@@ -445,7 +427,7 @@ def _run_analyse_kpis(
             historical_kpis_dir = output_dir / historical_kpis_dir
 
         # Create temporary status file for subprocess communication
-        status_file = output_dir / "analyse_kpis_status.yaml"
+        status_file = _generate_automatic_status_file_path(output_dir, "analyse_kpis")
 
         # Build CLI command
         command = build_analyse_kpis_command(
@@ -466,30 +448,26 @@ def _run_analyse_kpis(
             step_logs_dir=step_logs_dir,
         )
 
-        # Clean up temporary status file
-        try:
-            status_file.unlink()
-        except FileNotFoundError:
-            pass
-
         # Convert to expected format
+        result_data = {
+            "status": status_data.get(
+                "status", "failed" if not status_data.get("success") else "success"
+            ),
+            "completed_at": time.time(),
+            "log_file": log_file,
+        }
+
+        # Add success-specific fields
         if status_data.get("success"):
-            return {
-                "status": "success",
-                "output_file": _make_path_relative_to_base(output_file, env.ARTIFACT_DIR),
-                "findings_count": status_data.get("findings_count", 0),
-                "regressions_count": status_data.get("regressions_count", 0),
-                "improvements_count": status_data.get("improvements_count", 0),
-                "completed_at": time.time(),
-                "log_file": log_file,
-            }
-        else:
-            return {
-                "status": "failed",
-                "error": result.get("error", "Analysis failed"),
-                "completed_at": time.time(),
-                "log_file": None,
-            }
+            result_data["output_file"] = _make_path_relative_to_base(output_file, env.ARTIFACT_DIR)
+
+        # Add optional fields if present
+        if status_data.get("message"):
+            result_data["message"] = status_data["message"]
+        if status_data.get("error"):
+            result_data["error"] = status_data["error"]
+
+        return result_data
 
     except Exception as e:
         logger.exception("KPI analysis failed in _run_analyse_kpis")
@@ -763,9 +741,6 @@ class CaliperPostprocessOrchestrator:
             return
 
         # Create automatic status file path
-        from projects.caliper.orchestration.caliper_invocation import (
-            _generate_automatic_status_file_path,
-        )
 
         status_file = _generate_automatic_status_file_path(self.tree_root, "parse")
 
@@ -846,10 +821,6 @@ class CaliperPostprocessOrchestrator:
                 },
                 None,  # No log file if we couldn't even start
             )
-        finally:
-            # Clean up temporary status file
-            if status_file.exists():
-                status_file.unlink()
 
     def _run_visualize_step(self) -> None:
         """Execute the visualize step if enabled."""
@@ -857,9 +828,6 @@ class CaliperPostprocessOrchestrator:
             return
 
         # Create automatic status file path
-        from projects.caliper.orchestration.caliper_invocation import (
-            _generate_automatic_status_file_path,
-        )
 
         status_file = _generate_automatic_status_file_path(self.tree_root, "visualize")
 
@@ -965,10 +933,6 @@ class CaliperPostprocessOrchestrator:
                 },
                 None,  # No log file if we couldn't even start
             )
-        finally:
-            # Clean up temporary status file
-            if status_file.exists():
-                status_file.unlink()
 
     def _run_kpi_and_ai_data_steps(self) -> None:
         """Execute KPI generation, CSV export, KPI export, and AI evaluation steps."""
@@ -1069,7 +1033,7 @@ class CaliperPostprocessOrchestrator:
 
         kpis_json_path = output_dir / self.config.kpi.artifacts_to_kpis.output
 
-        status_file = output_dir / "kpis_to_mlflow_status.yaml"
+        status_file = _generate_automatic_status_file_path(output_dir, "kpis_to_mlflow")
 
         command = build_kpis_to_mlflow_command(
             tree_root=self.tree_root,
@@ -1083,11 +1047,6 @@ class CaliperPostprocessOrchestrator:
             status_file=status_file,
             step_logs_dir=self.step_logs_dir,
         )
-
-        try:
-            status_file.unlink()
-        except FileNotFoundError:
-            pass
 
         step_result = {
             "status": "success" if status_data.get("success") else "failed",
@@ -1182,7 +1141,7 @@ class CaliperPostprocessOrchestrator:
 
         try:
             # Create temporary status file for subprocess communication
-            status_file = output_dir / "s3_import_status.yaml"
+            status_file = _generate_automatic_status_file_path(output_dir, "s3_import")
 
             # Build CLI command
             command = build_s3_import_command(
@@ -1198,12 +1157,6 @@ class CaliperPostprocessOrchestrator:
                 status_file=status_file,
                 step_logs_dir=self.step_logs_dir,
             )
-
-            # Clean up temporary status file
-            try:
-                status_file.unlink()
-            except FileNotFoundError:
-                pass
 
             # Convert to expected format
             if status_data.get("success"):
@@ -1300,7 +1253,10 @@ class CaliperPostprocessOrchestrator:
                 result["status"] = "success"
                 logger.info("fail_on_regression is not set, setting the status to 'success'")
 
-        self._check_step_result_and_set_failure("analyse_kpis", result)
+        if not self.config.analyze.fail_on_regression:
+            logger.info("analyse_kpis warning ignored: fail_on_regression is not set")
+        else:
+            self._check_step_result_and_set_failure("analyse_kpis", result)
 
     def _run_s3_export_step(self, output_dir: Path) -> None:
         """Execute the S3 export step."""
@@ -1370,7 +1326,7 @@ class CaliperPostprocessOrchestrator:
                 analysis_file = env.ARTIFACT_DIR / analyze_step["output_file"]
 
             # Create temporary status file for subprocess communication
-            status_file = output_dir / "s3_export_status.yaml"
+            status_file = _generate_automatic_status_file_path(output_dir, "s3_export")
 
             # Build CLI command
             command = build_s3_export_command(
@@ -1389,12 +1345,6 @@ class CaliperPostprocessOrchestrator:
                 status_file=status_file,
                 step_logs_dir=self.step_logs_dir,
             )
-
-            # Clean up temporary status file
-            try:
-                status_file.unlink()
-            except FileNotFoundError:
-                pass
 
             # Convert to expected format
             if status_data.get("success"):

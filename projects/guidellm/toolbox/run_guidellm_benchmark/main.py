@@ -21,6 +21,7 @@ from projects.guidellm.toolbox.run_guidellm_benchmark.utils import (
     render_guidellm_copy_pod_from_parts,
     render_guidellm_job_from_parts,
     render_guidellm_pvc_from_parts,
+    render_guidellm_shared_volume_job_from_parts,
 )
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,7 @@ def run(
     hf_token_secret: str = "",
     fs_group: int | None = None,
     keep_full_benchmark_file: bool = False,
+    use_pvc: bool = False,
 ) -> int:
     """
     Run the GuideLLM benchmark against a resolved endpoint.
@@ -69,11 +71,12 @@ def run(
         namespace: Namespace to run the benchmark job in (empty string auto-detects current namespace)
         image: Full container image reference for the benchmark
         timeout: Active deadline for the Job and timeout in seconds to wait for completion
-        pvc_size: Size of the PersistentVolumeClaim for storing results
+        pvc_size: Size of the PersistentVolumeClaim for storing results (only used in PVC mode)
         guidellm_args: List of additional guidellm arguments (e.g., ["--rate=10", "--max-seconds=30"])
         hf_token_secret: Name of the K8s secret containing HF_TOKEN. If empty, HF_TOKEN is not injected.
         fs_group: If set, adds securityContext.fsGroup to the GuideLLM job pod.
         keep_full_benchmark_file: Whether to keep the full untrimmed benchmark JSON files alongside trimmed ones (default: False)
+        use_pvc: Use PVC with copy pod instead of shared emptyDir volume with sidecar (default: False)
     """
 
     if timeout <= 0:
@@ -111,15 +114,26 @@ def validate_parameters(args, ctx):
 def cleanup_previous_guidellm_resources_task(args, ctx):
     """Delete previous GuideLLM benchmark helper resources"""
 
-    _best_effort_delete(
-        "GuideLLM benchmark copy pod",
-        "delete",
-        "pod",
-        f"{ctx.benchmark_name}-copy",
-        "-n",
-        ctx.target_namespace,
-        "--ignore-not-found=true",
-    )
+    if args.use_pvc:
+        _best_effort_delete(
+            "GuideLLM benchmark copy pod",
+            "delete",
+            "pod",
+            f"{ctx.benchmark_name}-copy",
+            "-n",
+            ctx.target_namespace,
+            "--ignore-not-found=true",
+        )
+        _best_effort_delete(
+            "GuideLLM benchmark PVC",
+            "delete",
+            "pvc",
+            ctx.benchmark_name,
+            "-n",
+            ctx.target_namespace,
+            "--ignore-not-found=true",
+        )
+
     _best_effort_delete(
         "GuideLLM benchmark job",
         "delete",
@@ -129,16 +143,9 @@ def cleanup_previous_guidellm_resources_task(args, ctx):
         ctx.target_namespace,
         "--ignore-not-found=true",
     )
-    _best_effort_delete(
-        "GuideLLM benchmark PVC",
-        "delete",
-        "pvc",
-        ctx.benchmark_name,
-        "-n",
-        ctx.target_namespace,
-        "--ignore-not-found=true",
-    )
-    return f"Deleted previous GuideLLM resources for {ctx.benchmark_name}"
+
+    mode = "PVC" if args.use_pvc else "shared volume"
+    return f"Deleted previous GuideLLM resources for {ctx.benchmark_name} ({mode} mode)"
 
 
 def _best_effort_delete(description: str, *oc_args: str) -> None:
@@ -150,61 +157,90 @@ def _best_effort_delete(description: str, *oc_args: str) -> None:
 
 @task
 def create_guidellm_resources_task(args, ctx):
-    """Create the GuideLLM benchmark job and PVC with job as owner"""
+    """Create the GuideLLM benchmark job and optionally PVC with job as owner"""
 
     # Ensure src directory exists
     (args.artifact_dir / "src").mkdir(parents=True, exist_ok=True)
 
-    # Create the job first
-    oc_apply(
-        args.artifact_dir / "src" / "guidellm-job.yaml",
-        render_guidellm_job_from_parts(
-            namespace=ctx.target_namespace,
-            name=ctx.benchmark_name,
-            image=ctx.image,
-            endpoint_url=args.endpoint_url,
-            guidellm_args=ctx.guidellm_args,
-            timeout_seconds=args.timeout,
-            hf_token_secret=args.hf_token_secret,
-            fs_group=args.fs_group,
-        ),
-    )
+    # Create the job based on mode
+    if args.use_pvc:
+        # PVC mode - traditional single container job + PVC
+        oc_apply(
+            args.artifact_dir / "src" / "guidellm-job.yaml",
+            render_guidellm_job_from_parts(
+                namespace=ctx.target_namespace,
+                name=ctx.benchmark_name,
+                image=ctx.image,
+                endpoint_url=args.endpoint_url,
+                guidellm_args=ctx.guidellm_args,
+                timeout_seconds=args.timeout,
+                hf_token_secret=args.hf_token_secret,
+                fs_group=args.fs_group,
+            ),
+        )
 
-    # Get the job metadata for owner reference
-    job_data = oc_get_json("job", name=ctx.benchmark_name, namespace=ctx.target_namespace)
+        # Get the job metadata for owner reference
+        job_data = oc_get_json("job", name=ctx.benchmark_name, namespace=ctx.target_namespace)
 
-    # Create owner reference from job metadata
-    owner_reference = {
-        "apiVersion": "batch/v1",
-        "kind": "Job",
-        "name": job_data["metadata"]["name"],
-        "uid": job_data["metadata"]["uid"],
-        "controller": True,
-        "blockOwnerDeletion": True,
-    }
+        # Create owner reference from job metadata
+        owner_reference = {
+            "apiVersion": "batch/v1",
+            "kind": "Job",
+            "name": job_data["metadata"]["name"],
+            "uid": job_data["metadata"]["uid"],
+            "controller": True,
+            "blockOwnerDeletion": True,
+        }
 
-    # Create the PVC with job as owner
-    oc_apply(
-        args.artifact_dir / "src" / "guidellm-pvc.yaml",
-        render_guidellm_pvc_from_parts(
-            namespace=ctx.target_namespace,
-            name=ctx.benchmark_name,
-            pvc_size=args.pvc_size,
-            pvc_storage_class=args.pvc_storage_class,
-            owner_reference=owner_reference,
-        ),
-    )
+        # Create the PVC with job as owner
+        oc_apply(
+            args.artifact_dir / "src" / "guidellm-pvc.yaml",
+            render_guidellm_pvc_from_parts(
+                namespace=ctx.target_namespace,
+                name=ctx.benchmark_name,
+                pvc_size=args.pvc_size,
+                pvc_storage_class=args.pvc_storage_class,
+                owner_reference=owner_reference,
+            ),
+        )
 
-    ctx.wait_deadline = time.monotonic() + args.timeout + JOB_COMPLETION_GRACE_SECONDS
-    return f"GuideLLM benchmark {ctx.benchmark_name} created with job as PVC owner"
+        ctx.wait_deadline = time.monotonic() + args.timeout + JOB_COMPLETION_GRACE_SECONDS
+        return f"GuideLLM benchmark {ctx.benchmark_name} created with job as PVC owner"
+    else:
+        # Shared volume mode - job with main + sidecar containers
+        oc_apply(
+            args.artifact_dir / "src" / "guidellm-job.yaml",
+            render_guidellm_shared_volume_job_from_parts(
+                namespace=ctx.target_namespace,
+                name=ctx.benchmark_name,
+                image=ctx.image,
+                endpoint_url=args.endpoint_url,
+                guidellm_args=ctx.guidellm_args,
+                timeout_seconds=args.timeout,
+                hf_token_secret=args.hf_token_secret,
+                fs_group=args.fs_group,
+            ),
+        )
+        ctx.wait_deadline = time.monotonic() + args.timeout + JOB_COMPLETION_GRACE_SECONDS
+        return (
+            f"GuideLLM benchmark {ctx.benchmark_name} created with shared volume (main + sidecar)"
+        )
 
 
 # An upper safety bound only; ctx.wait_deadline enforces the per-run timeout.
 @retry(attempts=1080, delay=WAIT_POLL_INTERVAL_SECONDS, backoff=1.0)
 @task
 def wait_guidellm_benchmark_task(args, ctx):
-    """Wait for the GuideLLM benchmark job to complete"""
+    """Wait for the GuideLLM benchmark to complete"""
 
+    if args.use_pvc:
+        return wait_job_completion(args, ctx)
+    else:
+        return wait_main_container_completion(args, ctx)
+
+
+def wait_job_completion(args, ctx):
+    """Wait for the entire job to complete (PVC mode)"""
     # Check if job is still active first
     active_result = oc(
         "get",
@@ -224,6 +260,19 @@ def wait_guidellm_benchmark_task(args, ctx):
             raise TimeoutError(
                 f"GuideLLM benchmark {ctx.benchmark_name} did not complete within {args.timeout}s"
             )
+
+        # Show pod status while waiting
+        oc(
+            "get",
+            "pods",
+            "-n",
+            ctx.target_namespace,
+            "-l",
+            f"job-name={ctx.benchmark_name}",
+            "-o",
+            "wide",
+        )
+
         logger.info("Job %s is still active, retrying...", ctx.benchmark_name)
         return False  # Retry immediately
 
@@ -266,7 +315,7 @@ def wait_guidellm_benchmark_task(args, ctx):
         failure_message = f"""GuideLLM benchmark job '{ctx.benchmark_name}' failed.
 
 Check the job logs for detailed error information:
-  artifacts/guidellm_benchmark_job.logs
+  artifacts/guidellm_benchmark_job.log
 """
         write_text(failure_file, failure_message)
         logger.error(
@@ -280,6 +329,85 @@ Check the job logs for detailed error information:
         raise TimeoutError(
             f"GuideLLM benchmark {ctx.benchmark_name} did not complete within {args.timeout}s"
         )
+    return False  # Retry
+
+
+def wait_main_container_completion(args, ctx):
+    """Wait for the main container to complete (shared volume mode)"""
+    if time.monotonic() >= ctx.wait_deadline:
+        raise TimeoutError(
+            f"GuideLLM benchmark {ctx.benchmark_name} did not complete within {args.timeout}s"
+        )
+
+    # Get pod information
+    pod_result = oc(
+        "get",
+        "pods",
+        "-n",
+        ctx.target_namespace,
+        "-l",
+        f"job-name={ctx.benchmark_name}",
+        "-o",
+        "jsonpath={.items[0].metadata.name}",
+        check=False,
+    )
+
+    if pod_result.returncode != 0 or not pod_result.stdout.strip():
+        logger.info("Pod for job %s not ready yet, retrying...", ctx.benchmark_name)
+        return False  # Retry
+
+    pod_name = pod_result.stdout.strip()
+
+    # Check main container status
+    main_status_result = oc(
+        "get",
+        "pod",
+        pod_name,
+        "-n",
+        ctx.target_namespace,
+        "-o",
+        "jsonpath={.status.containerStatuses[?(@.name=='guidellm-main')].state}",
+        check=False,
+    )
+
+    if main_status_result.returncode != 0:
+        logger.info("Could not get main container status, retrying...")
+        return False  # Retry
+
+    try:
+        import json
+
+        container_state = json.loads(main_status_result.stdout.strip())
+    except (json.JSONDecodeError, AttributeError):
+        logger.info("Main container state not available yet, retrying...")
+        return False  # Retry
+
+    # Check if main container has terminated
+    if "terminated" in container_state:
+        terminated_info = container_state["terminated"]
+        exit_code = terminated_info.get("exitCode", 0)
+
+        if exit_code == 0:
+            logger.info("Main container completed successfully")
+            return f"GuideLLM benchmark main container {ctx.benchmark_name} completed successfully"
+        else:
+            # Main container failed
+            failure_file = args.artifact_dir / "FAILURE.txt"
+            failure_message = f"""GuideLLM benchmark main container '{ctx.benchmark_name}' failed with exit code {exit_code}.
+
+Check the job logs for detailed error information:
+  artifacts/guidellm_benchmark_job.log
+"""
+            write_text(failure_file, failure_message)
+            logger.error(
+                "GuideLLM main container %s failed with exit code %s",
+                ctx.benchmark_name,
+                exit_code,
+            )
+            raise RuntimeError(f"GuideLLM main container {ctx.benchmark_name} failed")
+
+    # Main container still running
+    logger.info("Main container for job %s still running, retrying...", ctx.benchmark_name)
     return False  # Retry
 
 
@@ -298,7 +426,10 @@ def capture_guidellm_state_task(args, ctx):
 
 @task
 def create_copy_pod(args, ctx):
-    """Create copy pod for GuideLLM results"""
+    """Create copy pod for GuideLLM results (PVC mode only)"""
+
+    if not args.use_pvc:
+        return "Skipping copy pod creation for shared volume mode"
 
     pod_data = oc_get_json(
         "pods",
@@ -325,7 +456,10 @@ def create_copy_pod(args, ctx):
 @retry(attempts=60, delay=5, backoff=1.0)
 @task
 def wait_copy_pod_ready(args, ctx):
-    """Wait for copy pod to be ready"""
+    """Wait for copy pod to be ready (PVC mode only)"""
+
+    if not args.use_pvc:
+        return "Skipping copy pod wait for shared volume mode"
 
     payload = oc_get_json(
         "pod",
@@ -343,10 +477,19 @@ def wait_copy_pod_ready(args, ctx):
 
 @task
 def extract_results(args, ctx):
-    """Extract GuideLLM results from copy pod"""
+    """Extract GuideLLM results from copy pod (PVC mode) or sidecar (shared volume mode)"""
 
     results_dir = args.artifact_dir / "artifacts" / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.use_pvc:
+        return extract_results_from_copy_pod(args, ctx, results_dir)
+    else:
+        return extract_results_from_sidecar(args, ctx, results_dir)
+
+
+def extract_results_from_copy_pod(args, ctx, results_dir: Path):
+    """Extract results from copy pod (PVC mode)"""
     extracted_files: list[dict[str, str | None]] = []
     for run in ctx.guidellm_runs:
         if run.rate is None:
@@ -424,7 +567,124 @@ def extract_results(args, ctx):
         },
     )
 
-    return f"Extracted results for {ctx.benchmark_name}"
+    return f"Extracted results for {ctx.benchmark_name} from copy pod"
+
+
+def extract_results_from_sidecar(args, ctx, results_dir: Path):
+    """Extract results from sidecar container (shared volume mode)"""
+    # Get pod name
+    pod_result = oc(
+        "get",
+        "pods",
+        "-n",
+        ctx.target_namespace,
+        "-l",
+        f"job-name={ctx.benchmark_name}",
+        "-o",
+        "jsonpath={.items[0].metadata.name}",
+        check=False,
+    )
+
+    if pod_result.returncode != 0 or not pod_result.stdout.strip():
+        raise RuntimeError(f"Could not find pod for job {ctx.benchmark_name}")
+
+    pod_name = pod_result.stdout.strip()
+
+    extracted_files: list[dict[str, str | None]] = []
+    for run in ctx.guidellm_runs:
+        if run.rate is None:
+            remote_path = "/results/benchmarks.json"
+            local_path = results_dir / "benchmarks.json"
+        else:
+            remote_path = f"/results/benchmarks-{run.label}.json"
+            local_path = results_dir / f"benchmarks-{run.label}.json"
+
+        logger.info(f"Retrieving the compressed benchmark file for {run.label} from sidecar...")
+
+        # Save compressed version to temp file first
+        temp_gz_path = local_path.with_suffix(".json.gz")
+
+        result = oc(
+            "exec",
+            "-n",
+            ctx.target_namespace,
+            pod_name,
+            "-c",
+            "guidellm-sidecar",
+            "--",
+            "gzip",
+            "-c",
+            remote_path,
+            check=False,
+            log_stdout=False,
+            stdout_dest=temp_gz_path,
+            text=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"No results found for {ctx.benchmark_name} run {run.label}")
+
+        # Extract and parse JSON from local compressed file
+        logger.info(f"Extracting compressed benchmark file for {run.label}...")
+        try:
+            with gzip.open(temp_gz_path, "rt", encoding="utf-8") as f:
+                json_content = f.read()
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to extract compressed results for run {run.label}: {e}"
+            ) from e
+
+        # Always create trimmed version
+        logger.info(f"Trimming the benchmark.json file for {run.label}...")
+        try:
+            raw_data = json.loads(json_content)
+            cleaned_data = trim_benchmark_json(raw_data)
+            with open(local_path, "w") as f:
+                json.dump(cleaned_data, f, separators=(",", ":"))
+        except json.JSONDecodeError:
+            logger.warning(f"Failed to parse JSON for {run.label}, writing raw data")
+            write_text(local_path, json_content)
+
+        # Manage full benchmark file based on flag
+        if not args.keep_full_benchmark_file:
+            # Remove the compressed full file
+            if temp_gz_path.exists():
+                temp_gz_path.unlink()
+                logger.info(f"Removed full benchmark file {temp_gz_path.name}")
+        else:
+            logger.info(f"Keeping full benchmark file {temp_gz_path.name}")
+        extracted_files.append(
+            {
+                "label": run.label,
+                "rate": run.rate,
+                "remote_path": remote_path,
+                "local_path": str(local_path.relative_to(args.artifact_dir)),
+            }
+        )
+
+    # Create done file to signal sidecar to exit
+    logger.info("Creating done file to signal sidecar to exit...")
+    oc(
+        "exec",
+        "-n",
+        ctx.target_namespace,
+        pod_name,
+        "-c",
+        "guidellm-sidecar",
+        "--",
+        "touch",
+        "/results/done",
+        check=True,
+    )
+
+    write_json(
+        results_dir / "index.json",
+        {
+            "benchmark_name": ctx.benchmark_name,
+            "runs": extracted_files,
+        },
+    )
+
+    return f"Extracted results for {ctx.benchmark_name} from sidecar and signaled completion"
 
 
 def _copy_result_file(
@@ -517,7 +777,10 @@ def _copy_result_file(
 
 @task
 def cleanup_copy_pod(args, ctx):
-    """Delete the copy pod after results extraction"""
+    """Delete the copy pod after results extraction (PVC mode only)"""
+
+    if not args.use_pvc:
+        return "Skipping copy pod cleanup for shared volume mode"
 
     _best_effort_delete(
         "GuideLLM benchmark copy pod",
@@ -533,7 +796,7 @@ def cleanup_copy_pod(args, ctx):
 
 @task
 def cleanup_guidellm_resources(args, ctx):
-    """Delete the GuideLLM benchmark job and PVC at the end"""
+    """Delete the GuideLLM benchmark job and optionally PVC at the end"""
 
     _best_effort_delete(
         "GuideLLM benchmark job",
@@ -544,16 +807,20 @@ def cleanup_guidellm_resources(args, ctx):
         ctx.target_namespace,
         "--ignore-not-found=true",
     )
-    _best_effort_delete(
-        "GuideLLM benchmark PVC",
-        "delete",
-        "pvc",
-        ctx.benchmark_name,
-        "-n",
-        ctx.target_namespace,
-        "--ignore-not-found=true",
-    )
-    return f"Cleaned up GuideLLM benchmark resources for {ctx.benchmark_name}"
+
+    if args.use_pvc:
+        _best_effort_delete(
+            "GuideLLM benchmark PVC",
+            "delete",
+            "pvc",
+            ctx.benchmark_name,
+            "-n",
+            ctx.target_namespace,
+            "--ignore-not-found=true",
+        )
+
+    mode = "PVC" if args.use_pvc else "shared volume"
+    return f"Cleaned up GuideLLM benchmark resources for {ctx.benchmark_name} ({mode} mode)"
 
 
 def capture_guidellm_state(*, artifact_dir: Path, namespace: str, benchmark_name: str) -> None:
@@ -583,43 +850,20 @@ def capture_guidellm_state(*, artifact_dir: Path, namespace: str, benchmark_name
         namespace,
         check=False,
         log_stdout=False,
-        stdout_dest=artifacts_dir / "guidellm_benchmark_job.logs",
+        stdout_dest=artifacts_dir / "guidellm_benchmark_job.log",
     )
 
-    # Capture additional debugging info
+    # Capture pod descriptions for debugging
     oc(
-        "get",
+        "describe",
         "pods",
         "-n",
         namespace,
         "-l",
         f"job-name={benchmark_name}",
-        "-oyaml",
         check=False,
         log_stdout=False,
-        stdout_dest=artifacts_dir / "guidellm_benchmark_pods.yaml",
-    )
-
-    oc(
-        "get",
-        "job",
-        benchmark_name,
-        "-n",
-        namespace,
-        "-oyaml",
-        check=False,
-        log_stdout=False,
-        stdout_dest=artifacts_dir / "guidellm_benchmark_job_detailed.yaml",
-    )
-
-    oc(
-        "logs",
-        f"job/{benchmark_name}",
-        "-n",
-        namespace,
-        check=False,
-        log_stdout=False,
-        stdout_dest=artifacts_dir / "guidellm_benchmark_job_logs.txt",
+        stdout_dest=artifacts_dir / "guidellm_benchmark_pod_description.txt",
     )
 
 

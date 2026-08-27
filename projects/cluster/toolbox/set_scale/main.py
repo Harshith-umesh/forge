@@ -29,6 +29,7 @@ def run(
     force: bool = False,
     base_machineset: str = "",
     use_base_name_prefix: bool = False,
+    root_disk_size_gib: int = 0,
 ) -> int:
     """
     Scale cluster with compute nodes, auto-detecting cloud provider and using appropriate compute instance types.
@@ -45,6 +46,7 @@ def run(
         force: Force scaling down other machinesets of the same instance type
         base_machineset: Base machineset to derive from (auto-selected if not specified)
         use_base_name_prefix: Include base machineset name as prefix in generated machineset name
+        root_disk_size_gib: Root disk size in GiB for IBM Cloud instances (0 = use default)
     """
 
     execute_tasks(locals())
@@ -69,6 +71,12 @@ def validate_parameters(args, ctx):
 
     if args.taint and ":" not in args.taint:
         raise ValueError("taint must be in format 'key=value:effect'")
+
+    if args.root_disk_size_gib < 0:
+        raise ValueError("root_disk_size_gib must be >= 0")
+
+    if args.root_disk_size_gib > 0 and args.root_disk_size_gib < 25:
+        raise ValueError("root_disk_size_gib must be >= 25 GiB if specified (IBM Cloud minimum)")
 
     return f"Validated parameters for {args.replicas} compute nodes"
 
@@ -254,6 +262,16 @@ def create_compute_machineset(ctx, args):
     new_machineset["spec"]["template"]["spec"]["providerSpec"]["value"][ctx.instance_type_field] = (
         ctx.compute_instance_type
     )
+
+    # Update root disk size for IBM Cloud
+    if ctx.is_ibm and args.root_disk_size_gib > 0:
+        boot_volume = new_machineset["spec"]["template"]["spec"]["providerSpec"]["value"].get(
+            "bootVolume", {}
+        )
+        boot_volume["sizeGiB"] = args.root_disk_size_gib
+        new_machineset["spec"]["template"]["spec"]["providerSpec"]["value"]["bootVolume"] = (
+            boot_volume
+        )
 
     # Add taints if specified
     if args.taint:

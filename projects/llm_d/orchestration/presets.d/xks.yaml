@@ -1,0 +1,47 @@
+__multiple: true
+
+xks-intelligent:
+  extends:
+  - cpt-xks
+  - llama3-70b
+
+  runtime.deployment_profile:
+  - intelligentrouting-tp2-x4
+  - simple-tp2-x4
+
+  runtime.benchmark_key:
+  - heavy-heterogeneous
+  - multi-turn
+
+xks-pd:
+  extends:
+  - cpt-xks
+  - gpt-oss
+
+  runtime.deployment_profile:
+  - pd-p.tp1-p.x8-d.tp4-d.x2
+  - simple-tp4-x4
+  - intelligentrouting-tp4-x4
+
+  runtime.benchmark_key:
+  - heavy-heterogeneous
+  - multi-turn
+
+xks-smoke:
+  extends:
+  - cpt-xks
+
+  runtime.deployment_profile:
+  - intelligentrouting-tp1-x2
+  - simple-tp1-x2
+  - pd-d.x1-p.tp1-d.tp1-p.x1
+
+  runtime.benchmark_key:
+  - short
+
+xks-smoke-mini:
+  extends:
+  - xks-smoke
+
+  runtime.deployment_profile:
+  - intelligentrouting-tp1-x1

@@ -2,12 +2,12 @@ apiVersion: serving.kserve.io/v1alpha1
 kind: LLMInferenceService
 metadata:
   name: llm-d-intelligentr-4e3b09
-  namespace: forge-llm-d
   annotations:
     security.opendatahub.io/enable-auth: 'false'
     prometheus.io/path: /metrics
     prometheus.io/port: '8000'
     forge.openshift.io/deployment-profile: intelligentrouting-tp4-x4
+  namespace: forge-llm-d
   labels:
     app.kubernetes.io/managed-by: forge
     forge.openshift.io/project: llm_d
@@ -26,10 +26,7 @@ spec:
     route: {}
     gateway: {}
   template:
-    tolerations:
-    - key: nvidia.com/gpu
-      operator: Exists
-      effect: NoSchedule
+    tolerations: null
     containers:
     - name: main
       resources:

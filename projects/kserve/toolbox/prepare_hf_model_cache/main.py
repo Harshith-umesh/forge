@@ -310,7 +310,6 @@ def wait_for_pods_running(args, ctx):
         "-o",
         "custom-columns=NAME:.metadata.name,STATUS:.status.phase",
         check=False,
-        log_stdout=False,
     )
 
     if not result.stdout.strip():

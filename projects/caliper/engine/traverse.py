@@ -17,21 +17,25 @@ MATRIXBENCHMARKING_MARKER = "settings.yaml"
 def discover_test_bases(
     base_dir: Path,
     *,
-    include_label_filter: list[dict[str, str]] | None = None,
-    exclude_label_filter: list[dict[str, str]] | None = None,
-) -> list[TestBaseNode]:
+    include_label_filter: dict[str, list[str]] | None = None,
+    exclude_label_filter: dict[str, list[str]] | None = None,
+) -> tuple[list[TestBaseNode], list[dict[str, Any]]]:
     """Walk base_dir; each directory containing MARKER or MATRIXBENCHMARKING_MARKER becomes a TestBaseNode.
 
     Args:
         base_dir: Base directory to search
         include_label_filter: List of filter dicts or single dict of label key-value pairs that must match for inclusion
         exclude_label_filter: List of filter dicts or single dict of label key-value pairs that exclude directories if they match
+
+    Returns:
+        Tuple of (included nodes, excluded directories with reasons)
     """
     base_dir = base_dir.resolve()
     if not base_dir.is_dir():
         raise FileNotFoundError(f"Base directory does not exist: {base_dir}")
 
     nodes: list[TestBaseNode] = []
+    excluded_dirs: list[dict[str, Any]] = []
     for dirpath, _dirnames, filenames in os.walk(base_dir, topdown=True):
         marker_found = None
         if MARKER in filenames:
@@ -58,29 +62,74 @@ def discover_test_bases(
                 labels=labels,
                 version="matrix_benchmarking/settings",
             )
-        # Skip directory if skip: true is set in labels
-        if labels.get("skip") is True:
+        # Check for exclusion reasons
+        relative_path = str(path.relative_to(base_dir))
+
+        # Skip directory if skip: true is set at the top level of the labels file
+        # or inside the labels section (both conventions are supported).
+        if test_labels.get("skip") is True or labels.get("skip") is True:
+            excluded_dirs.append(
+                {
+                    "path": relative_path,
+                    "reason": "skip",
+                    "detail": "skip: true set in labels",
+                    "labels": labels.copy(),
+                    "marker_type": marker_found,
+                }
+            )
             continue
 
         # Apply label filtering if specified
+
         from projects.caliper.engine.label_filters import matches_filters
 
-        def _apply_filters(labels, include_filters, exclude_filters):
-            # For exclude filters, ANY match excludes (OR logic)
-            if exclude_filters:
-                for exclude_filter in exclude_filters:
-                    if not matches_filters(labels, include={}, exclude=exclude_filter):
-                        return False
+        filter_labels = labels.copy()
+        filter_labels.update(test_labels.get("kpi_labels", {}))
 
-            # For include filters, ALL must match (AND logic)
-            if include_filters:
-                for include_filter in include_filters:
-                    if not matches_filters(labels, include=include_filter, exclude={}):
-                        return False
+        def _matches_any_local(labels_dict: dict, key: str, filter_values: list[str]) -> bool:
+            """Local copy of _matches_any for detailed filter reason reporting."""
+            raw = labels_dict.get(key)
+            for filter_value in filter_values:
+                if filter_value == "not-set":
+                    if key not in labels_dict:
+                        return True
+                elif str(raw) == filter_value:
+                    return True
+            return False
 
-            return True
+        filter_result = matches_filters(
+            filter_labels,
+            include=include_label_filter or {},
+            exclude=exclude_label_filter or {},
+        )
 
-        if not _apply_filters(labels, include_label_filter, exclude_label_filter):
+        if not filter_result:
+            # Determine specific filter reason
+            filter_reason = "filter_mismatch"
+            filter_detail = []
+
+            # Check exclude filters
+            if exclude_label_filter:
+                for key, values in exclude_label_filter.items():
+                    if _matches_any_local(filter_labels, key, values):
+                        filter_detail.append(f"excluded by {key}={values}")
+
+            # Check include filters
+            if include_label_filter and not filter_detail:
+                for key, values in include_label_filter.items():
+                    if not _matches_any_local(filter_labels, key, values):
+                        filter_detail.append(f"does not match required {key}={values}")
+
+            detail = "; ".join(filter_detail) if filter_detail else "label filter mismatch"
+            excluded_dirs.append(
+                {
+                    "path": relative_path,
+                    "reason": filter_reason,
+                    "detail": detail,
+                    "labels": filter_labels.copy(),
+                    "marker_type": marker_found,
+                }
+            )
             continue
 
         nodes.append(
@@ -91,7 +140,7 @@ def discover_test_bases(
                 test_path=path.relative_to(base_dir),
             )
         )
-    return sorted(nodes, key=lambda n: str(n.directory))
+    return sorted(nodes, key=lambda n: str(n.directory)), excluded_dirs
 
 
 def _load_hierarchical_test_labels(test_dir: Path, base_dir: Path) -> dict[str, Any]:

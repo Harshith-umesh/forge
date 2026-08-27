@@ -8,6 +8,7 @@ The `__test_labels__.yaml` file marks directories as Caliper test bases and prov
 
 ```yaml
 version: "1"
+skip: true          # optional — omit this directory from all Caliper processing
 labels:
   # Test distinguishing characteristics  
   key1: value1
@@ -28,6 +29,7 @@ completion:
 - **`labels`**: Key-value pairs describing test characteristics
 
 ### Optional Fields
+- **`skip`**: Set to `true` to exclude this directory from all Caliper discovery, filtering, and report generation. Useful for marking in-progress, broken, or intentionally ignored test results. Can be placed at the top level of the file (preferred) or inside the `labels:` section — both are supported.
 - **`kpi_labels`**: System/environment context labels for KPI records
   - **`platform`**: Platform name (e.g., `"CKS"`, `"RHOAI"`)
   - **`gpu_type`**: GPU type (e.g., `"H100"`, `"A100"`)
@@ -116,6 +118,17 @@ completion:
   success: false
   message: "Connection timeout to inference service"
 ```
+
+### Skipped Test
+```yaml
+version: "1"
+skip: true
+labels:
+  model_name: "llama-3.1-8b"
+  deployment_profile: "simple"
+```
+
+Caliper will not discover or process this directory at all. The `skip` field can also be placed inside the `labels:` section for compatibility with older tooling, but top-level placement is preferred.
 
 ## Usage
 

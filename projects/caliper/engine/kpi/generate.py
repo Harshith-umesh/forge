@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
 from projects.caliper.engine.kpi.format import write_kpis_in_format
 from projects.caliper.engine.parse import run_parse
 from projects.caliper.engine.validation import load_schema, schema_path, validate_instance
+
+logger = logging.getLogger(__name__)
 
 
 def run_kpi_generate(
@@ -19,10 +22,10 @@ def run_kpi_generate(
     use_cache: bool,
     cache_path: Path | None,
     format_type: str = "hierarchical",
-    include_label_filter: list[dict[str, str]] | None = None,
-    exclude_label_filter: list[dict[str, str]] | None = None,
+    include_label_filter: dict[str, list[str]] | None = None,
+    exclude_label_filter: dict[str, list[str]] | None = None,
     verbose_parsing: bool = False,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Generate KPI output in specified format.
 
     Args:
@@ -35,9 +38,11 @@ def run_kpi_generate(
         format_type: Output format - "hierarchical" (default) or "jsonl"
         include_label_filter: Include only directories matching these label filters
         exclude_label_filter: Exclude directories matching these label filters
+        verbose_parsing: Enable verbose parsing output
 
     Returns:
-        List of KPI records
+        Tuple of (KPI records, status details). Status details includes default values
+        when plugin.compute_kpis() returns only rows.
     """
     model = run_parse(
         base_dir=base_dir,
@@ -49,8 +54,35 @@ def run_kpi_generate(
         verbose_parsing=verbose_parsing,
         show_parameter_matrix=verbose_parsing,  # Only show matrix in verbose mode
     )
-    compute = plugin.compute_kpis
-    rows: list[dict[str, Any]] = compute(model)
+
+    # Get KPIs from plugin - may return rows or (rows, status)
+    result = plugin.compute_kpis(model)
+
+    # Check if plugin returned status details
+    if isinstance(result, tuple) and len(result) == 2:
+        rows, status_details = result
+        status = status_details.get("status", "success")
+        message = status_details.get("message")
+        warnings = status_details.get("warnings", [])
+
+        # Add success field based on status
+        status_details["success"] = status != "failed"
+
+        # Log warnings if present
+        if warnings:
+            for warning in warnings:
+                logger.warning(f"KPI computation warning: {warning}")
+
+        # Handle different status codes
+        if status == "failed":
+            raise RuntimeError(f"KPI computation failed: {message}")
+        elif status == "warning":
+            logger.warning(f"KPI computation completed with warnings: {message}")
+    else:
+        # Plugin returned just rows (old behavior) - provide default status details
+        rows = result
+        status_details = {"status": "success", "success": True, "message": None, "warnings": []}
+
     kpi_schema = load_schema(schema_path("kpi_record.schema.json"))
     for row in rows:
         validate_instance(row, kpi_schema, "KPI record")
@@ -58,4 +90,5 @@ def run_kpi_generate(
     if output:
         write_kpis_in_format(rows, output, format_type, model)
 
-    return rows
+    # Always return tuple with KPI records and status details
+    return rows, status_details

@@ -19,6 +19,66 @@ def _load_yaml(path: Path) -> Any:
         return yaml.safe_load(handle)
 
 
+def _is_efa_enabled() -> bool:
+    """Check if EFA is enabled for PD deployments."""
+    return config.project.get_config("deployments.pd.efa.enabled", default_value=False)
+
+
+def _load_efa_config(config_dir: str | Path) -> dict[str, Any]:
+    """Load EFA configuration from manifest file."""
+    efa_config = config.project.get_config("deployments.pd.efa", default_value={})
+    manifest_path = Path(config_dir) / efa_config["manifest"]
+
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"EFA manifest not found at {manifest_path}")
+
+    efa_manifest = _load_yaml(manifest_path)
+
+    # Set the image from config
+    efa_manifest["init_container"]["image"] = efa_config["image"]
+
+    return efa_manifest
+
+
+def _apply_efa_configuration(pod_template: dict[str, Any], efa_config: dict[str, Any]) -> None:
+    """Apply EFA configuration to a pod template.
+
+    Args:
+        pod_template: Pod template to modify in-place
+        efa_config: EFA configuration from manifest
+    """
+    logger.info("Applying EFA configuration to pod template")
+    # Add init container
+    if "initContainers" not in pod_template:
+        pod_template["initContainers"] = []
+    pod_template["initContainers"].append(copy.deepcopy(efa_config["init_container"]))
+
+    # Add volumes
+    if "volumes" not in pod_template:
+        pod_template["volumes"] = []
+    pod_template["volumes"].extend(copy.deepcopy(efa_config["volumes"]))
+
+    # Add volume mounts to main container
+    main_container = pod_template["containers"][0]
+    if "volumeMounts" not in main_container:
+        main_container["volumeMounts"] = []
+    main_container["volumeMounts"].extend(copy.deepcopy(efa_config["volume_mounts"]))
+
+    # Add EFA environment variables to main container
+    if "env" in efa_config:
+        if "env" not in main_container:
+            main_container["env"] = []
+        efa_env_vars = copy.deepcopy(efa_config["env"])
+        main_container["env"].extend(efa_env_vars)
+        logger.info(f"Applied EFA environment variables: {efa_env_vars}")
+    else:
+        logger.info("No EFA environment variables found in config")
+
+    # Add security context for EFA
+    main_container["securityContext"] = {"capabilities": {"add": ["IPC_LOCK"]}}
+    logger.info("Applied EFA security context with IPC_LOCK capability")
+
+
 def _replace_placeholders(value: Any, replacements: dict[str, str]) -> Any:
     """Replace Python-time deployment placeholders while preserving value types."""
     if isinstance(value, dict):
@@ -108,6 +168,8 @@ def render_inference_service_from_parts(
             deployment_profile_name
         )
 
+    model_hostpath = config.project.get_config("runtime.model_hostpath", default_value=None)
+
     if model_name.startswith("oci://"):
         source_uri = model_name
         source_scheme = "oci"
@@ -118,13 +180,16 @@ def render_inference_service_from_parts(
         source_uri = f"hf://{model_name}"
         source_scheme = "hf"
 
-    cache_spec = _create_model_cache_spec(
-        model_cache=model_cache,
-        source_uri=source_uri,
-        source_scheme=source_scheme,
-        model_slug=model_slug,
-        namespace=namespace,
-    )
+    if model_hostpath:
+        cache_spec = None
+    else:
+        cache_spec = _create_model_cache_spec(
+            model_cache=model_cache,
+            source_uri=source_uri,
+            source_scheme=source_scheme,
+            model_slug=model_slug,
+            namespace=namespace,
+        )
 
     # These sentinels are resolved here because VLLM_ADDITIONAL_ARGS is opaque
     # shell input and cannot use controller-time Go-template substitutions.
@@ -143,7 +208,7 @@ def render_inference_service_from_parts(
 
     if is_pd_deployment:
         rendered_manifest = _render_pd_deployment(
-            manifest, deployment_profile, deployment_profile_name, workload
+            manifest, deployment_profile, deployment_profile_name, workload, config_dir
         )
     else:
         rendered_manifest = _render_standard_deployment(
@@ -153,6 +218,17 @@ def render_inference_service_from_parts(
     # Apply Kueue configuration if enabled
     _apply_kueue_configuration(rendered_manifest, deployment_profile)
 
+    # Apply hostpath model configuration if configured
+    if model_hostpath:
+        _apply_hostpath_model_configuration(rendered_manifest, model_hostpath, source_uri)
+
+    # Apply image pull secrets if configured
+    image_pull_secret = config.project.get_config(
+        "platform.inference_service.image_pull_secret", default_value=None
+    )
+    if image_pull_secret:
+        _apply_image_pull_secrets(rendered_manifest, image_pull_secret)
+
     return rendered_manifest
 
 
@@ -161,43 +237,94 @@ def handle_pd_resources(
     deployment_profile: dict[str, Any],
     is_prefill: bool = False,
 ) -> None:
-    """Handle P/D resource configuration, including DRA support.
+    """Handle P/D resource configuration for mutually exclusive networking technologies.
+
+    Supports IB, RoCE, and EFA networking - only one can be enabled at a time.
 
     Args:
         base_resources: Base resources dict to modify in-place
         deployment_profile: Deployment profile configuration
         is_prefill: Whether this is for a prefill container
     """
-    pd_resources = config.project.get_config("deployments.pd.resources")
+    # Get networking configurations - they are mutually exclusive
+    ib_config = config.project.get_config("deployments.pd.ib", default_value={})
+    roce_config = config.project.get_config("deployments.pd.roce", default_value={})
+    efa_config = config.project.get_config("deployments.pd.efa", default_value={})
 
-    if pd_resources == "composite.dra.io/gpu-nic-pair":
-        # Handle DRA (Dynamic Resource Allocation) case
-        if is_prefill:
-            # For prefill pods, use prefill tensor parallelism
-            tensor_parallelism = deployment_profile["prefill"]["tensor_parallelism"]
-        else:
-            # For decode pods, use decode tensor parallelism
-            tensor_parallelism = deployment_profile["decode"]["tensor_parallelism"]
+    # Check which networking technology is enabled
+    enabled_configs = []
+    if ib_config.get("enabled", False):
+        enabled_configs.append("ib")
+    if roce_config.get("enabled", False):
+        enabled_configs.append("roce")
+    if efa_config.get("enabled", False):
+        enabled_configs.append("efa")
 
-        # Override GPU resources for DRA
-        for bound in ("requests", "limits"):
-            if bound not in base_resources:
-                base_resources[bound] = {}
-            # Set nvidia.com/gpu to 0 and add composite DRA resource
-            base_resources[bound]["nvidia.com/gpu"] = "0"
-            base_resources[bound][pd_resources] = str(tensor_parallelism)
-    elif isinstance(pd_resources, dict):
-        # Normal case: pd_resources is a dictionary to merge
-        for bound in ("requests", "limits"):
-            if bound not in base_resources:
-                base_resources[bound] = {}
-            base_resources[bound].update(pd_resources)
-    elif pd_resources is not None:
-        # Handle unexpected pd_resources type
+    # Validate mutual exclusivity
+    if len(enabled_configs) > 1:
         raise ValueError(
-            f"Unexpected type for deployments.pd.resources: {type(pd_resources)}, value: {pd_resources}"
+            f"Multiple networking technologies enabled: {enabled_configs}. "
+            "IB, RoCE, and EFA are mutually exclusive."
         )
-    # If pd_resources is None, do nothing
+
+    if not enabled_configs:
+        return  # No networking technology enabled
+
+    networking_type = enabled_configs[0]
+
+    if networking_type == "ib":
+        # Add IB resources
+        ib_resources = ib_config.get("resources", {})
+        resource_dict = _normalize_resources(ib_resources, "IB")
+        _apply_resources(base_resources, resource_dict)
+        logger.info(f"Applied IB resources: {resource_dict}")
+
+    elif networking_type == "roce":
+        # Add RoCE resources
+        roce_resources = roce_config.get("resources", {})
+        resource_dict = _normalize_resources(roce_resources, "RoCE")
+        _apply_resources(base_resources, resource_dict)
+        logger.info(f"Applied RoCE resources: {resource_dict}")
+
+    elif networking_type == "efa":
+        # Add EFA resources with calculated count (1:4 GPU-to-EFA ratio)
+        efa_resources = efa_config.get("resources", {})
+        tensor_parallelism = deployment_profile.get("tensor_parallelism", 1)
+        efa_count = 4 * tensor_parallelism
+
+        if isinstance(efa_resources, dict):
+            resource_dict = efa_resources.copy()
+            # Override with calculated count for any EFA resource
+            for key in resource_dict:
+                if "efa" in key.lower():
+                    resource_dict[key] = str(efa_count)
+        elif isinstance(efa_resources, str):
+            resource_dict = {efa_resources: str(efa_count)}
+        else:
+            logger.warning(f"Unexpected EFA resources format: {type(efa_resources)}")
+            return
+
+        _apply_resources(base_resources, resource_dict)
+        logger.info(f"Applied EFA resources: {resource_dict} (TP={tensor_parallelism}, ratio=1:4)")
+
+
+def _normalize_resources(resources: Any, technology: str) -> dict[str, str]:
+    """Normalize resource specification to dictionary format."""
+    if isinstance(resources, dict):
+        return {k: str(v) for k, v in resources.items()}
+    elif isinstance(resources, str):
+        return {resources: "1"}
+    else:
+        logger.warning(f"Unexpected {technology} resources format: {type(resources)}")
+        return {}
+
+
+def _apply_resources(base_resources: dict[str, Any], resource_dict: dict[str, str]) -> None:
+    """Apply resource dictionary to both requests and limits."""
+    for bound in ("requests", "limits"):
+        if bound not in base_resources:
+            base_resources[bound] = {}
+        base_resources[bound].update(resource_dict)
 
 
 def _build_serving_resources(deployment_profile: dict[str, Any]) -> dict[str, Any]:
@@ -286,8 +413,16 @@ def _render_standard_deployment(
 
     serving_container = manifest["spec"]["template"]["containers"][0]
     serving_container["resources"] = _build_serving_resources(deployment_profile)
-    if deployment_profile.get("serving_image"):
-        serving_container["image"] = deployment_profile["serving_image"]
+
+    # Set serving container image (deployment profile specific or default)
+    serving_image = deployment_profile.get("serving_image")
+    if not serving_image:
+        # Fall back to defaults vllm_extra.image
+        serving_image = config.project.get_config(
+            "deployments.defaults.serving_image", default_value=None
+        )
+    if serving_image:
+        serving_container["image"] = serving_image
 
     vllm_additional_args = _build_vllm_additional_args(deployment_profile, workload)
 
@@ -313,9 +448,17 @@ def _render_standard_deployment(
     else:
         # Configure scheduler for intelligent routing
         manifest["spec"]["router"]["scheduler"] = copy.deepcopy(scheduler)
-        if deployment_profile.get("router_image"):
+
+        # Set router container image (deployment profile specific or default)
+        router_image = deployment_profile.get("router_image")
+        if not router_image:
+            # Fall back to defaults router_image
+            router_image = config.project.get_config(
+                "deployments.defaults.router_image", default_value=None
+            )
+        if router_image:
             manifest["spec"]["router"]["scheduler"]["template"]["containers"][0]["image"] = (
-                deployment_profile["router_image"]
+                router_image
             )
 
     return manifest
@@ -326,6 +469,7 @@ def _render_pd_deployment(
     deployment_profile: dict[str, Any],
     deployment_profile_name: str | None = None,
     workload: dict[str, Any] | None = None,
+    config_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Render P/D (Prefill/Decode) deployment configuration."""
     from .runtime_config import get_decode_pod_count, get_prefill_pod_count
@@ -341,7 +485,11 @@ def _render_pd_deployment(
         "replicas": get_prefill_pod_count(),
         "parallelism": {"tensor": deployment_profile["prefill"]["tensor_parallelism"]},
         "template": _build_pd_pod_template(
-            deployment_profile, deployment_profile_name, is_prefill=True, workload=workload
+            deployment_profile,
+            deployment_profile_name,
+            is_prefill=True,
+            workload=workload,
+            config_dir=config_dir,
         ),
     }
 
@@ -349,8 +497,17 @@ def _render_pd_deployment(
     manifest["spec"]["replicas"] = get_decode_pod_count()
     manifest["spec"]["parallelism"] = {"tensor": deployment_profile["decode"]["tensor_parallelism"]}
     manifest["spec"]["template"] = _build_pd_pod_template(
-        deployment_profile, deployment_profile_name, is_prefill=False, workload=workload
+        deployment_profile,
+        deployment_profile_name,
+        is_prefill=False,
+        workload=workload,
+        config_dir=config_dir,
     )
+
+    # Apply scheduler config (nodeSelector, tolerations, image, …) from deployment profile
+    scheduler = deployment_profile.get("scheduler")
+    if scheduler is not None:
+        manifest["spec"]["router"]["scheduler"] = copy.deepcopy(scheduler)
 
     return manifest
 
@@ -360,6 +517,7 @@ def _build_pd_pod_template(
     deployment_profile_name: str | None = None,
     is_prefill: bool = False,
     workload: dict[str, Any] | None = None,
+    config_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Build pod template for P/D deployment."""
 
@@ -389,9 +547,37 @@ def _build_pd_pod_template(
         base_vllm_args = _build_vllm_additional_args(deployment_profile, workload)
 
     # Add P/D extra args
-
     pd_extra_args = pd_vllm_extra.get("args", [])
-    all_vllm_args = base_vllm_args.split() + pd_extra_args
+
+    # Handle kv_transfer_config
+    kv_transfer_config = pd_vllm_extra.get("kv_transfer_config", {})
+    logger.info(f"Base kv_transfer_config: {kv_transfer_config}")
+
+    # Merge EFA-specific kv_transfer_config if EFA is enabled
+    efa_enabled = _is_efa_enabled()
+    logger.info(f"EFA enabled: {efa_enabled}, config_dir: {config_dir}")
+    if efa_enabled and config_dir is not None:
+        efa_pd_config = config.project.get_config("deployments.pd.efa", default_value={})
+        efa_vllm_extra = efa_pd_config.get("vllm_extra", {})
+        efa_kv_config = efa_vllm_extra.get("kv_transfer_config", {})
+        logger.info(f"EFA kv_transfer_config: {efa_kv_config}")
+
+        if efa_kv_config:
+            # Simple merge: EFA config adds to base config
+            kv_transfer_config = {**kv_transfer_config, **efa_kv_config}
+            logger.info(f"Merged kv_transfer_config: {kv_transfer_config}")
+        else:
+            logger.info("No EFA kv_transfer_config found")
+
+    # Add kv_transfer_config as argument if it exists
+    kv_transfer_args = []
+    if kv_transfer_config:
+        import json
+
+        kv_transfer_json = json.dumps(kv_transfer_config, separators=(",", ":"))
+        kv_transfer_args = ["--kv-transfer-config", f"'{kv_transfer_json}'"]
+
+    all_vllm_args = base_vllm_args.split() + pd_extra_args + kv_transfer_args
 
     vllm_additional_args = " ".join(all_vllm_args)
 
@@ -404,7 +590,16 @@ def _build_pd_pod_template(
     pd_extra_env = pd_vllm_extra.get("env", [])
     all_env = base_env + copy.deepcopy(pd_extra_env)
 
+    # Add ROCE extra environment variables if enabled
+    roce_config = config.project.get_config("deployments.pd.roce", default_value={})
+    if roce_config.get("enabled", False):
+        roce_extra_env = roce_config.get("vllm_extra", {}).get("env", [])
+        if roce_extra_env:
+            all_env.extend(copy.deepcopy(roce_extra_env))
+            logger.info(f"Added ROCE environment variables: {roce_extra_env}")
+
     # Build base resources with correct tensor parallelism
+    effective_profile = deployment_profile
     if is_prefill and deployment_profile_name:
         # For prefill pods, use prefill tensor parallelism
         from .runtime_config import _extract_value_from_profile_name
@@ -416,6 +611,7 @@ def _build_pd_pod_template(
             # Create modified profile with prefill tensor parallelism
             prefill_profile = copy.deepcopy(deployment_profile)
             prefill_profile["tensor_parallelism"] = prefill_tp
+            effective_profile = prefill_profile
             base_resources = _build_serving_resources(prefill_profile)
         except ValueError:
             # Fallback to main tensor parallelism if extraction fails
@@ -424,8 +620,8 @@ def _build_pd_pod_template(
         # For decode pods, use main tensor parallelism
         base_resources = _build_serving_resources(deployment_profile)
 
-    # Handle P/D extra resources
-    handle_pd_resources(base_resources, deployment_profile, is_prefill)
+    # Handle P/D extra resources with the effective profile
+    handle_pd_resources(base_resources, effective_profile, is_prefill)
 
     # Build container configuration
     container = {
@@ -434,9 +630,15 @@ def _build_pd_pod_template(
         "env": all_env,
     }
 
-    # Add serving image if specified
-    if deployment_profile.get("serving_image"):
-        container["image"] = deployment_profile["serving_image"]
+    # Set serving container image (deployment profile specific or default)
+    serving_image = deployment_profile.get("serving_image")
+    if not serving_image:
+        # Fall back to defaults serving_image
+        serving_image = config.project.get_config(
+            "deployments.defaults.serving_image", default_value=None
+        )
+    if serving_image:
+        container["image"] = serving_image
 
     # Build pod template with anti-affinity for P/D deployments
     component_type = "prefill" if is_prefill else "decode"
@@ -469,6 +671,33 @@ def _build_pd_pod_template(
 
     pod_template["affinity"] = affinity
 
+    # Apply EFA configuration if enabled
+    if _is_efa_enabled() and config_dir is not None:
+        efa_config = _load_efa_config(config_dir)
+        _apply_efa_configuration(pod_template, efa_config)
+
+    # Add shared memory volume if configured
+    shmem_size = config.project.get_config("deployments.pd.shmem.size", default_value=None)
+    if shmem_size is not None:
+        logger.info(f"Adding shared memory volume with size: {shmem_size}")
+
+        # Add shared memory volume
+        if "volumes" not in pod_template:
+            pod_template["volumes"] = []
+
+        shm_volume = {"name": "shm", "emptyDir": {"medium": "Memory", "sizeLimit": str(shmem_size)}}
+        pod_template["volumes"].append(shm_volume)
+
+        # Add volume mount to main container
+        main_container = pod_template["containers"][0]
+        if "volumeMounts" not in main_container:
+            main_container["volumeMounts"] = []
+
+        shm_mount = {"name": "shm", "mountPath": "/dev/shm"}
+        main_container["volumeMounts"].append(shm_mount)
+
+        logger.info("Applied shared memory volume and mount")
+
     return pod_template
 
 
@@ -498,6 +727,103 @@ def _calculate_total_gpu_usage(deployment_profile: dict[str, Any]) -> int:
         tensor_parallelism = deployment_profile.get("tensor_parallelism", 1)
         replicas = deployment_profile.get("replicas", 1)
         return tensor_parallelism * replicas
+
+
+def _apply_hostpath_model_configuration(
+    manifest: dict[str, Any],
+    hostpath: str,
+    source_uri: str,
+) -> None:
+    """Configure hostPath model loading with link-model init container.
+
+    This approach:
+    - disables the storage initializer
+    - adds a link-model init container that creates symlinks from hostpath to /mnt/models
+    - mounts the hostPath directory for the init container and main container
+
+    Args:
+        manifest: The rendered LLMInferenceService manifest to modify in-place.
+        hostpath: Absolute path on the node where the model store lives
+                  (e.g. /mnt/nvme/models).
+        source_uri: The model URI (e.g. hf://model-name) used to determine model path.
+    """
+    # Disable storage initializer
+    manifest["spec"]["storageInitializer"] = {"enabled": False}
+
+    # Extract model name from URI
+    if source_uri.startswith("hf://"):
+        model_name = source_uri.removeprefix("hf://")
+    else:
+        model_name = source_uri
+
+    # Load hostpath configuration from manifest
+    config_dir = Path(__file__).parent
+    hostpath_manifest_path = config_dir / "manifests" / "hostpath-model-config.yaml"
+    hostpath_config = _load_yaml(hostpath_manifest_path)
+
+    # Replace placeholders
+    hostpath_config = _replace_placeholders(
+        hostpath_config,
+        {
+            "__MODEL_NAME__": model_name,
+            "__HOSTPATH__": hostpath,
+        },
+    )
+
+    def _configure_pod_template(template: dict[str, Any]) -> None:
+        # Add volumes
+        template.setdefault("volumes", [])
+        template["volumes"].extend(copy.deepcopy(hostpath_config["volumes"]))
+
+        # Add init container
+        template.setdefault("initContainers", [])
+        template["initContainers"].append(copy.deepcopy(hostpath_config["init_container"]))
+
+        # Add volume mounts to main container
+        if not template.get("containers"):
+            raise ValueError("No containers found in template for volume mount configuration")
+        container = template["containers"][0]
+        container.setdefault("volumeMounts", [])
+        volume_mounts = hostpath_config.get("volume_mounts", [])
+        if not volume_mounts:
+            raise ValueError("No volume_mounts found in hostpath_config")
+        container["volumeMounts"].extend(copy.deepcopy(volume_mounts))
+
+    # Apply to main (decode) pod template
+    _configure_pod_template(manifest["spec"]["template"])
+
+    # Apply to prefill pod template for P/D deployments
+    if "prefill" in manifest["spec"]:
+        _configure_pod_template(manifest["spec"]["prefill"]["template"])
+
+
+def _apply_image_pull_secrets(
+    manifest: dict[str, Any],
+    image_pull_secret: str,
+) -> None:
+    """Inject a single imagePullSecret into all pod templates: serving, prefill, and scheduler.
+
+    Args:
+        manifest: The rendered LLMInferenceService manifest to modify in-place.
+        image_pull_secret: Secret name string.
+    """
+    normalized = [{"name": image_pull_secret}]
+
+    def _inject(template: dict[str, Any]) -> None:
+        template.setdefault("imagePullSecrets", [])
+        template["imagePullSecrets"].extend(normalized)
+
+    # Serving (decode) pod template
+    _inject(manifest["spec"]["template"])
+
+    # Prefill pod template (P/D deployments)
+    if "prefill" in manifest["spec"]:
+        _inject(manifest["spec"]["prefill"]["template"])
+
+    # Scheduler (router) pod template
+    if "router" in manifest["spec"] and "scheduler" in manifest["spec"]["router"]:
+        scheduler_template = manifest["spec"]["router"]["scheduler"].setdefault("template", {})
+        _inject(scheduler_template)
 
 
 def _apply_kueue_configuration(

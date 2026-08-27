@@ -162,8 +162,64 @@ def capture_podmonitors(args, context):
 
 
 @task
-def capture_pod_logs(args, context):
-    """Capture logs from LLMInferenceService pods"""
+def capture_kserve_objects(args, context):
+    """Capture KServe objects in YAML format (ignoring errors)"""
+
+    # Capture ServingRuntimes (namespaced)
+    shell.run(
+        f"oc get servingruntimes -n {context.target_namespace} -oyaml",
+        stdout_dest=args.artifact_dir / "artifacts/kserve.servingruntimes.yaml",
+        check=False,
+    )
+
+    # Capture ClusterServingRuntimes (cluster-scoped)
+    shell.run(
+        "oc get clusterservingruntimes -oyaml",
+        stdout_dest=args.artifact_dir / "artifacts/kserve.clusterservingruntimes.yaml",
+        check=False,
+    )
+
+    # Capture InferenceServices (if any exist alongside LLMInferenceServices)
+    shell.run(
+        f"oc get inferenceservices -n {context.target_namespace} -oyaml",
+        stdout_dest=args.artifact_dir / "artifacts/kserve.inferenceservices.yaml",
+        check=False,
+    )
+
+    # Capture KServe MutatingWebhookConfigurations
+    shell.run(
+        'oc get mutatingwebhookconfigurations -l "app.kubernetes.io/part-of=kserve" -oyaml',
+        stdout_dest=args.artifact_dir / "artifacts/kserve.mutatingwebhooks.yaml",
+        check=False,
+    )
+
+    # Capture KServe ValidatingWebhookConfigurations
+    shell.run(
+        'oc get validatingwebhookconfigurations -l "app.kubernetes.io/part-of=kserve" -oyaml',
+        stdout_dest=args.artifact_dir / "artifacts/kserve.validatingwebhooks.yaml",
+        check=False,
+    )
+
+    return "KServe objects captured (errors ignored)"
+
+
+def _capture_pod_container_logs(
+    args, context, output_dir, file_suffix="", oc_flags="", description="logs"
+):
+    """
+    Helper function to capture logs from LLMInferenceService pods - one file per container.
+
+    Args:
+        args: Task arguments
+        context: Task context
+        output_dir: Directory to save log files
+        file_suffix: Suffix for log files (e.g., ".previous")
+        oc_flags: Additional flags for oc logs command (e.g., "--previous")
+        description: Description for return message
+
+    Returns:
+        Tuple of (captured_pod_count, total_non_empty_files)
+    """
     result = shell.run(
         f'oc get pods -l "app.kubernetes.io/name={args.llmisvc_name}" -n {context.target_namespace} -o jsonpath="{{.items[*].metadata.name}}"',
         check=False,
@@ -172,49 +228,81 @@ def capture_pod_logs(args, context):
 
     pod_names = result.stdout.strip().split()
     if not pod_names or not result.stdout.strip():
-        return "No pods found to capture logs"
+        return 0, 0
 
-    logs_dir = args.artifact_dir / "artifacts/logs"
     captured_count = 0
+    total_files = 0
 
     for pod_name in pod_names:
-        log_file = logs_dir / f"{pod_name}.log"
-        shell.run(
-            f"oc logs {pod_name} -n {context.target_namespace} --all-containers=true",
-            stdout_dest=log_file,
+        # Get container names for this pod
+        container_result = shell.run(
+            f'oc get pod {pod_name} -n {context.target_namespace} -o jsonpath="{{.spec.containers[*].name}}"',
             check=False,
+            log_stdout=False,
         )
+
+        container_names = container_result.stdout.strip().split()
+        if not container_names:
+            continue
+
+        for container_name in container_names:
+            log_file = output_dir / f"{pod_name}-{container_name}{file_suffix}.log"
+
+            # Build oc logs command
+            cmd = f"oc logs {pod_name} -c {container_name} -n {context.target_namespace}"
+            if oc_flags:
+                cmd += f" {oc_flags}"
+
+            shell.run(cmd, stdout_dest=log_file, check=False)
+
+            # Check if log file is too small and delete if so
+            if log_file.exists() and log_file.stat().st_size < 10:
+                log_file.unlink()
+            else:
+                total_files += 1
+
         captured_count += 1
 
-    return f"Pod logs captured for {captured_count} pods in dedicated files"
+    return captured_count, total_files
+
+
+@task
+def capture_pod_logs(args, context):
+    """Capture logs from LLMInferenceService pods - one file per container"""
+    logs_dir = args.artifact_dir / "artifacts/logs"
+
+    captured_count, total_files = _capture_pod_container_logs(
+        args, context, logs_dir, description="current logs"
+    )
+
+    if captured_count == 0:
+        return "No pods found to capture logs"
+
+    return (
+        f"Pod logs captured for {captured_count} pods ({total_files} non-empty container log files)"
+    )
 
 
 @task
 def capture_pod_previous_logs(args, context):
-    """Capture previous logs from LLMInferenceService pods if available"""
-    result = shell.run(
-        f'oc get pods -l "app.kubernetes.io/name={args.llmisvc_name}" -n {context.target_namespace} -o jsonpath="{{.items[*].metadata.name}}"',
-        check=False,
-        log_stdout=False,
+    """Capture previous logs from LLMInferenceService pods if available - one file per container"""
+    # Create previous logs subdirectory
+    previous_logs_dir = args.artifact_dir / "artifacts/logs/previous"
+    shell.mkdir("artifacts/logs/previous")
+
+    captured_count, total_files = _capture_pod_container_logs(
+        args,
+        context,
+        previous_logs_dir,
+        file_suffix=".previous",
+        oc_flags="--previous",
+        description="previous logs",
     )
 
-    pod_names = result.stdout.strip().split()
-    if not pod_names or not result.stdout.strip():
+    if captured_count == 0:
         return "No pods found to capture previous logs"
 
-    logs_dir = args.artifact_dir / "artifacts/logs"
-    captured_count = 0
-
-    for pod_name in pod_names:
-        log_file = logs_dir / f"{pod_name}.previous.log"
-        shell.run(
-            f"oc logs {pod_name} -n {context.target_namespace} --previous --all-containers=true",
-            stdout_dest=log_file,
-            check=False,
-        )
-        captured_count += 1
-
-    return f"Pod previous logs captured for {captured_count} pods in dedicated files"
+    return f"Pod previous logs captured for {captured_count} pods ({total_files} non-empty container log files in logs/previous/)"
 
 
 @task
@@ -392,8 +480,21 @@ def capture_node_gpu_mapping(args, context):
             gpu_class = result.stdout.strip()
             if gpu_class:
                 gpu_type = f"NVIDIA-{gpu_class}"
-            else:
-                gpu_type = "unknown"
+
+        # If still not found, try nvidia.com/gpu.accelerator as fallback
+        if not gpu_type:
+            result = shell.run(
+                f'oc get node {node_name} -o jsonpath="{{.metadata.labels.nvidia\\.com/gpu\\.accelerator}}"',
+                check=False,
+                log_stdout=False,
+            )
+            gpu_accelerator = result.stdout.strip()
+            if gpu_accelerator:
+                gpu_type = f"NVIDIA-{gpu_accelerator.upper()}"
+
+        # Final fallback
+        if not gpu_type:
+            gpu_type = "unknown"
 
         node_gpu_mapping[node_name] = gpu_type
 

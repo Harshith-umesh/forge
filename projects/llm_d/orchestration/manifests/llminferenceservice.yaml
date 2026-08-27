@@ -2,7 +2,6 @@ apiVersion: serving.kserve.io/v1alpha1
 kind: LLMInferenceService
 metadata:
   name: llm-d
-  namespace: llm-d
   annotations:
     security.opendatahub.io/enable-auth: "false"
     prometheus.io/path: /metrics
@@ -20,10 +19,7 @@ spec:
     route: {}
     gateway: {}
   template:
-    tolerations:
-      - key: nvidia.com/gpu
-        operator: Exists
-        effect: NoSchedule
+    tolerations: null
     containers:
       - name: main
         resources:

@@ -1,0 +1,77 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ name }}
+  namespace: {{ namespace }}
+  labels:
+    app.kubernetes.io/managed-by: forge
+    forge.openshift.io/project: llm_d
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/managed-by: forge
+        forge.openshift.io/project: llm_d
+    spec:
+      serviceAccountName: default
+      restartPolicy: Never
+{% if fs_group is not none %}
+      securityContext:
+        fsGroup: {{ fs_group }}
+{% endif %}
+      containers:
+        - name: guidellm-main
+          image: {{ image }}
+          # command and args are set by render_guidellm_shared_volume_job_from_parts() in
+          # utils.py — single-run jobs invoke guidellm directly, multi-run
+          # jobs use a generated shell script.
+          env:
+            - name: USER
+              value: guidellm
+{% if hf_token_secret %}
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ hf_token_secret }}
+                  key: HF_TOKEN
+                  optional: true
+{% endif %}
+          volumeMounts:
+            - name: home
+              mountPath: /home/guidellm
+            - name: results
+              mountPath: /results
+        - name: guidellm-sidecar
+          image: {{ image }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              echo "Sidecar waiting for done file..."
+              while [ ! -f /results/done ]; do
+                  sleep 5
+              done
+              echo "Done file found, sidecar exiting"
+          env:
+            - name: USER
+              value: guidellm
+{% if hf_token_secret %}
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ hf_token_secret }}
+                  key: HF_TOKEN
+                  optional: true
+{% endif %}
+          volumeMounts:
+            - name: home
+              mountPath: /home/guidellm
+            - name: results
+              mountPath: /results
+      volumes:
+        - name: home
+          emptyDir: {}
+        - name: results
+          emptyDir: {}

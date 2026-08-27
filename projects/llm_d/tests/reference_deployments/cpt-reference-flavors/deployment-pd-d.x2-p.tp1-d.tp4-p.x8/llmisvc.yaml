@@ -2,12 +2,12 @@ apiVersion: serving.kserve.io/v1alpha1
 kind: LLMInferenceService
 metadata:
   name: llm-d-pd-d-x2-p-tp-bfb506
-  namespace: forge-llm-d
   annotations:
     security.opendatahub.io/enable-auth: 'false'
     prometheus.io/path: /metrics
     prometheus.io/port: '8000'
     forge.openshift.io/deployment-profile: pd-d.x2-p.tp1-d.tp4-p.x8
+  namespace: forge-llm-d
   labels:
     app.kubernetes.io/managed-by: forge
     forge.openshift.io/project: llm_d
@@ -21,6 +21,8 @@ spec:
       template:
         containers:
         - name: main
+        nodeSelector:
+          nvidia.com/gpu.present: 'true'
     route: {}
     gateway: {}
   template:
@@ -37,8 +39,13 @@ spec:
       - name: VLLM_ADDITIONAL_ARGS
         value: --gpu-memory-utilization=0.92 --trust-remote-code --no-enable-log-requests
           --enable-prefix-caching --max-model-len=4096 --block-size 128 --kv-transfer-config
-          '{"kv_connector":"NixlConnector", "kv_role":"kv_both"}'
+          '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
       - name: VLLM_NIXL_SIDE_CHANNEL_HOST
+        valueFrom:
+          fieldRef:
+            apiVersion: v1
+            fieldPath: status.podIP
+      - name: VLLM_HOST_IP
         valueFrom:
           fieldRef:
             apiVersion: v1
@@ -73,8 +80,13 @@ spec:
         - name: VLLM_ADDITIONAL_ARGS
           value: --gpu-memory-utilization=0.92 --trust-remote-code --no-enable-log-requests
             --enable-prefix-caching --max-model-len=4096 --block-size 128 --kv-transfer-config
-            '{"kv_connector":"NixlConnector", "kv_role":"kv_both"}'
+            '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
         - name: VLLM_NIXL_SIDE_CHANNEL_HOST
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: status.podIP
+        - name: VLLM_HOST_IP
           valueFrom:
             fieldRef:
               apiVersion: v1

@@ -45,7 +45,7 @@ Key paths:
 
 7. **Use the vault module.**
     Use the project `projects.core.library.vault` module to access the secrets, stored in files. Consider all the content of these files as secret.
-    
+
 8. **Never pass secrets via environment variables**
     For transparency and post-mortem troubleshooting, the environment variables are saved to disk at multiple locations. Do not use environment variables to pass a secret between two components. There might be few exceptions to this rule (MLFlow, AWS), but they must be handled with care.
 
@@ -159,6 +159,7 @@ Orchestration is the **upper layer** — CI phases, config, presets.
 ```python
 # BAD: Toolbox importing orchestration config
 from projects.llamastack.orchestration.runtime_config import cfg
+
 hpa_cfg = cfg.get_hpa_config()
 min_replicas = hpa_cfg.get("min_replicas", 1)
 ```
@@ -210,9 +211,11 @@ def wait_until_ready(args, ctx):
 # BAD: YAML already returns int
 replicas = int(config.project.get_config("runtime.replicas"))
 
+
 # BAD: Custom bool coercion for YAML values
 def _as_bool(value):
     return value.strip().lower() not in ("false", "0", "no")
+
 
 # GOOD: Trust YAML types
 replicas = config.project.get_config("runtime.replicas")
@@ -247,3 +250,7 @@ finally:
     else:
         os.environ["MLFLOW_WORKSPACE"] = old_value
 ```
+
+## Legacy support
+
+Overall, we do not want legacy support. Do not implement legacy fallback, unless explicitly requested by the user.

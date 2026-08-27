@@ -66,7 +66,7 @@ caliper:
         output: kpis/dashboard.csv
         include_header_comments: false
       artifacts_to_ai_data:
-        enabled: true
+        enabled: false
         output_dir: ai_data
 
     s3:
@@ -84,7 +84,7 @@ caliper:
         include_ai_data: false
         max_downloads: 50
       export:
-        enabled: true
+        enabled: false
         upload_id: null  # use timestamp if null
         dry_run: false
         include_csv: true

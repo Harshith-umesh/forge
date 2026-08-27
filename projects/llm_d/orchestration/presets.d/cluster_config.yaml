@@ -1,0 +1,59 @@
+__multiple: true
+
+cluster_cks-waldorf:
+  runtime.namespace: kpouget-dev
+  platform.cluster.namespace.labels: {}
+
+  runtime.kserve.wait_readiness: false
+  runtime.kueue.enabled: true
+  runtime.kueue.queue_name: llm-d-cluster-queue
+  runtime.kueue.disable_above_n_gpus: 8
+
+  # Use ReadWriteMany for model cache PVC in CKS environment
+  model_cache.pvc.access_mode: ReadWriteMany
+  platform.preflight.check_crds: false
+  runtime.kserve.wait_long_scheduling: true
+  platform.inference_service.scheduler.node_selector:
+    gpu.nvidia.com/class: H200
+
+  cpt.kpi.labels.platform: CKS
+
+  deployments.pd.ib.enabled: true
+
+cluster_janus:
+  runtime.namespace: kpouget-dev
+
+  # Use ReadWriteMany for model cache PVC in CKS environment
+  model_cache.pvc.access_mode: ReadWriteMany
+  model_cache.pvc.storage_class_name: nfs
+
+  cpt.kpi.labels.platform: OCP
+
+  deployments.pd.roce.enabled: true
+  cpt.kpi.labels.gpu_type: NVIDIA-H200
+
+cluster_eks-h100:
+  cpt.kpi.labels.platform: EKS
+  platform.cluster.namespace.labels: {}
+
+  deployments.pd.efa.enabled: true
+  deployments.pd.shmem.size: 16Gi
+
+  runtime.namespace: kevin-dev
+  runtime.model_hostpath: /mnt/nvme/models
+  runtime.kserve.wait_readiness: false
+
+  platform.inference_service.image_pull_secret: rhai-pull-secret
+  platform.inference_service.scheduler.node_selector:
+    nvidia.com/gpu.accelerator: h100
+  platform.inference_service.scheduler.tolerations:
+  - key: nvidia.com/gpu
+    value: "true"
+    operator: Equal
+    effect: NoSchedule
+
+cluster_athena-fire:
+  cpt.kpi.labels.platform: OCP
+  model_cache.pvc.access_mode: ReadWriteMany
+  model_cache.pvc.storage_class_name: nfs-rwx
+  workloads.pvc_storage_class: nfs-rwx
