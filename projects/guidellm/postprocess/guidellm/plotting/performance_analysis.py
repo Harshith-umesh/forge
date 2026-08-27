@@ -91,6 +91,30 @@ def _safe_get_curve_value(curves: dict, metric_name: str, index: int, default: A
         return default
 
 
+def _custom_configuration_sort_key(config_name: str) -> tuple[int, str]:
+    """
+    Create a sort key that ensures heterogeneous configurations appear before multi-turn.
+
+    Args:
+        config_name: Configuration name from test_configuration column
+
+    Returns:
+        Tuple of (priority, config_name) for sorting
+    """
+    # Convert to lowercase for case-insensitive comparison
+    config_lower = config_name.lower()
+
+    # Priority: 0 = heterogeneous (first), 1 = multi-turn (second), 2 = others (last)
+    if "heterogeneous" in config_lower:
+        priority = 0
+    elif "multi-turn" in config_lower or "multi_turn" in config_lower:
+        priority = 1
+    else:
+        priority = 2
+
+    return (priority, config_name)
+
+
 def create_dataframe_from_records(records: list[UnifiedResultRecord]) -> pd.DataFrame:
     """
     Convert Caliper UnifiedResultRecord objects to pandas DataFrame for analysis.
@@ -222,10 +246,24 @@ def create_dataframe_from_records(records: list[UnifiedResultRecord]) -> pd.Data
 
     # Sort for consistent ordering
     logger.info("📋 Organizing data by configuration, concurrency, and request rate...")
+    # Add custom sort column to ensure heterogeneous comes before multi-turn
+    df["_config_sort_key"] = df["test_configuration"].apply(
+        lambda x: _custom_configuration_sort_key(x)[0]
+    )
+
     # Sort and fill any NaN values in numeric columns with 0 for consistent plotting
     df = df.sort_values(
-        ["test_configuration", "intended_concurrency", "request_rate", "rate_point_index"]
+        [
+            "_config_sort_key",
+            "test_configuration",
+            "intended_concurrency",
+            "request_rate",
+            "rate_point_index",
+        ]
     )
+
+    # Remove the temporary sort column
+    df = df.drop(columns=["_config_sort_key"])
 
     # Fill NaN values in numeric columns with appropriate defaults
     numeric_columns = [
@@ -237,8 +275,8 @@ def create_dataframe_from_records(records: list[UnifiedResultRecord]) -> pd.Data
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
-    # Show what we found
-    configs = df["test_configuration"].unique()
+    # Show what we found - preserve custom sort order
+    configs = df["test_configuration"].drop_duplicates().tolist()
     total_records = len(
         [
             r
@@ -276,6 +314,9 @@ def create_throughput_scaling_plot(df: pd.DataFrame, title_context: str = ""):
 
         title = f"Request Throughput vs Concurrency by Configuration{title_context}"
 
+        # Get ordered configuration list to maintain consistent legend order
+        config_order = df["test_configuration"].drop_duplicates().tolist()
+
         fig = px.scatter(
             df,
             x="intended_concurrency",
@@ -296,6 +337,7 @@ def create_throughput_scaling_plot(df: pd.DataFrame, title_context: str = ""):
                 "test_configuration": "Configuration",
                 "request_concurrency": "Achieved Concurrency",
             },
+            category_orders={"test_configuration": config_order},
         )
 
         fig.update_traces(textposition="top center")
@@ -321,6 +363,9 @@ def create_latency_vs_throughput_plot(df: pd.DataFrame, title_context: str = "")
             return None
 
         title = f"Latency vs Throughput Trade-off{title_context}"
+
+        # Get ordered configuration list to maintain consistent legend order
+        config_order = df["test_configuration"].drop_duplicates().tolist()
 
         fig = px.scatter(
             df,
@@ -390,6 +435,9 @@ def create_token_throughput_vs_concurrency_plot(df: pd.DataFrame, title_context:
         subtitle = " | ".join(subtitle_parts)
         title = f"Token Throughput vs Concurrency{title_context}<br><sub>{subtitle}</sub>"
 
+        # Get ordered configuration list to maintain consistent legend order
+        config_order = df["test_configuration"].drop_duplicates().tolist()
+
         fig = px.line(
             df,
             x="intended_concurrency",
@@ -436,6 +484,9 @@ def create_ttft_analysis_plot(df: pd.DataFrame, title_context: str = ""):
             return None
 
         title = f"TTFT vs Concurrency{title_context}<br><sub>Lower is better</sub>"
+
+        # Get ordered configuration list to maintain consistent legend order
+        config_order = df["test_configuration"].drop_duplicates().tolist()
 
         fig = px.line(
             df,
@@ -486,8 +537,8 @@ def create_token_throughput_percentiles_plot(df: pd.DataFrame, title_context: st
 
         fig = go.Figure()
 
-        # Get unique configurations and colors
-        configurations = sorted(df["test_configuration"].unique())
+        # Get unique configurations and colors - maintain custom sort order
+        configurations = df["test_configuration"].drop_duplicates().tolist()
         logger.info(
             f"   Plotting {len(configurations)} configurations with percentile distributions..."
         )
