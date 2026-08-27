@@ -373,9 +373,9 @@ class GuideLLMParser:
             else:
                 return float(metric_data.get(stat_type, default))
 
-        # Extract latency metrics (convert ms to seconds for consistency)
-        request_latency_median = get_metric_value("request_latency", "median") / 1000.0
-        request_latency_p95 = get_metric_value("request_latency", "p95") / 1000.0
+        # Extract latency metrics (request_latency is already in seconds from guidellm)
+        request_latency_median = get_metric_value("request_latency", "median")
+        request_latency_p95 = get_metric_value("request_latency", "p95")
 
         # Extract TTFT percentiles
         ttft_median = get_metric_value("time_to_first_token_ms", "median") / 1000.0
