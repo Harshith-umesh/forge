@@ -164,8 +164,13 @@ def flatten_hierarchical_kpis(data: dict[str, Any]) -> list[dict[str, Any]]:
             record = dict(test_base)
             record["kpi_id"] = kpi.get("id")
             for k, v in kpi.items():
-                if k != "id":
+                if k == "id":
+                    pass
+                elif k == "labels":
+                    record[k] = {} | test_base["labels"] | v
+                else:
                     record[k] = v
+
             records.append(record)
     return records
 
