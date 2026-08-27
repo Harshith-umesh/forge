@@ -162,29 +162,96 @@ Each entry is a preset name from `presets.d/presets.yaml` that sets
 A CPT pipeline generates **|models| × |workloads|** jobs. For example,
 `cpt-vllm-release` with 9 models × 5 workloads = 45 individual benchmark jobs.
 
-## How a Forge Launcher Should Work
+## How the Fournos UI Currently Submits CPT Jobs
 
-The launcher needs to:
+The UI plugin (`fournos-ui/app/projects/rhaiis.py`, see
+[fournos PR #117](https://github.com/openshift-psap/fournos/pull/117)) implements
+the CPT flow as follows:
+
+### Job Granularity: One Job Per Model (not per model×workload)
+
+The UI creates **one FournosJob per model entry** in `__models`. All workloads
+are passed as a list in `tests.rhaiis.workload_keys` so the single job iterates
+over them internally during its test phase.
+
+This means a pipeline with 9 models × 5 workloads = **9 jobs** (not 45).
+
+### Submit Flow (`POST /api/submit-cpt`)
+
+The UI sends a JSON payload:
+```json
+{
+  "models": [{"name": "llama-70b/tp4", "preset": "llama-70b", "tp": 4, "overrides": {}}],
+  "workloads": ["ci-quick", "profile1", "profile2", "profile3", "profile4"],
+  "accelerator": "nvidia",
+  "engine": "vllm",
+  "cluster": "hera",
+  "pipeline": "forge-full",
+  "owner": "fournos-dashboard",
+  "priority": "manual",
+  "version_label": "vLLM-0.24.0-CPT",
+  "overrides": {"rhaiis.profiler.enabled": true, ...}
+}
+```
+
+For each model entry, the backend:
+
+1. **Resolves the model preset** → looks up `model_entries[preset].overrides["tests.rhaiis.model_key"]`
+2. **Determines GPU count** — from the `tp` field (parsed from `/tp<N>` suffix), falling back to `models.yaml[model_key].vllm_args.tensor-parallel-size`
+3. **Determines GPU type** — from `clusters.yaml` or defaults (`h200` for hera/zeus)
+4. **Builds `configOverrides`** — merges: pipeline-level overrides → per-model overrides → `tests.rhaiis.workload_keys: [all workloads]`
+5. **Builds the FournosJob spec**:
+   ```yaml
+   spec:
+     cluster: hera
+     displayName: rhaiis-cpt-llama-70b-hera
+     hardware:
+       gpuType: h200
+       gpuCount: 4
+     executionEngine:
+       forge:
+         project: rhaiis
+         args: [nvidia, vllm, hera, llama-70b]
+         configOverrides:
+           tests.rhaiis.workload_keys: [ci-quick, profile1, profile2, profile3, profile4]
+           tests.rhaiis.version: "vLLM-0.24.0-CPT"
+           rhaiis.profiler.enabled: true
+           ...per-model overrides...
+     secretRefs: [psap-forge-dashboard-s3, psap-forge-notifications]
+   ```
+6. **Submits** via `k8s_client.create_fournos_job(body)`
+
+### Key Differences from a Hypothetical CLI Launcher
+
+| Aspect | UI (current) | CLI launcher (future) |
+|--------|-------------|----------------------|
+| Job granularity | 1 job per model (workloads as list) | Could be 1 per model×workload |
+| Config source | Fetches from GitHub API at runtime | Reads local files |
+| Args format | `[accelerator, engine, cluster, model]` | Same |
+| Workload selection | `tests.rhaiis.workload_keys: [...]` | Same, or `workload_key` singular |
+
+## How a Forge CLI Launcher Should Work
+
+A CLI launcher should mirror what the UI does:
 
 1. **Parse `cpt.d/cpt.yaml`** — iterate over each pipeline definition.
-2. **Expand the matrix** — for each `(model, workload)` pair in `__models × __workloads`:
-   a. Resolve the model preset → get `tests.rhaiis.model_key`
-   b. Resolve the workload preset → get `tests.rhaiis.workload_key`
-   c. Look up `models.yaml[model_key]` → get `hf_model_id`, `vllm_args`
-   d. Override `tensor-parallel-size` from the `/tp<N>` suffix
-   e. Merge: base config → pipeline globals → per-model overrides
-3. **Determine hardware** — from the resolved `tensor-parallel-size`:
-   - `gpuCount` = N (from `/tp<N>`)
-   - `gpuType` = looked up from `rhaiis.gpu_types[accelerator]`
+2. **For each model in `__models`**:
+   a. Parse `<preset>/tp<N>` → extract preset name and TP size
+   b. Resolve preset → `tests.rhaiis.model_key` from `presets.d/presets.yaml`
+   c. Look up `models.yaml[model_key]` → get `hf_model_id`, validate TP
+   d. Merge: pipeline globals → per-model overrides → `tests.rhaiis.workload_keys: __workloads`
+3. **Determine hardware**:
+   - `gpuCount` = TP size (from `/tp<N>`)
+   - `gpuType` = from `clusters.yaml` or `rhaiis.gpu_types[accelerator]`
 4. **Build the FournosJob** — set:
-   - `spec.executionEngine.forge.args`: `[<workload-preset>, <accelerator>, <engine>, <cluster>, <model-preset>]`
+   - `spec.executionEngine.forge.args`: `[<accelerator>, <engine>, <cluster>, <model-preset>]`
    - `spec.executionEngine.forge.configOverrides`: merged config overrides
    - `spec.hardware`: `{gpuCount, gpuType}`
    - `spec.cluster`: target cluster
    - `spec.secretRefs`: from `config.yaml.vaults`
-5. **Submit** — create the FournosJob CR (or batch-submit via the Fournos UI).
+5. **Submit** — create the FournosJob CR.
 
-### Example: Expanding one entry
+### Example: Expanding one model entry
 
 Given:
 ```yaml
@@ -195,19 +262,19 @@ cpt-vllm-release:
       rhaiis.engines.vllm.args.tensor-parallel-size: 2
   __workloads:
     - profile1
+    - profile2
   rhaiis.profiler.enabled: true
   tests.rhaiis.run_benchmark: true
 ```
 
-Produces one FournosJob with:
-- `args: [profile1, nvidia, vllm, hera, llama-70b]`
+Produces **one** FournosJob with:
+- `args: [nvidia, vllm, hera, llama-70b]`
 - `configOverrides`:
   ```yaml
+  tests.rhaiis.workload_keys: [profile1, profile2]
   rhaiis.engines.vllm.args.tensor-parallel-size: 2
   rhaiis.profiler.enabled: true
   tests.rhaiis.run_benchmark: true
-  tests.rhaiis.workload_key: profile1
-  tests.rhaiis.model_key: llama-3-3-70b-fp8
   ```
 - `hardware: {gpuCount: 2, gpuType: h200}`
 
