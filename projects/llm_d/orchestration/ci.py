@@ -154,6 +154,7 @@ def test(ctx) -> int:
                 max_exit_code = 1  # Set exit code to 1 if post-processing failed but tests passed
 
     except Exception:
+        logger.exception("Test failed")
         if max_exit_code == 0:
             max_exit_code = 1  # Set exit code to 1 if post-processing failed but tests passed
 
