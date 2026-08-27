@@ -164,7 +164,7 @@ class TestEndToEnd:
             [
                 _make_test_entry(
                     "current_run",
-                    {"platform": "A100"},
+                    {"platform": "A100", "version": "v2.0"},
                     [
                         _make_kpi("throughput", 100.0),
                     ],
@@ -178,7 +178,7 @@ class TestEndToEnd:
             [
                 _make_test_entry(
                     "old_run_1",
-                    {"platform": "A100"},
+                    {"platform": "A100", "version": "v1.9"},
                     [
                         _make_kpi("throughput", 95.0),
                     ],
@@ -189,7 +189,7 @@ class TestEndToEnd:
             [
                 _make_test_entry(
                     "old_run_2",
-                    {"platform": "A100"},
+                    {"platform": "A100", "version": "v1.8"},
                     [
                         _make_kpi("throughput", 98.0),
                     ],
@@ -227,7 +227,7 @@ class TestEndToEnd:
             [
                 _make_test_entry(
                     "current_run",
-                    {"platform": "A100"},
+                    {"platform": "A100", "version": "v2.0"},
                     [
                         _make_kpi("throughput", 70.0),
                     ],
@@ -240,7 +240,7 @@ class TestEndToEnd:
             [
                 _make_test_entry(
                     "old_run",
-                    {"platform": "A100"},
+                    {"platform": "A100", "version": "v1.9"},
                     [
                         _make_kpi("throughput", 100.0),
                     ],
@@ -305,7 +305,7 @@ class TestEndToEnd:
             [
                 _make_test_entry(
                     "run",
-                    {"platform": "A100"},
+                    {"platform": "A100", "version": "v2.0"},
                     [
                         _make_kpi("throughput", 100.0, higher_is_better=True),
                         _make_kpi("latency", 2.0, unit="s", higher_is_better=False),
@@ -319,7 +319,7 @@ class TestEndToEnd:
             [
                 _make_test_entry(
                     "old",
-                    {"platform": "A100"},
+                    {"platform": "A100", "version": "v1.9"},
                     [
                         _make_kpi("throughput", 100.0, higher_is_better=True),
                         _make_kpi("latency", 1.0, unit="s", higher_is_better=False),
@@ -355,7 +355,7 @@ class TestEndToEnd:
             [
                 _make_test_entry(
                     "run",
-                    {"platform": "A100"},
+                    {"platform": "A100", "version": "v2.0"},
                     [
                         _make_kpi("throughput", 100.0),
                         _make_kpi("curve_data", [1.0, 2.0, 3.0]),  # non-scalar
@@ -369,7 +369,7 @@ class TestEndToEnd:
             [
                 _make_test_entry(
                     "old",
-                    {"platform": "A100"},
+                    {"platform": "A100", "version": "v1.9"},
                     [
                         _make_kpi("throughput", 95.0),
                     ],
@@ -427,7 +427,7 @@ class TestEndToEnd:
         self._write_hierarchical_kpi(historical_dir / "run1" / "kpis.json", baseline)
 
         # With version as comparison_key, both match on platform=A100
-        # (plugin would expose this config; here we test the core logic directly)
+        # (version excluded from match key, so records with different versions can be compared)
         test_status, _ = run_kpi_analysis(
             current_kpi_file=current_dir / "kpis.json",
             historical_data_dir=historical_dir,
@@ -435,12 +435,12 @@ class TestEndToEnd:
             plugin_module="projects.caliper.tests.stub_plugin",
         )
 
-        # Without plugin config, default AnalysisConfig has no comparison_keys,
-        # so version must also match → no baselines found → all KPIs skipped
-        assert test_status["exit_code"] == 2
+        # With comparison_labels=["version"], version is excluded from matching
+        # Current v2.0 and baseline v1.0 both match on platform=A100 → regression test performed
+        assert test_status["exit_code"] == 0
         with open(output_file) as f:
             report = yaml.safe_load(f)
-        # The version label differs, so with empty comparison_keys they don't match → all skipped
+        # Both records matched and regression test was performed (100.0 vs 95.0 = +5.26% improvement)
         assert report["tested"]["total_kpis"] == 1
-        assert report["tested"]["skipped"] == 1
-        assert report["overall"]["verdict"] == "NO_TEST_PERFORMED"
+        assert report["tested"]["pass"] == 1
+        assert report["overall"]["verdict"] == "PASS"

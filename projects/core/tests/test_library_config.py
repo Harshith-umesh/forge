@@ -41,7 +41,7 @@ def test_init_consolidates_config_chunks_into_top_level_sections(tmp_path: Path)
         {"name": "rhoai", "channel": "stable"},
     )
 
-    core_config.init(orchestration_dir)
+    core_config.init(orchestration_dir, apply_cluster_config=False)
 
     assert core_config.project.get_config("runtime.override", print=False) == "from-chunk"
     assert core_config.project.get_config("runtime.nested.chunk_value", print=False) == 2
@@ -68,7 +68,7 @@ def test_init_supports_projects_defined_only_with_config_d(tmp_path: Path) -> No
         {"namespace": "test-ns"},
     )
 
-    core_config.init(orchestration_dir)
+    core_config.init(orchestration_dir, apply_cluster_config=False)
 
     assert core_config.project.get_config("runtime.default_preset", print=False) == "smoke"
     assert core_config.project.get_config("platform.namespace", print=False) == "test-ns"
@@ -83,7 +83,7 @@ def test_init_rejects_empty_config_d_when_config_yaml_is_missing(tmp_path: Path)
     (orchestration_dir / "config.d").mkdir(parents=True)
 
     with pytest.raises(ValueError, match="config YAML chunks"):
-        core_config.init(orchestration_dir)
+        core_config.init(orchestration_dir, apply_cluster_config=False)
 
 
 def test_init_rejects_overlapping_sections_between_config_and_config_d(
@@ -100,7 +100,7 @@ def test_init_rejects_overlapping_sections_between_config_and_config_d(
     )
 
     with pytest.raises(ValueError, match="defined in both"):
-        core_config.init(orchestration_dir)
+        core_config.init(orchestration_dir, apply_cluster_config=False)
 
 
 def test_init_supports_yml_config_chunks(tmp_path: Path) -> None:
@@ -110,6 +110,6 @@ def test_init_supports_yml_config_chunks(tmp_path: Path) -> None:
         {"default_preset": "smoke"},
     )
 
-    core_config.init(orchestration_dir)
+    core_config.init(orchestration_dir, apply_cluster_config=False)
 
     assert core_config.project.get_config("runtime.default_preset", print=False) == "smoke"

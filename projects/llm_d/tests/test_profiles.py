@@ -31,7 +31,7 @@ def _reset_project_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def _init_project_config() -> None:
-    core_config.init(PROJECT_ORCHESTRATION_DIR)
+    core_config.init(PROJECT_ORCHESTRATION_DIR, apply_cluster_config=False)
 
 
 def test_deployment_presets_resolve_deployments() -> None:
