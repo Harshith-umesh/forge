@@ -23,6 +23,20 @@ logger = logging.getLogger(__name__)
 
 RHAIIS_SLACK_CHANNEL_ID = "C0B9T6JUW74"
 
+_SLACK_USER_RE = re.compile(r"^[UW][A-Z0-9]+$")
+_SLACK_GROUP_RE = re.compile(r"^S[A-Z0-9]+$")
+
+
+def _format_slack_user_line(slack_user: str) -> str:
+    """Build the 'Triggered by' line, supporting both user and group IDs."""
+    if not slack_user:
+        return ""
+    if _SLACK_USER_RE.match(slack_user):
+        return f"*Triggered by:* <@{slack_user}>\n"
+    if _SLACK_GROUP_RE.match(slack_user):
+        return f"*Triggered by:* <!subteam^{slack_user}>\n"
+    return f"*Triggered by:* {slack_user}\n"
+
 
 def _send_via_topsail_bot(
     message: str, *, notification_vault: str | None = None, channel_id: str | None = None
@@ -476,12 +490,7 @@ def send_regression_notification(
 
     details = "\n".join(detail_lines)
 
-    if slack_user and re.match(r"^[UW][A-Z0-9]+$", slack_user):
-        user_line = f"*Triggered by:* <@{slack_user}>\n"
-    elif slack_user:
-        user_line = f"*Triggered by:* {slack_user}\n"
-    else:
-        user_line = ""
+    user_line = _format_slack_user_line(slack_user)
 
     report_line = f"*Agent Analysis:* <{report_url}|View Report>\n" if report_url else ""
 
@@ -550,12 +559,7 @@ def send_success_notification(
     Returns:
         True if notification sent successfully
     """
-    if slack_user and re.match(r"^[UW][A-Z0-9]+$", slack_user):
-        user_line = f"*Triggered by:* <@{slack_user}>\n"
-    elif slack_user:
-        user_line = f"*Triggered by:* {slack_user}\n"
-    else:
-        user_line = ""
+    user_line = _format_slack_user_line(slack_user)
 
     parallelism_parts = []
     if tp:
@@ -652,12 +656,7 @@ def send_failure_notification(
     Returns:
         True if notification sent successfully
     """
-    if slack_user and re.match(r"^[UW][A-Z0-9]+$", slack_user):
-        user_line = f"*Triggered by:* <@{slack_user}>\n"
-    elif slack_user:
-        user_line = f"*Triggered by:* {slack_user}\n"
-    else:
-        user_line = ""
+    user_line = _format_slack_user_line(slack_user)
 
     parallelism_parts = []
     if tp:

@@ -30,6 +30,7 @@ ci-test:
   caliper.postprocess.csv_dashboard.enabled: false
   tests.rhaiis.slack_notify_always: true
   rhaiis.agent_analysis.enabled: false
+  tests.rhaiis.run_benchmark: true
 
 ci-quick:
   tests.rhaiis.workload_key: ci-quick

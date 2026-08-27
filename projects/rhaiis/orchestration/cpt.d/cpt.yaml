@@ -1,0 +1,117 @@
+# CPT Pipeline Definitions
+# Forge repo path: projects/rhaiis/orchestration/cpt.d/cpt.yaml
+#
+# Each top-level key (except __cpt) defines one CPT pipeline.
+# __models: keys use the format <preset>/tp<N> where N is the tensor-parallel-size (GPU count).
+#   Values are per-model config overrides (null = global only).
+#   The /tpN suffix is parsed automatically — no separate __tp field needed.
+# Non-__ keys at the pipeline level are global overrides applied to every job.
+
+__cpt: true
+
+# ──────────────────────────────────────────────
+# vLLM Release — Tier 1 models
+# ──────────────────────────────────────────────
+cpt-vllm-release:
+  __description: "vLLM Release CPT — Tier 1 models across all workload profiles"
+  __engine: vllm
+  __models:
+    llama-70b/tp4:
+    llama-70b/tp2:
+      rhaiis.engines.vllm.args.tensor-parallel-size: 2
+    llama-70b-bf16/tp4:
+    llama-70b-bf16/tp2:
+      rhaiis.engines.vllm.args.tensor-parallel-size: 2
+    granite-8b-bf16/tp1:
+    mistral-24b/tp1:
+    mistral-24b-bf16/tp1:
+    qwen25-7b/tp1:
+    qwen25-7b-bf16/tp1:
+  __workloads:
+    - ci-quick
+    - profile1
+    - profile2
+    - profile3
+    - profile4
+  rhaiis.profiler.enabled: true
+  tests.rhaiis.run_benchmark: true
+  caliper.postprocess.csv_dashboard.enabled: true
+  tests.rhaiis.slack_notify_always: true
+  rhaiis.agent_analysis.enabled: false
+
+# ──────────────────────────────────────────────
+# SGLang Release — Tier 1 models
+# ──────────────────────────────────────────────
+cpt-sglang-competitive:
+  __description: "SGLang Release CPT — Tier 1 models across all workload profiles"
+  __engine: sglang
+  __models:
+    llama-70b/tp4:
+    llama-70b-bf16/tp4:
+    granite-8b-bf16/tp1:
+    mistral-24b/tp1:
+    mistral-24b-bf16/tp1:
+    qwen25-7b/tp1:
+    qwen25-7b-bf16/tp1:
+  __workloads:
+    - profile1
+    - profile2
+    - profile3
+    - profile4
+  rhaiis.profiler.enabled: true
+  tests.rhaiis.run_benchmark: true
+  caliper.postprocess.csv_dashboard.enabled: true
+  tests.rhaiis.slack_notify_always: true
+  rhaiis.agent_analysis.enabled: false
+
+# ──────────────────────────────────────────────
+# TensorRT-LLM Release — NVIDIA only
+# ──────────────────────────────────────────────
+cpt-trtllm-competitive:
+  __description: "TensorRT-LLM Release CPT — supported NVIDIA models across all workload profiles"
+  __engine: trtllm
+  __accelerator: nvidia
+  __models:
+    llama-70b/tp4:
+    mistral-24b/tp1:
+    qwen25-7b/tp1:
+  __workloads:
+    - profile1
+    - profile2
+    - profile3
+    - profile4
+  rhaiis.profiler.enabled: true
+  tests.rhaiis.run_benchmark: true
+  caliper.postprocess.csv_dashboard.enabled: true
+  tests.rhaiis.slack_notify_always: true
+  rhaiis.agent_analysis.enabled: false
+
+# ──────────────────────────────────────────────
+# vLLM Competitive — wider model coverage
+# ──────────────────────────────────────────────
+cpt-vllm-competitive:
+  __description: "vLLM Competitive CPT — wide model coverage for cross-engine comparison"
+  __engine: vllm
+  __models:
+    llama-70b/tp4:
+    llama-70b-bf16/tp4:
+    granite-8b-bf16/tp1:
+    mistral-24b/tp1:
+    mistral-24b-bf16/tp1:
+    qwen25-7b/tp1:
+    qwen25-7b-bf16/tp1:
+    llama-8b/tp1:
+    llama-4-scout/tp2:
+    llama-4-maverick/tp8:
+    qwen3-235b/tp4:
+    deepseek-r1/tp8:
+  __workloads:
+    - profile1
+    - profile2
+    - profile3
+    - profile4
+  rhaiis.profiler.enabled: true
+  tests.rhaiis.run_benchmark: true
+  caliper.postprocess.csv_dashboard.enabled: true
+  tests.rhaiis.slack_notify_always: true
+  rhaiis.agent_analysis.enabled: false
