@@ -444,8 +444,16 @@ def _summarize_label_sets(
     comparison_labels: list[str],
     ignored_labels: list[str],
     current_keys: dict[str, set[str]] | None = None,
+    current_comparison_combinations: set[frozenset] | None = None,
 ) -> dict[str, Any]:
     """Summarize label sets found in a hierarchical KPI doc.
+
+    Args:
+        data: Hierarchical KPI data
+        comparison_labels: List of comparison label keys
+        ignored_labels: List of ignored label keys
+        current_keys: Universe of label keys and values from current test data
+        current_comparison_combinations: Set of frozenset comparison key combinations from current data
 
     Returns:
       - comparison_labels: unique values per comparison key
@@ -475,6 +483,15 @@ def _summarize_label_sets(
         if current_keys is not None:
             if not _is_relevant_baseline(labels, current_keys, excluded_labels):
                 continue
+
+        # Filter out entries with identical comparison key combinations
+        if current_comparison_combinations is not None and comparison_labels:
+            baseline_comparison_keys = frozenset(
+                (k, str(labels[k])) for k in comparison_labels if k in labels
+            )
+            if baseline_comparison_keys in current_comparison_combinations:
+                continue
+
         if filtered and filtered not in seen_filtered:
             seen_filtered.append(filtered)
 
@@ -514,7 +531,8 @@ def _build_report(
     results: list[dict[str, Any]],
     config: AnalysisConfig,
     current_source: dict[str, Any],
-    baseline_sources: list[dict[str, Any]],
+    relevant_sources: list[dict[str, Any]],
+    irrelevant_sources: list[dict[str, Any]],
     baseline_skipped: dict[str, int],
 ) -> dict[str, Any]:
     """Build the final report structure."""
@@ -554,8 +572,11 @@ def _build_report(
         },
         "input_data": {
             "current_source": current_source,
-            "baseline_sources": baseline_sources,
-            "baseline_source_count": len(baseline_sources),
+            "baseline_sources": {
+                "relevant_sources": relevant_sources,
+                "irrelevant_sources": irrelevant_sources,
+            },
+            "baseline_source_count": len(relevant_sources) + len(irrelevant_sources),
             "baseline_skipped": baseline_skipped,
         },
         "results": passes + regressions,
@@ -703,9 +724,19 @@ def run_kpi_analysis(
 
         # Build label universe from current data for baseline filtering
         current_keys: dict[str, set[str]] = {}
+        current_comparison_combinations: set[frozenset] = set()
+
         for test in current_data.get("tests", []):
-            for k, v in test.get("labels", {}).items():
+            labels = test.get("labels", {})
+            for k, v in labels.items():
                 current_keys.setdefault(k, set()).add(str(v))
+
+            # Build comparison key combinations from current data
+            if config.comparison_labels:
+                comparison_combo = frozenset(
+                    (k, str(labels[k])) for k in config.comparison_labels if k in labels
+                )
+                current_comparison_combinations.add(comparison_combo)
 
         # Build baseline index (irrelevant entries are filtered out)
         baseline_index = _build_baseline_index(baseline_kpi_data, config, current_keys)
@@ -744,10 +775,16 @@ def run_kpi_analysis(
 
         # Build report
         excluded_labels = set(config.ignored_labels) | set(config.comparison_labels)
-        baseline_sources = []
+        relevant_sources = []
+        irrelevant_sources = []
+
         for path, data in baseline_kpi_data.items():
             summary = _summarize_label_sets(
-                data, config.comparison_labels, config.ignored_labels, current_keys
+                data,
+                config.comparison_labels,
+                config.ignored_labels,
+                current_keys,
+                current_comparison_combinations,
             )
 
             unexpected_labels: list[str] = []
@@ -766,22 +803,29 @@ def run_kpi_analysis(
                         if entry not in irrelevant_keys:
                             irrelevant_keys.append(entry)
 
-            baseline_sources.append(
-                {
-                    "path": str(path),
-                    **summary,
-                    "unexpected_labels": sorted(unexpected_labels),
-                    "irrelevant_keys": sorted(irrelevant_keys),
-                }
-            )
+            source_entry = {
+                "path": str(path),
+                **summary,
+                "unexpected_labels": sorted(unexpected_labels),
+                "irrelevant_keys": sorted(irrelevant_keys),
+            }
+
             if not unexpected_labels:
-                baseline_sources[-1].pop("unexpected_labels")
+                source_entry.pop("unexpected_labels")
             if not irrelevant_keys:
-                baseline_sources[-1].pop("irrelevant_keys")
+                source_entry.pop("irrelevant_keys")
+
+            # Split sources based on relevant_count
+            if summary.get("relevant_count", 0) > 0:
+                relevant_sources.append(source_entry)
+            else:
+                irrelevant_sources.append(source_entry)
 
         current_source = {
             "path": str(current_kpi_file),
-            **_summarize_label_sets(current_data, config.comparison_labels, config.ignored_labels),
+            **_summarize_label_sets(
+                current_data, config.comparison_labels, config.ignored_labels, None, None
+            ),
         }
 
         if (irr_count := current_source.pop("irrelevant_count")) != 0:
@@ -798,7 +842,8 @@ def run_kpi_analysis(
             results=results,
             config=config,
             current_source=current_source,
-            baseline_sources=baseline_sources,
+            relevant_sources=relevant_sources,
+            irrelevant_sources=irrelevant_sources,
             baseline_skipped=baseline_skipped_totals,
         )
 
@@ -867,7 +912,10 @@ def _write_no_baseline_report(
         },
         "processed": {
             "current_source": str(current_kpi_file),
-            "baseline_sources": [],
+            "baseline_sources": {
+                "relevant_sources": [],
+                "irrelevant_sources": [],
+            },
             "baseline_source_count": 0,
         },
         "tested": {"total_kpis": 0, "regressions": 0, "passes": 0, "skipped": 0},
