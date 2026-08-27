@@ -278,22 +278,3 @@ Produces **one** FournosJob with:
   ```
 - `hardware: {gpuCount: 2, gpuType: h200}`
 
-## Open Questions for Discussion
-
-1. **Scheduling** — Should the launcher submit all jobs at once or stagger them?
-   Kueue handles admission, but 45+ simultaneous jobs may overwhelm the queue.
-
-2. **Naming convention** — How to name CPT jobs for easy identification?
-   e.g. `cpt-vllm-release-llama70b-tp4-profile1`
-
-3. **Version tracking** — Should `tests.rhaiis.version` be set globally per
-   pipeline (e.g. `vLLM-0.24.0-CPT`) or derived from the engine image tag?
-
-4. **Notification grouping** — Individual per-job notifications or a single
-   summary at pipeline completion?
-
-5. **Failure handling** — If one job in the matrix fails, should the rest
-   continue? (Current answer: yes, jobs are independent.)
-
-6. **TTL** — Should CPT jobs get a shorter/longer TTL than the default 12h?
-   Consider that a full pipeline may run for days.
