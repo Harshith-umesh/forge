@@ -90,23 +90,15 @@ def format_postprocess_status_notification(
                 step_name_display = f"**{step_name}**"
 
             # Format step with message if available
+            lines.append(f"- {step_emoji} {step_name_display}: `{step_result.status}`")
             if step_result.message:
-                lines.append(
-                    f"- {step_emoji} {step_name_display}: `{step_result.status}` * {step_result.message}"
-                )
-            else:
-                lines.append(f"- {step_emoji} {step_name_display}: `{step_result.status}`")
+                lines.append(f"  * `{step_result.message}`")
 
-            # Add reason for skipped steps (only if no message already shown)
-            if (
-                step_result.status in ("skipped", "disabled")
-                and step_result.reason
-                and not step_result.message
-            ):
-                lines.append(f"  > {step_result.reason}")
+            if step_result.reason:
+                lines.append(f"  * `{step_result.reason}`")
 
             # Add specific file links for certain steps
-            if step_result.status == "success" and get_file_link:
+            if get_file_link:
                 if (
                     step_name == "artifacts_to_kpis"
                     and hasattr(step_result, "output_file")

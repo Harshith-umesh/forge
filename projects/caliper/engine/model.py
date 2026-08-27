@@ -47,6 +47,7 @@ class UnifiedRunModel:
     unified_result_records: list[UnifiedResultRecord]
     parse_cache_ref: str | None = None
     schema_version: str = "1"
+    excluded_test_directories: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -97,8 +98,22 @@ class PostProcessingPlugin(ABC):
         """Write plots/HTML; return list of created file paths."""
         return []
 
-    def compute_kpis(self, model: UnifiedRunModel) -> list[dict[str, Any]]:
-        """Return canonical-shaped KPI dicts (pre-validated)."""
+    def compute_kpis(
+        self, model: UnifiedRunModel
+    ) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Return canonical-shaped KPI dicts (pre-validated).
+
+        Can return either:
+        - list[dict[str, Any]] - Just the KPI records (traditional behavior)
+        - tuple[list[dict[str, Any]], dict[str, Any]] - KPI records + status info
+
+        Status info format:
+        {
+            "status": "success" | "warning" | "failed",
+            "message": str | None,
+            "warnings": list[str]
+        }
+        """
         return []
 
     def export_kpis_to_csv(

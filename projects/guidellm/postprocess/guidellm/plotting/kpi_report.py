@@ -31,7 +31,7 @@ def generate_kpi_report(
     Returns:
         Path to the generated HTML file
     """
-    from projects.guidellm.postprocess.guidellm.parsing.kpis import GuideLLMKpiHandler
+    from projects.llm_d.postprocess.llm_d.parsing.kpis import GuideLLMKpiHandler
 
     if not records:
         return ""
@@ -455,7 +455,7 @@ def _generate_multi_test_kpi_report(
     """
     from projects.caliper.engine.kpi import get_kpi_functions, is_2d_kpi
     from projects.guidellm.postprocess.guidellm.parsing import kpis as kpis_module
-    from projects.guidellm.postprocess.guidellm.parsing.kpis import GuideLLMKpiHandler
+    from projects.llm_d.postprocess.llm_d.parsing.kpis import GuideLLMKpiHandler
 
     kpi_functions = get_kpi_functions(kpis_module)
 

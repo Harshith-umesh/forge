@@ -56,10 +56,10 @@ custom_env_vars:
 ./forge_launcher.py status
 
 # Build the container image
-./forge_launcher.py build
+./forge_launcher.py build-image
 
 # Create/recreate the toolbox container
-./forge_launcher.py recreate
+./forge_launcher.py build-toolbx
 
 # Verify everything is ready
 ./forge_launcher.py status
@@ -82,8 +82,8 @@ custom_env_vars:
 
 | Command | Description | Bash Equivalent |
 |---------|-------------|------------------|
-| `build` | Build container image | `./forge_build` |
-| `recreate` | Recreate toolbox container | `./recreate` |
+| `build-image` | Build container image | `./forge_build` |
+| `build-toolbx` | Build toolbox container | `./recreate` |
 | `enter` | Enter development environment | `./forge_enter` |
 | `run` | Run FORGE commands | `./forge_run` |
 | `run-cmd` | Run toolbox commands | `./forge_run_cmd` |
@@ -102,7 +102,7 @@ custom_env_vars:
 
 ```bash
 # Build with extra packages
-./forge_launcher.py build --extra-packages vim htop
+./forge_launcher.py build-image --extra-packages vim htop
 
 # Enter environment in current directory
 ./forge_launcher.py enter --here
@@ -186,7 +186,7 @@ Use `-v` or `--verbose` to see detailed execution information:
 
 ```bash
 ./forge_launcher.py --verbose status
-./forge_launcher.py --verbose build
+./forge_launcher.py --verbose build-image
 ./forge_launcher.py --verbose enter "make test"
 ```
 
@@ -224,12 +224,12 @@ The `status` command provides comprehensive environment validation:
 
 **Container image not found:**
 ```bash
-./forge_launcher.py build
+./forge_launcher.py build-image
 ```
 
 **Container doesn't exist:**
 ```bash
-./forge_launcher.py recreate
+./forge_launcher.py build-toolbx
 ```
 
 **Toolbox not available:**
@@ -243,7 +243,7 @@ Ensure your user is in the appropriate groups for container operations.
 Use verbose mode to see exactly what commands are being executed:
 
 ```bash
-./forge_launcher.py --verbose build
+./forge_launcher.py --verbose build-image
 ./forge_launcher.py --verbose enter "your-command"
 ```
 
@@ -280,12 +280,12 @@ The Python launcher is designed as a drop-in replacement:
 
 | Bash Script | Python Equivalent |
 |-------------|-------------------|
-| `./forge_build` | `./forge_launcher.py build` |
+| `./forge_build` | `./forge_launcher.py build-image` |
 | `./forge_enter` | `./forge_launcher.py enter` |
 | `./forge_enter here` | `./forge_launcher.py enter --here` |
 | `./forge_run <args>` | `./forge_launcher.py run <args>` |
 | `./forge_run_cmd <args>` | `./forge_launcher.py run-cmd <args>` |
-| `./recreate <name> <image>` | `./forge_launcher.py recreate` |
+| `./recreate <name> <image>` | `./forge_launcher.py build-toolbx` |
 
 ### Benefits of Python Launcher
 

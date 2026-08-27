@@ -15,8 +15,8 @@ def run_ai_eval_export(
     plugin: object,
     output: Path,
     use_cache: bool,
-    include_label_filter: list[dict[str, str]] | None = None,
-    exclude_label_filter: list[dict[str, str]] | None = None,
+    include_label_filter: dict[str, list[str]] | None = None,
+    exclude_label_filter: dict[str, list[str]] | None = None,
     verbose_parsing: bool = False,
 ) -> dict[str, object]:
     """Export AI evaluation payload with structured directories and copied artifacts."""

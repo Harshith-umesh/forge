@@ -238,9 +238,107 @@ class Config:
     def get_preset(self, name):
         return self.config["presets"].get(name)
 
-    def apply_presets_from_project_args(self):
+    def apply_presets_from_project_args(self, *, lenient=False):
         for arg_name in self.get_config("project.args", print=False) or []:
-            self.apply_preset(arg_name)
+            try:
+                self.apply_preset(arg_name)
+            except Exception as e:
+                if not lenient:
+                    raise
+                logger.warning(
+                    "apply_presets_from_project_args: failed to apply preset %r: %s", arg_name, e
+                )
+
+    def apply_presets_from_cluster_config(self):
+        """Apply cluster-specific configuration if ci_job.cluster matches cluster_config keys."""
+
+        # Get the current cluster name from ci_job.cluster
+        cluster_name = None
+        try:
+            cluster_name = self.get_config("ci_job.cluster", print=False)
+        except KeyError:
+            pass
+
+        # If ci_job.cluster isn't set, try to load from forge-config ConfigMap
+        if not cluster_name:
+            cluster_name = self._get_cluster_from_configmap()
+
+        if not cluster_name:
+            logger.info(
+                "apply_presets_from_cluster_config: no cluster name found (ci_job.cluster or forge-config ConfigMap), skipping cluster config application."
+            )
+            logging.info(
+                "Use this command to configure the cluster name in the current namespace:\n"
+                "oc create configmap forge-config --from-literal=cluster=$CLUSTER_NAME"
+            )
+
+            return
+
+        # Apply preset named cluster_{cluster_name}
+        preset_name = f"cluster_{cluster_name}"
+
+        if not self.get_preset(preset_name):
+            logging.info(
+                f"apply_presets_from_cluster_config: no preset named '{preset_name}', nothing to apply."
+            )
+            return
+
+        self.apply_preset(preset_name)
+        logger.info(f"Applied cluster preset: {preset_name}")
+
+    def _get_cluster_from_configmap(self):
+        """Get cluster name from forge-config ConfigMap as fallback."""
+        import subprocess
+
+        try:
+            logger.debug(
+                "apply_presets_from_cluster_config: trying to get cluster name from forge-config ConfigMap"
+            )
+
+            # Run oc get cm forge-config -o yaml
+            result = subprocess.run(
+                ["oc", "get", "cm", "forge-config", "-o", "yaml"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+
+            if result.returncode != 0:
+                logger.debug(
+                    f"apply_presets_from_cluster_config: failed to get forge-config ConfigMap: {result.stderr.strip()}"
+                )
+                return None
+
+            # Parse the YAML output
+            configmap_data = yaml.safe_load(result.stdout)
+            if not configmap_data or "data" not in configmap_data:
+                logger.debug(
+                    "apply_presets_from_cluster_config: forge-config ConfigMap has no data section"
+                )
+                return None
+
+            cluster_name = configmap_data["data"].get("cluster")
+            if cluster_name:
+                logger.info(
+                    f"apply_presets_from_cluster_config: loaded cluster name '{cluster_name}' from forge-config ConfigMap"
+                )
+                return cluster_name.strip()
+            else:
+                logger.debug(
+                    "apply_presets_from_cluster_config: no 'cluster' field found in forge-config ConfigMap data"
+                )
+                return None
+
+        except subprocess.TimeoutExpired:
+            logger.warning(
+                "apply_presets_from_cluster_config: timeout getting forge-config ConfigMap"
+            )
+            return None
+        except Exception as e:
+            logger.debug(
+                f"apply_presets_from_cluster_config: error getting cluster from ConfigMap: {e}"
+            )
+            return None
 
     def has_config(self, jsonpath):
         try:
@@ -499,9 +597,16 @@ def init(orchestration_dir, *, apply_config_overrides=True):
     presets_applied_file.parent.mkdir(parents=True, exist_ok=True)
     presets_applied_file.touch(exist_ok=True)
 
-    project.apply_config_overrides()
-    project.apply_presets_from_project_args()
-    project.apply_config_overrides()  # reapply so that the value overrides are applied last
+    import sys
+
+    lenient_presets = len(sys.argv) > 1 and sys.argv[1] == "resolve-fournos-config"
+
+    project.apply_config_overrides(ignore_not_found=lenient_presets)
+    project.apply_presets_from_project_args(lenient=lenient_presets)
+    project.apply_presets_from_cluster_config()
+    project.apply_config_overrides(
+        ignore_not_found=lenient_presets
+    )  # reapply so that the value overrides are applied last
 
 
 def reload(orchestration_dir, *, apply_config_overrides=True):

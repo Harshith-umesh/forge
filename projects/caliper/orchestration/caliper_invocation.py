@@ -38,7 +38,7 @@ def _generate_automatic_status_file_path(artifacts_dir: Path, operation: str) ->
     status_dir.mkdir(parents=True, exist_ok=True)
 
     # Find next available index
-    existing_files = list(status_dir.glob(f"*__{operation}.yaml"))
+    existing_files = list(status_dir.glob("*__*.yaml"))
     if existing_files:
         # Extract indices from existing files
         indices = []
@@ -415,38 +415,8 @@ def run_analyse_kpis(
             step_logs_dir=step_logs_dir,
         )
 
-        # Check success condition, accounting for regression override
-        # Regression detection with exit code 3 is considered successful analysis
-        regression_analysis_success = (
-            result.returncode == 3
-            and status_data.get("regressions_detected")
-            and "output_file" in status_data
-        )
+        command_succeeded = result.returncode == 0 and status_data.get("success")
 
-        orchestration_success = (
-            result.returncode == 0 and status_data.get("success")
-        ) or regression_analysis_success
-
-        if not orchestration_success:
-            # Include only summary data in failure case too
-            summary_fields = [
-                "success",
-                "regressions_detected",
-                "baseline_source_count",
-                "tested",
-                "overall",
-            ]
-            analysis_summary = {k: v for k, v in status_data.items() if k in summary_fields}
-
-            return {
-                "status": "failed",
-                "error": status_data.get("error", "Unknown error"),
-                "completed_at": time.time(),
-                "log_file": log_file,
-                **analysis_summary,
-            }
-
-        # Include only summary data, not detailed results
         summary_fields = [
             "success",
             "regressions_detected",
@@ -456,13 +426,26 @@ def run_analyse_kpis(
         ]
         analysis_summary = {k: v for k, v in status_data.items() if k in summary_fields}
 
-        return {
-            "status": "success",
-            "output_file": _make_path_relative_to_base(output_file, env.ARTIFACT_DIR),
+        # Build result data
+        result_data = {
             "completed_at": time.time(),
             "log_file": log_file,
+            "output_file": _make_path_relative_to_base(output_file, env.ARTIFACT_DIR),
+            "status": status_data["message"],
             **analysis_summary,
         }
+
+        if status_data.get("message"):
+            result_data["message"] = status_data["message"]
+
+        if not command_succeeded:
+            fail_on_regression = postprocess_config.analyze.fail_on_regression
+            result_data["status"] = "failed" if fail_on_regression else "warning"
+            result_data["message"] = status_data.get("error") or status_data.get(
+                "message", "Unknown error"
+            )
+
+        return result_data
 
     except Exception as e:
         logger.exception("KPI analysis failed in run_analyse_kpis")

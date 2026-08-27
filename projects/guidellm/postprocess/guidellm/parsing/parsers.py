@@ -67,44 +67,54 @@ def extract_field_by_jsonpath(data: dict[str, Any], jsonpath: str, default: Any 
         return default
 
 
-def parse_product_version_from_annotation(annotation_value: str) -> str | None:
+def parse_product_version_from_annotation(
+    annotation_value: str, prefix: str = "RHOAI-"
+) -> str | None:
     """
-    Parse product version from kserve config annotation.
+    Parse product version from annotation value.
 
     Args:
-        annotation_value: Raw annotation like "v3-5-0-ea-2-kserve-config-llm-decode-template"
+        annotation_value: Raw annotation like "v3-5-0-ea-2-kserve-anything" or "v2-1-0"
+        prefix: Version prefix to use (default: "RHOAI-")
 
     Returns:
-        Cleaned version like "v3.5.0-ea.2" or None if parsing fails
+        Cleaned version like "RHOAI-3.5.0-EA.2" or "RHOAI-2.1.0" or None if parsing fails
 
     Examples:
         parse_product_version_from_annotation("v3-5-0-ea-2-kserve-config-llm-decode-template")
-        # Returns: "v3.5.0-ea.2"
+        # Returns: "RHOAI-3.5.0-EA.2"
+        parse_product_version_from_annotation("v2-1-0-kserve-something", "CUSTOM-")
+        # Returns: "CUSTOM-2.1.0"
     """
     if not annotation_value:
         return None
 
-    # Remove the kserve suffix
-    suffix = "-kserve-config-llm-decode-template"
-    if annotation_value.endswith(suffix):
-        version_part = annotation_value[: -len(suffix)]
-    else:
-        version_part = annotation_value
+    # Remove any kserve suffix (anything starting with -kserve-)
+    version_part = annotation_value
+    if "-kserve-" in annotation_value:
+        kserve_index = annotation_value.find("-kserve-")
+        version_part = annotation_value[:kserve_index]
 
-    # Transform v3-5-0-ea-2 -> v3.5.0-ea.2
-    # Replace hyphens with dots in the version numbers, keep -ea- as is
-    if version_part.startswith("v") and "-ea-" in version_part:
+    # Transform version strings: v3-5-0-ea-2 -> {prefix}3.5.0-EA.2 or v2-1-0 -> {prefix}2.1.0
+    if not version_part.startswith("v"):
+        return None
+
+    # Remove the 'v' prefix
+    version_without_v = version_part[1:]
+
+    if "-ea-" in version_without_v:
         # Split on -ea- to handle the pre-release part separately
-        base_version, ea_part = version_part.split("-ea-", 1)
-
-        # Replace hyphens with dots in base version (v3-5-0 -> v3.5.0)
+        base_version, ea_part = version_without_v.split("-ea-", 1)
+        # Replace hyphens with dots in base version (3-5-0 -> 3.5.0)
         base_version = base_version.replace("-", ".")
-
-        # Reconstruct with -ea. format
-        cleaned_version = f"{base_version}-ea.{ea_part}"
+        # Reconstruct with specified prefix and uppercase EA
+        cleaned_version = f"{prefix}{base_version}-EA.{ea_part}"
         return cleaned_version
-
-    return None
+    else:
+        # Regular version without -ea- (2-1-0 -> {prefix}2.1.0)
+        base_version = version_without_v.replace("-", ".")
+        cleaned_version = f"{prefix}{base_version}"
+        return cleaned_version
 
 
 class GuideLLMParser:
@@ -130,6 +140,11 @@ class GuideLLMParser:
         """Check if path is a config.yaml artifact."""
         return path.name == "config.yaml"
 
+    @staticmethod
+    def _is_node_gpu_mapping_artifact(path: Path) -> bool:
+        """Check if path is a node_gpu_mapping.yaml artifact."""
+        return path.name == "node_gpu_mapping.yaml"
+
     def extract_fields_from_llmisvc(self, file_path: Path) -> dict[str, Any]:
         """
         Extract multiple fields from LLMInferenceService YAML file.
@@ -146,18 +161,27 @@ class GuideLLMParser:
             if not isinstance(yaml_data, dict):
                 return result
 
-            # Extract product version from kserve annotation
-            annotation_value = extract_field_by_jsonpath(
-                yaml_data, 'status.annotations["serving.kserve.io/config-llm-decode-template"]'
-            )
-            if annotation_value:
-                product_version = parse_product_version_from_annotation(annotation_value)
-                if product_version:
-                    normalized = normalize_product_version(product_version)
-                    result["product_version"] = normalized
-                    logger.info(
-                        f"Extracted product_version '{product_version}' (normalized to '{normalized}') from {file_path}"
-                    )
+            # Extract product version from any annotation starting with v[number]
+            annotations = extract_field_by_jsonpath(yaml_data, "status.annotations", {})
+            if isinstance(annotations, dict):
+                for annotation_key, annotation_value in annotations.items():
+                    if (
+                        isinstance(annotation_value, str)
+                        and annotation_value.startswith("v")
+                        and len(annotation_value) > 1
+                    ):
+                        # Check if the second character is a digit
+                        if annotation_value[1].isdigit():
+                            product_version = parse_product_version_from_annotation(
+                                annotation_value
+                            )
+                            if product_version:
+                                normalized = normalize_product_version(product_version)
+                                result["product_version"] = normalized
+                                logger.info(
+                                    f"Extracted product_version '{product_version}' (normalized to '{normalized}') from annotation '{annotation_key}' in {file_path}"
+                                )
+                                break  # Use the first matching version annotation found
 
             # Extract deployment profile from forge annotation
             deployment_profile = extract_field_by_jsonpath(
@@ -232,6 +256,44 @@ class GuideLLMParser:
 
         except Exception as e:
             logger.warning(f"Failed to extract fields from {file_path}: {e}")
+
+        return result
+
+    def extract_fields_from_node_gpu_mapping(self, file_path: Path) -> dict[str, str]:
+        """
+        Extract GPU type from node_gpu_mapping.yaml file.
+
+        Args:
+            file_path: Path to node_gpu_mapping.yaml file
+
+        Returns:
+            Dictionary with extracted GPU type field
+
+        Example file structure:
+            node_gpu_mapping:
+              psap-fire-athena-bnfx9-worker-gpu-h200-66lrw: NVIDIA-H200
+        """
+        result = {}
+        try:
+            yaml_data = yaml.safe_load(file_path.read_text(encoding="utf-8"))
+            if not isinstance(yaml_data, dict):
+                return result
+
+            # Extract GPU types from node_gpu_mapping
+            node_gpu_mapping = yaml_data.get("node_gpu_mapping", {})
+            if isinstance(node_gpu_mapping, dict) and node_gpu_mapping:
+                # Get all unique GPU types from the mapping
+                gpu_types = list(set(node_gpu_mapping.values()))
+
+                if gpu_types:
+                    # Concatenate all GPU types with comma separator
+                    result["gpu_type"] = ",".join(sorted(gpu_types))
+                    logger.info(f"Extracted gpu_type '{result['gpu_type']}' from {file_path}")
+                else:
+                    logger.warning(f"Empty node_gpu_mapping found in {file_path}")
+
+        except Exception as e:
+            logger.warning(f"Failed to extract GPU type from {file_path}: {e}")
 
         return result
 
@@ -584,6 +646,9 @@ class GuideLLMParser:
             llmisvc_files = [p for p in node.artifact_paths if self._is_llmisvc_artifact(p)]
             llmisvc_files.sort(key=lambda path: "__capture_llmisvc_state" not in str(path))
             config_files = [p for p in node.artifact_paths if self._is_config_artifact(p)]
+            gpu_mapping_files = [
+                p for p in node.artifact_paths if self._is_node_gpu_mapping_artifact(p)
+            ]
 
             if not benchmarks_files:
                 # No benchmark result JSON found for this node, create empty record
@@ -613,6 +678,11 @@ class GuideLLMParser:
             if node_benchmarks:
                 # Create aggregated metrics with performance curves for this node
                 labels = _labels_from_node(node)
+                kpi_labels = _kpi_labels_from_node(node)
+
+                # Merge kpi_labels into distinguishing_labels
+                distinguishing_labels = {**labels, **kpi_labels}
+
                 metrics = self._create_aggregated_metrics(node_benchmarks)
                 if node_config:
                     metrics["configuration"] = node_config.to_dict()
@@ -631,15 +701,39 @@ class GuideLLMParser:
                         if field_value and field_name not in metrics:
                             metrics[field_name] = field_value
 
-                # Extract kpi_labels from test labels
-                kpi_labels = _kpi_labels_from_node(node)
+                # Extract GPU type from node_gpu_mapping.yaml if available
+                for gpu_mapping_file in gpu_mapping_files:
+                    gpu_fields = self.extract_fields_from_node_gpu_mapping(gpu_mapping_file)
+                    for field_name, field_value in gpu_fields.items():
+                        if field_value and field_name not in metrics:
+                            metrics[field_name] = field_value
+
+                # Extract kpi_labels from the extracted fields and and
+                # the test labels from the node file
+
+                kpi_labels = {}
+
+                # Add gpu_type as a KPI label if it was extracted
+                if "gpu_type" in metrics:
+                    kpi_labels["gpu_type"] = metrics["gpu_type"]
+                    logger.info(f"Added gpu_type '{metrics['gpu_type']}' to KPI labels")
+
+                # Add product_version as a KPI label if it was extracted
+                if "product_version" in metrics:
+                    kpi_labels["product_version"] = metrics["product_version"]
+                    logger.info(
+                        f"Added product_version '{metrics['product_version']}' to KPI labels"
+                    )
+
+                kpi_labels.update(_kpi_labels_from_node(node))
+
                 if kpi_labels:
                     metrics["kpi_labels"] = kpi_labels
 
                 records.append(
                     UnifiedResultRecord(
                         test_base_path=str(node.test_path),
-                        distinguishing_labels=labels,
+                        distinguishing_labels=distinguishing_labels,
                         metrics=metrics,
                         run_identity={"guidellm": True},
                         parse_notes=[],

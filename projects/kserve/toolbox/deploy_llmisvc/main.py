@@ -40,7 +40,7 @@ def run(
     inference_service_manifest_path: str,
     gateway_status_address_name: str | None = "gateway-external",
     dry_run: bool = False,
-    wait_pods_scheduled: bool = False,
+    wait_long_scheduling: bool = False,
 ) -> str:
     """
     Deploy an LLMInferenceService and wait for its endpoint.
@@ -50,7 +50,7 @@ def run(
         inference_service_manifest_path: Path to the InferenceService YAML manifest file
         gateway_status_address_name: Gateway status address name for endpoint resolution
         dry_run: If True, only prepare the manifest without deploying
-        wait_pods_scheduled: If True, wait for all pods to be scheduled before checking service readiness
+        wait_long_scheduling: If True, wait for all pods to be scheduled before checking service readiness with extended retry
     """
 
     ctx = execute_tasks(locals())
@@ -167,7 +167,7 @@ def apply_inference_service(args, ctx):
 
 
 @on_failure(on_wait_pods_appear_failure)
-@retry(attempts=12, delay=5, backoff=1.0)
+@retry(attempts=30, delay=5, backoff=1.0)
 @task
 def wait_pods_appear(args, ctx):
     """Wait for llm-d pods to appear"""
@@ -250,15 +250,8 @@ def query_service_message(args, ctx):
         return "No Ready condition found in status"
 
 
-@retry(attempts=999999, delay=30, backoff=1.0)
-@task
-def wait_pods_scheduled(args, ctx):
-    """Wait for all pods to be scheduled (optional task)"""
-
-    # Check if this task is enabled
-    if not args.wait_pods_scheduled:
-        return "Pod scheduling wait disabled by parameter"
-
+def _check_pod_scheduling_status(args, ctx):
+    """Helper function to check pod scheduling status and image pull errors"""
     service_name = ctx.inference_service_name
 
     # First, check if the LLMInferenceService exists
@@ -297,6 +290,31 @@ def wait_pods_scheduled(args, ctx):
     if not result.stdout.strip():
         return False, "No pods found for the service yet"
 
+    # Check for image pull errors and fail early if found
+    image_pull_result = oc(
+        "get",
+        "pods",
+        "-l",
+        ctx.selector,
+        "-n",
+        args.namespace,
+        "--no-headers",
+        "-o",
+        "jsonpath={range .items[*]}{.metadata.name}:{range .status.containerStatuses[*]}{.state.waiting.reason}{'|'}{end}{'\\n'}{end}",
+        check=False,
+    )
+
+    for line in image_pull_result.stdout.strip().split("\n"):
+        pod_name, waiting_reasons = line.split(":", 1)
+        if not waiting_reasons:
+            continue
+        reasons = waiting_reasons.split("|")
+        for reason in reasons:
+            if reason in ("ImagePullBackOff", "ErrImagePull"):
+                raise RuntimeError(
+                    f"Pod {pod_name} has image pull error: {reason}. Aborting wait due to image pull failure."
+                )
+
     # Keep waiting if any pod is Pending or SchedulingGated
     if "Pending" in result.stdout:
         return False, "Waiting for pods to exit Pending state"
@@ -305,6 +323,30 @@ def wait_pods_scheduled(args, ctx):
         return False, "Waiting for pods to exit SchedulingGated state"
 
     return f"All pods for {service_name} are scheduled successfully"
+
+
+@retry(attempts=12, delay=10, backoff=1.0)
+@task
+def wait_pods_scheduled_short(args, ctx):
+    """Wait for all pods to be scheduled with short retry (normal scheduling)"""
+
+    # Check if this task is enabled
+    if args.wait_long_scheduling:
+        return "Short pod scheduling wait disabled - long scheduling is enabled"
+
+    return _check_pod_scheduling_status(args, ctx)
+
+
+@retry(attempts=999999, delay=30, backoff=1.0)
+@task
+def wait_pods_scheduled_long(args, ctx):
+    """Wait for all pods to be scheduled with extended retry (long scheduling)"""
+
+    # Check if this task is enabled
+    if not args.wait_long_scheduling:
+        return "Long pod scheduling wait disabled by parameter"
+
+    return _check_pod_scheduling_status(args, ctx)
 
 
 @retry(attempts=180, delay=10, backoff=1.0)

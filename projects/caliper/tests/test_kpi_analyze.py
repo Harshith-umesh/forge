@@ -10,6 +10,7 @@ import yaml
 
 from projects.caliper.engine.kpi.analyze import (
     AnalysisConfig,
+    Verdict,
     _build_baseline_index,
     _extract_kpi_records_from_hierarchical,
     _match_key,
@@ -45,14 +46,14 @@ def _make_kpi(kpi_id: str, value, unit: str = "tokens/s", higher_is_better: bool
 class TestMatchKey:
     def test_basic_match_key(self):
         labels = {"platform": "A100", "version": "1.0", "os": "linux"}
-        key = _match_key(labels, ignored_keys=["os"], comparison_keys=["version"])
+        key = _match_key(labels, ignored_labels=["os"], comparison_labels=["version"])
         assert ("os", "linux") not in key
         assert ("version", "1.0") not in key
         assert ("platform", "A100") in key
 
     def test_empty_config(self):
         labels = {"a": "1", "b": "2"}
-        key = _match_key(labels, ignored_keys=[], comparison_keys=[])
+        key = _match_key(labels, ignored_labels=[], comparison_labels=[])
         assert key == tuple(sorted([("a", "1"), ("b", "2")]))
 
 
@@ -101,11 +102,12 @@ class TestBuildBaselineIndex:
                 ),
             ]
         )
-        config = AnalysisConfig(comparison_keys=["version"])
+        config = AnalysisConfig(comparison_labels=["version"])
+        current_keys = {"platform": {"A100"}, "version": {"1.0", "2.0"}}
         baseline_data = {Path("/fake/kpis.json"): data}
-        index = _build_baseline_index(baseline_data, config)
+        index = _build_baseline_index(baseline_data, config, current_keys)
 
-        mk = _match_key({"platform": "A100"}, [], ["version"])
+        mk = _match_key({"platform": "A100"}, ignored_labels=[], comparison_labels=["version"])
         key = ("throughput", mk)
         assert key in index
         assert len(index[key]) == 2
@@ -114,34 +116,34 @@ class TestBuildBaselineIndex:
 class TestRegressionTest:
     def test_no_regression_higher_is_better(self):
         current = {"kpi_id": "throughput", "value": 100.0, "higher_is_better": True, "labels": {}}
-        baselines = [{"value": 95.0}, {"value": 100.0}]
-        config = AnalysisConfig(max_relative_regression=0.1)
+        baselines = [{"value": 95.0, "labels": {}}, {"value": 100.0, "labels": {}}]
+        config = AnalysisConfig(regression_config={"max_relative_regression": 0.1})
         result = _run_regression_test(current, baselines, config)
-        assert not result.regression
-        assert result.relative_change > 0
+        assert result["verdict"] != Verdict.REGRESSION
+        assert result["details"]["relative_change"] > 0
 
     def test_regression_higher_is_better(self):
         current = {"kpi_id": "throughput", "value": 80.0, "higher_is_better": True, "labels": {}}
-        baselines = [{"value": 100.0}, {"value": 100.0}]
-        config = AnalysisConfig(max_relative_regression=0.1)
+        baselines = [{"value": 100.0, "labels": {}}, {"value": 100.0, "labels": {}}]
+        config = AnalysisConfig(regression_config={"max_relative_regression": 0.1})
         result = _run_regression_test(current, baselines, config)
-        assert result.regression
-        assert result.relative_change < -0.1
+        assert result["verdict"] == Verdict.REGRESSION
+        assert result["details"]["relative_change"] < -0.1
 
     def test_regression_lower_is_better(self):
         current = {"kpi_id": "latency", "value": 1.5, "higher_is_better": False, "labels": {}}
-        baselines = [{"value": 1.0}, {"value": 1.0}]
-        config = AnalysisConfig(max_relative_regression=0.1)
+        baselines = [{"value": 1.0, "labels": {}}, {"value": 1.0, "labels": {}}]
+        config = AnalysisConfig(regression_config={"max_relative_regression": 0.1})
         result = _run_regression_test(current, baselines, config)
-        assert result.regression
-        assert result.relative_change > 0.1
+        assert result["verdict"] == Verdict.REGRESSION
+        assert result["details"]["relative_change"] > 0.1
 
     def test_no_regression_lower_is_better(self):
         current = {"kpi_id": "latency", "value": 0.9, "higher_is_better": False, "labels": {}}
-        baselines = [{"value": 1.0}]
-        config = AnalysisConfig(max_relative_regression=0.1)
+        baselines = [{"value": 1.0, "labels": {}}]
+        config = AnalysisConfig(regression_config={"max_relative_regression": 0.1})
         result = _run_regression_test(current, baselines, config)
-        assert not result.regression
+        assert result["verdict"] != Verdict.REGRESSION
 
 
 class TestEndToEnd:
@@ -261,7 +263,7 @@ class TestEndToEnd:
         assert report["analysis"]["status"] == "REGRESSION_DETECTED"
         assert report["overall"]["regression_count"] == 1
         assert report["results"][0]["verdict"] == "REGRESSION"
-        assert report["results"][0]["relative_change_pct"] == pytest.approx(-30.0)
+        assert report["results"][0]["details"]["relative_change"] == pytest.approx(-0.3)
 
     def test_no_historical_data(self, tmp_path):
         current_dir = tmp_path / "current"
@@ -388,7 +390,7 @@ class TestEndToEnd:
             report = yaml.safe_load(f)
 
         assert report["tested"]["skipped"] == 1
-        assert report["tested"]["total_kpis"] == 1
+        assert report["tested"]["total_kpis"] == 2
 
     def test_comparison_keys_separate_baselines(self, tmp_path):
         """Records that differ on comparison_keys should still be matched."""
@@ -434,9 +436,11 @@ class TestEndToEnd:
         )
 
         # Without plugin config, default AnalysisConfig has no comparison_keys,
-        # so version must also match → no baselines found → skip
-        assert test_status["exit_code"] in (0, 2)
+        # so version must also match → no baselines found → all KPIs skipped
+        assert test_status["exit_code"] == 2
         with open(output_file) as f:
             report = yaml.safe_load(f)
-        # The version label differs, so with empty comparison_keys they don't match
-        assert report["tested"]["total_kpis"] == 0 or report["overall"]["verdict"] == "NO_BASELINE"
+        # The version label differs, so with empty comparison_keys they don't match → all skipped
+        assert report["tested"]["total_kpis"] == 1
+        assert report["tested"]["skipped"] == 1
+        assert report["overall"]["verdict"] == "NO_TEST_PERFORMED"

@@ -16,9 +16,6 @@ from projects.core.library import config, env
 from projects.core.library.postprocess import run_and_postprocess, write_test_labels
 from projects.core.library.run import SignalInterrupt
 from projects.core.orchestration.utils.k8s import ensure_namespace
-from projects.guidellm.postprocess.guidellm.dashboard import (
-    deployment_metadata_from_profile,
-)
 from projects.guidellm.toolbox.run_guidellm_benchmark import build_guidellm_args
 from projects.guidellm.toolbox.run_guidellm_benchmark import main as run_guidellm_benchmark_command
 from projects.guidellm.toolbox.run_smoke_request import main as run_smoke_request_command
@@ -151,27 +148,15 @@ def extract_kpi_labels_from_config() -> dict[str, str]:
     """
     kpi_labels = {}
 
-    # Extract platform name
-    platform_name = config.project.get_config("cpt.kpi.labels.platform_name")
-    if platform_name:
-        kpi_labels["platform"] = platform_name
+    kpi_labels.update(config.project.get_config("cpt.kpi.labels"))
 
-    # Extract gpu_type
-    gpu_type = config.project.get_config("cpt.kpi.labels.gpu_type")
-    if gpu_type:
-        kpi_labels["gpu_type"] = gpu_type
-
-    # Extract test_harness
-    test_harness = config.project.get_config("cpt.kpi.labels.test_harness")
-    if test_harness:
-        kpi_labels["test_harness"] = test_harness
+    for k, v in list(kpi_labels.items()):
+        if v is None:
+            del kpi_labels[k]
 
     product_version = config.project.get_config("cpt.kpi.labels.product_version")
     if product_version:
         kpi_labels["product_version"] = product_version
-
-    deployment_profile = runtime_config.get_deployment_profile()
-    kpi_labels.update(deployment_metadata_from_profile(deployment_profile))
 
     return kpi_labels
 
@@ -256,6 +241,9 @@ def update_test_labels_with_status(success: bool, message: str) -> None:
     logger.info(
         "Updated test labels with completion status: success=%s, message=%s", success, message
     )
+
+    if not success:
+        (test_labels_path.parent / "FAILURE.txt").write_text(message)
 
 
 def run_all_tests(stop_on_error: bool = False) -> int:
@@ -430,9 +418,11 @@ def do_test() -> int:
     except Exception as e:
         primary_exc = sys.exc_info()
         update_test_labels_with_status(False, f"Test failed with exception: {str(e)}")
+        logger.exception("Test failed with exception")
     except SignalInterrupt as e:
         primary_exc = sys.exc_info()
         update_test_labels_with_status(False, f"Test interrupted: {str(e)}")
+        logger.error("Test interrupted")
     finally:
         do_finalizers = config.project.get_config("runtime.run_test_finalizers")
         if primary_exc and isinstance(primary_exc[1], SignalInterrupt):
@@ -628,14 +618,14 @@ def deploy_inference_service_from_manifest(manifest_path: Path, actual_llmisvc_n
     logger.info("Deploying LLMInferenceService from manifest: %s", manifest_path)
 
     # Get scheduling wait configuration
-    wait_pods_scheduled = config.project.get_config("runtime.kserve.wait_long_scheduling")
+    wait_long_scheduling = config.project.get_config("runtime.kserve.wait_long_scheduling")
 
     endpoint_url = deploy_llmisvc.run(
         namespace=namespace,
         inference_service_manifest_path=str(manifest_path),
         gateway_status_address_name=gateway_status_address_name,
         dry_run=dry_run,
-        wait_pods_scheduled=wait_pods_scheduled,
+        wait_long_scheduling=wait_long_scheduling,
     )
 
     if dry_run:

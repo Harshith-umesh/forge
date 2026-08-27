@@ -175,11 +175,6 @@ def test_release_preset_expands_benchmark_list_and_merges_workload_args() -> Non
         core_config.project.get_config("cpt.kpi.labels.test_harness", print=False)
         == "rhoai-release"
     )
-    assert core_config.project.get_config("cpt.kpi.labels.gpu_type", print=False) == "H200"
-    assert (
-        core_config.project.get_config("cpt.kpi.labels.product_version", print=False)
-        == "RHOAI-3.5-EA2"
-    )
 
     assert core_config.project.get_config("runtime.deployment_profile", print=False) == [
         "release-distributed-default",

@@ -80,16 +80,18 @@ gateway:
   namespace: openshift-ingress
   name: openshift-ai-inference
   gateway_class_name: data-science-gateway-class
-  status_address_name: gateway-external
+  status_address_name: gateway-internal
   create_if_missing: true
 
 inference_service:
   name: llm-d
   template: manifests/llminferenceservice.yaml
   workload_deployment_name_suffix: -kserve
+  image_pull_secret: null  # secret name to add to imagePullSecrets of all pod templates
   scheduler:
     node_selector:
       nvidia.com/gpu.present: "true"
+    tolerations: null
 
 artifacts:
   capture_namespace_events: true

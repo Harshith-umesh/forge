@@ -1,0 +1,39 @@
+init_container:
+  name: link-model
+  image: busybox
+  env:
+    - name: MODEL_NAME
+      value: __MODEL_NAME__
+  command:
+    - sh
+    - -c
+    - |
+      set -e
+      HF_DIR="/model-store/hub/models--$(echo "$MODEL_NAME" | sed 's|/|--|g')"
+      SNAP=$(ls -d "$HF_DIR"/snapshots/*/ 2>/dev/null | head -1)
+      if [ -z "$SNAP" ]; then echo "ERROR: no snapshot for $MODEL_NAME in $HF_DIR"; exit 1; fi
+      echo "Linking $MODEL_NAME from $SNAP"
+      ls -1A "$SNAP" | while read -r f; do ln -sf "${SNAP}${f}" "/mnt/models/${f}"; done
+      echo "Created $(ls -1A /mnt/models | wc -l) symlinks in /mnt/models"
+  volumeMounts:
+    - name: model-store
+      mountPath: /model-store
+      readOnly: true
+    - name: model-dir
+      mountPath: /mnt/models
+
+volumes:
+  - name: model-store
+    hostPath:
+      path: __HOSTPATH__
+      type: Directory
+  - name: model-dir
+    emptyDir: {}
+
+volume_mounts:
+  - name: model-dir
+    mountPath: /mnt/models
+    readOnly: true
+  - name: model-store
+    mountPath: /model-store
+    readOnly: true

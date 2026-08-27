@@ -212,6 +212,45 @@ def delete_inference_service(args, ctx):
         )
 
 
+@task
+def delete_workloads(args, ctx):
+    """Delete Kueue workloads associated with the inference service"""
+
+    # Delete workloads that match the inference service name pattern
+    result = oc(
+        "delete",
+        "workload.kueue.x-k8s.io",
+        "-l",
+        f"kueue.x-k8s.io/pod-group-name={args.inference_service_name}",
+        "-n",
+        args.namespace,
+        "--ignore-not-found=true",
+        "--timeout=30s",
+        check=False,
+    )
+
+    if result.returncode != 0 and "the server doesn't have a resource type" in result.stderr:
+        logger.info(
+            "Kueue workload CRDs not available for %s, skipping workload cleanup",
+            args.inference_service_name,
+        )
+        return f"Kueue not available for {args.inference_service_name}, skipped workload cleanup"
+
+    if result.returncode != 0:
+        logger.warning(
+            "Failed to delete workloads for %s (rc=%d), continuing cleanup",
+            args.inference_service_name,
+            result.returncode,
+        )
+        return f"Failed to delete workloads for {args.inference_service_name}, continuing"
+
+    # Check if something was actually deleted by looking at the output
+    if not result.stdout.strip():
+        return f"No Kueue workloads found for {args.inference_service_name} (already cleaned up)"
+
+    return f"Deleted Kueue workloads for {args.inference_service_name}"
+
+
 @retry(attempts=90, delay=10, backoff=1.0)
 @task
 def wait_for_workload_pods_deletion(args, ctx):

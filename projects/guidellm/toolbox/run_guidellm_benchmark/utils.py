@@ -241,6 +241,65 @@ def render_guidellm_job_from_parts(
     return manifest
 
 
+def render_guidellm_shared_volume_job_from_parts(
+    *,
+    namespace: str,
+    name: str,
+    image: str,
+    endpoint_url: str,
+    guidellm_args: list[str],
+    timeout_seconds: int,
+    hf_token_secret: str = "",
+    fs_group: int | None = None,
+) -> dict[str, Any]:
+    """Render a GuideLL-M job manifest with shared volume (main + sidecar containers).
+
+    Args:
+        namespace: Target namespace
+        name: Name of the benchmark job
+        image: Container image for GuideLLM
+        endpoint_url: Gateway endpoint URL
+        guidellm_args: Additional arguments for GuideLLM
+        timeout_seconds: Active deadline for the Kubernetes Job
+        hf_token_secret: Name of the K8s secret containing HF_TOKEN. If empty, HF_TOKEN is not injected.
+        fs_group: If set, adds a pod-level securityContext.fsGroup to ensure
+            the shared volume is writable by both containers.
+
+    Returns:
+        Job manifest as dict with main and sidecar containers
+    """
+    runs = expand_guidellm_runs(guidellm_args)
+    rendered_yaml = template.render_template(
+        "guidellm_shared_volume_job.yaml.j2",
+        {
+            "namespace": namespace,
+            "name": name,
+            "image": image,
+            "hf_token_secret": hf_token_secret,
+            "fs_group": fs_group,
+        },
+    )
+    manifest = yaml.safe_load(rendered_yaml)
+    manifest["spec"]["activeDeadlineSeconds"] = timeout_seconds
+
+    # Build the main container script
+    if len(runs) == 1 and runs[0].rate is None:
+        main_script_lines = [
+            "set -euo pipefail",
+            "mkdir -p /results",
+            f"/opt/app-root/bin/guidellm benchmark run --target={endpoint_url} {' '.join(runs[0].args)}",
+        ]
+        main_script = "\n".join(main_script_lines)
+        manifest["spec"]["template"]["spec"]["containers"][0]["command"] = ["/bin/sh", "-c"]
+        manifest["spec"]["template"]["spec"]["containers"][0]["args"] = [main_script]
+    else:
+        main_script = _build_multi_run_script(endpoint_url=endpoint_url, runs=runs)
+        manifest["spec"]["template"]["spec"]["containers"][0]["command"] = ["/bin/sh", "-c"]
+        manifest["spec"]["template"]["spec"]["containers"][0]["args"] = [main_script]
+
+    return manifest
+
+
 def render_guidellm_copy_pod_from_parts(
     *,
     namespace: str,

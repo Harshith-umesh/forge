@@ -5,6 +5,7 @@ Runtime execution engine for the DSL framework
 import inspect
 import logging
 import os
+import shlex
 import threading
 import time
 import types
@@ -155,6 +156,7 @@ def execute_tasks(function_args: dict = None):
         # Track if @always tasks were executed after failure for log splitting
         always_executed = False
 
+        script_manager = None
         try:
             # Log execution banner (now captured in file)
             log_execution_banner(function_args, log_file)
@@ -305,8 +307,10 @@ def execute_tasks(function_args: dict = None):
             return shared_context
 
         finally:
-            # Clear thread-local execution context
-            script_manager.clear_execution_context()
+            if script_manager:
+                # Clear thread-local execution context
+                script_manager.clear_execution_context()
+
             # Clean up the thread-local file handler to prevent leaks
             if hasattr(_thread_local_handlers, "file_handler"):
                 _thread_local_handlers.file_handler.close()
@@ -630,7 +634,7 @@ def _generate_restart_script(function_args: dict, caller_frame, meta_dir):
     script_content += f"# Original execution artifact dir: {env.ARTIFACT_DIR}\n\n"
 
     # Build command line with arguments on separate lines
-    script_content += f'exec python "{rel_filename}"'
+    script_content += f"exec python {shlex.quote(str(rel_filename))}"
 
     # Add arguments, each on a new line with proper indentation
     for key, value in function_args.items():
@@ -640,13 +644,27 @@ def _generate_restart_script(function_args: dict, caller_frame, meta_dir):
             if isinstance(value, bool):
                 if value:  # Only add flag if True
                     script_content += " \\\n    " + f"--{key.replace('_', '-')}"
+            elif isinstance(value, list):
+                if not value:
+                    continue
+
+                # Concatenate list values with spaces and shell escape each value
+                escaped_values = [shlex.quote(str(item)) for item in value]
+                list_value = " ".join(escaped_values)
+                script_content += (
+                    " \\\n    " + f"--{key.replace('_', '-')} {shlex.quote(list_value)}"
+                )
             else:
-                script_content += " \\\n    " + f'--{key.replace("_", "-")} "{value}"'
+                if value == "":
+                    continue
+                script_content += (
+                    " \\\n    " + f"--{key.replace('_', '-')} {shlex.quote(str(value))}"
+                )
 
     script_content += "\n"
 
     # Write restart script
-    restart_file = meta_dir / "restart.sh"
+    restart_file = meta_dir / "restart.sh.txt"
     with open(restart_file, "w") as f:
         f.write(script_content)
 

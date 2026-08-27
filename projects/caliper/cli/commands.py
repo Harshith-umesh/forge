@@ -223,6 +223,21 @@ def parse_cmd(
                 }
             )
 
+        # Add excluded directories information
+        excluded_summary = {}
+        if model.excluded_test_directories:
+            # Group excluded dirs by reason for summary
+            by_reason = {}
+            for excluded in model.excluded_test_directories:
+                reason = excluded["reason"]
+                by_reason.setdefault(reason, []).append(excluded)
+
+            excluded_summary = {
+                "total_excluded": len(model.excluded_test_directories),
+                "by_reason": {reason: len(dirs) for reason, dirs in by_reason.items()},
+                "excluded_directories": model.excluded_test_directories,
+            }
+
         status.update(
             {
                 "success": True,
@@ -230,6 +245,7 @@ def parse_cmd(
                 "parsed_records": len(model.unified_result_records),
                 "test_directories": test_directories,
                 "test_directories_count": len(test_directories),
+                "excluded_test_directories": excluded_summary,
                 "cache_ref": str(model.parse_cache_ref) if model.parse_cache_ref else None,
             }
         )
@@ -245,6 +261,31 @@ def parse_cmd(
                 click.echo(f"   • {test_dir}")
         else:
             click.echo("⚠️  No test directories found")
+
+        # Show excluded directories summary
+        if model.excluded_test_directories:
+            excluded_count = len(model.excluded_test_directories)
+            click.echo(f"🚫 Excluded {excluded_count} directories:")
+
+            # Group by reason and show counts
+            by_reason = {}
+            for excluded in model.excluded_test_directories:
+                reason = excluded["reason"]
+                by_reason.setdefault(reason, []).append(excluded)
+
+            for reason, dirs in by_reason.items():
+                reason_label = {
+                    "skip": "marked with skip: true",
+                    "filter_mismatch": "filtered out by include/exclude rules",
+                }.get(reason, reason)
+
+                click.echo(f"   • {len(dirs)} {reason_label}")
+
+                # Show first few examples
+                for d in dirs[:2]:
+                    click.echo(f"     - {d['path']}: {d['detail']}")
+                if len(dirs) > 2:
+                    click.echo(f"     ... and {len(dirs) - 2} more")
 
     except Exception as e:  # noqa: BLE001
         import traceback
@@ -585,6 +626,20 @@ def kpi_generate(
         test_directories = [str(node.directory) for node in model.test_nodes]
         test_dir_count = len(test_directories)
 
+        # Prepare excluded directory summary
+        excluded_summary = {}
+        if model.excluded_test_directories:
+            by_reason = {}
+            for excluded in model.excluded_test_directories:
+                reason = excluded["reason"]
+                by_reason.setdefault(reason, []).append(excluded)
+
+            excluded_summary = {
+                "total_excluded": len(model.excluded_test_directories),
+                "by_reason": {reason: len(dirs) for reason, dirs in by_reason.items()},
+                "excluded_directories": model.excluded_test_directories,
+            }
+
         # Check if any test directories were found
         if test_dir_count == 0:
             status_data = {
@@ -592,14 +647,26 @@ def kpi_generate(
                 "message": "No test directories found - nothing to process for KPI generation",
                 "test_directories_count": 0,
                 "test_directories": [],
+                "excluded_test_directories": excluded_summary,
             }
             click.echo("❌ No test directories found - KPI generation failed", err=True)
             click.echo("   No __test_labels__.yaml files found in artifact directory", err=True)
 
+            # Show excluded directories if any
+            if model.excluded_test_directories:
+                excluded_count = len(model.excluded_test_directories)
+                click.echo(f"   Found {excluded_count} directories that were excluded:", err=True)
+                for reason, count in excluded_summary["by_reason"].items():
+                    reason_label = {
+                        "skip": "marked with skip: true",
+                        "filter_mismatch": "filtered out by include/exclude rules",
+                    }.get(reason, reason)
+                    click.echo(f"     • {count} {reason_label}", err=True)
+
             sys.exit(3)
         else:
             # Proceed with KPI generation
-            run_kpi_generate(
+            rows, status_details = run_kpi_generate(
                 base_dir=artifact_root,
                 plugin_module=mod,
                 plugin=plugin,
@@ -611,14 +678,50 @@ def kpi_generate(
                 exclude_label_filter=exclude_filter,
                 verbose_parsing=verbose_parsing,
             )
+
+            # Check for KPI generation failure
+            if not status_details.get("success", True):
+                status_data = {
+                    "success": False,
+                    "message": status_details.get("message", "KPI generation failed"),
+                    "test_directories_count": test_dir_count,
+                    "test_directories": test_directories,
+                    "excluded_test_directories": excluded_summary,
+                    "status_details": status_details,
+                }
+                click.echo(
+                    f"❌ KPI generation failed: {status_details.get('message', 'Unknown error')}",
+                    err=True,
+                )
+                sys.exit(2)
+
+            if not rows:
+                status_data = {
+                    "success": False,
+                    "message": "No KPIs generated",
+                    "test_directories_count": test_dir_count,
+                    "test_directories": test_directories,
+                    "excluded_test_directories": excluded_summary,
+                    "status_details": status_details,
+                }
+                click.echo("❌ No KPIs generated", err=True)
+                sys.exit(3)
+
             status_data = {
                 "success": True,
                 "output_file": str(output),
                 "test_directories_count": test_dir_count,
                 "test_directories": test_directories,
+                "excluded_test_directories": excluded_summary,
+                "status_details": status_details,
             }
             click.echo(f"Generated {output}")
             click.echo(f"📁 Processed {test_dir_count} test directories")
+
+            # Log any warnings from KPI generation
+            if status_details and status_details.get("warnings"):
+                for warning in status_details["warnings"]:
+                    click.echo(f"⚠️  Warning: {warning}", err=True)
 
     except Exception as e:  # noqa: BLE001
         import traceback

@@ -121,7 +121,7 @@ class KPICsvExporter:
         Returns:
             Path to the generated CSV file
         """
-        from projects.guidellm.postprocess.guidellm.parsing.kpis import GuideLLMKpiHandler
+        from projects.llm_d.postprocess.llm_d.parsing.kpis import GuideLLMKpiHandler
 
         # Compute KPIs from the model
         kpi_handler = GuideLLMKpiHandler()
