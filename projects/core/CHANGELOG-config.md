@@ -42,9 +42,7 @@
 #### Usage Example
 
 ```yaml
-# In presets.d/clusters.yaml
-__multiple: true
-
+# In presets.d/clusters.yaml (multiple presets per file is the default)
 cluster_eks:
   runtime.namespace: kpouget-dev
   platform.cluster.namespace.labels: {}

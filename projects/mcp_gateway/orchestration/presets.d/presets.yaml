@@ -1,5 +1,3 @@
-__multiple: true
-
 smoke:
   runtime.mock_server: perf-mock-server
   experiment.servers: [1]

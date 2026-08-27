@@ -1,5 +1,3 @@
-__multiple: true
-
 hera:
   rhaiis.cluster_tag: "hera2"
   rhaiis.deploy.image_pull_secrets: ["npalaska-image-pull"]

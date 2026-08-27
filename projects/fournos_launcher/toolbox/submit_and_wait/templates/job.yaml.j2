@@ -16,6 +16,7 @@ spec:
   cluster: {{ args.cluster_name }}
   {%- endif %}
   exclusive: {{ args.exclusive }}
+  ttl: {{ args.ttl | default("12h") }}
   pipeline: {{ args.pipeline_name }}
   {% if args.gpu_count and args.gpu_type -%}
   hardware:

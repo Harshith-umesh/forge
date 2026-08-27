@@ -1,5 +1,3 @@
-__multiple: true
-
 deployment-approximate-prefix-cache:
   runtime.deployment_profile: approximate-prefix-cache
 

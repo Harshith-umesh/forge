@@ -1,5 +1,3 @@
-__multiple: true
-
 rhoai-rc:
   platform.rhoai.custom_catalog.enabled: true
   platform.operators.rhods-operator.channel: beta

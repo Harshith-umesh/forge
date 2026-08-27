@@ -1,5 +1,3 @@
-__multiple: true
-
 xks-intelligent:
   extends:
   - cpt-xks

@@ -1,5 +1,3 @@
-__multiple: true
-
 gpt-oss:
   runtime.model_name: openai/gpt-oss-120b
   runtime.smoke_request_key: default

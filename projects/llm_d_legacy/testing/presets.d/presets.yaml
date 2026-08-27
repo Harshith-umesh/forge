@@ -1,5 +1,3 @@
-__multiple: true
-
 # Preset that automatically scales up GPU nodes if none exist, and scales down at the end
 scale_up:
   prepare.cluster.nodes.auto_scale: true
