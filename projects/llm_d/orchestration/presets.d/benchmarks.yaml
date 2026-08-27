@@ -1,3 +1,5 @@
+__multiple: true
+
 concurrent-1k-1k:
   runtime.benchmark_key: concurrent-1k-1k
 

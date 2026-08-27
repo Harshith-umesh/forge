@@ -1,3 +1,5 @@
+__multiple: true
+
 cluster_cks-waldorf:
   runtime.namespace: kpouget-dev
   platform.cluster.namespace.labels: {}

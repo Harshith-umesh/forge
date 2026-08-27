@@ -1,3 +1,5 @@
+__multiple: true
+
 # CPT reference profiles
 cpt-reference-flavors:
   extends:

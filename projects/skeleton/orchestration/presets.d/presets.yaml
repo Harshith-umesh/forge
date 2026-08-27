@@ -1,3 +1,5 @@
+__multiple: true
+
 collect_cluster_info:
   skeleton.collect_cluster_info: true
 

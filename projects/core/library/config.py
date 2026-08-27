@@ -226,12 +226,12 @@ class Config:
         for preset_file in preset_dir.glob("*.yaml"):
             with open(preset_file) as preset_f:
                 preset_dict = yaml.safe_load(preset_f)
-            if preset_dict.get("__single"):
-                filtered_dict = {k: v for k, v in preset_dict.items() if k != "__single"}
-                self.config["presets"][preset_file.stem] = filtered_dict
-            else:
+            if "__multiple" in preset_dict:
+                # Filter out __multiple key when merging presets
                 filtered_dict = {k: v for k, v in preset_dict.items() if k != "__multiple"}
                 self.config["presets"].update(filtered_dict)
+            else:
+                self.config["presets"][preset_file.stem] = preset_dict
 
         self.save_config()
 
