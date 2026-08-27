@@ -426,24 +426,30 @@ def run_analyse_kpis(
         ]
         analysis_summary = {k: v for k, v in status_data.items() if k in summary_fields}
 
-        # Build result data
+        # Determine final status based on command success and regression policy
+        if command_succeeded:
+            final_status = "success"
+            error_message = None
+        else:
+            # Command failed - check if we should treat as failure or warning
+            fail_on_regression = postprocess_config.analyze.fail_on_regression
+            final_status = "failed" if fail_on_regression else "warning"
+            error_message = status_data.get("error") or status_data.get(
+                "message", "Analysis failed"
+            )
+
+        # Build result data with consistent field usage
         result_data = {
             "completed_at": time.time(),
             "log_file": log_file,
             "output_file": _make_path_relative_to_base(output_file, env.ARTIFACT_DIR),
-            "status": status_data["message"],
+            "status": final_status,
             **analysis_summary,
         }
 
-        if status_data.get("message"):
-            result_data["message"] = status_data["message"]
-
-        if not command_succeeded:
-            fail_on_regression = postprocess_config.analyze.fail_on_regression
-            result_data["status"] = "failed" if fail_on_regression else "warning"
-            result_data["message"] = status_data.get("error") or status_data.get(
-                "message", "Unknown error"
-            )
+        # Add error/message field if there's an issue
+        if error_message:
+            result_data["error"] = error_message
 
         return result_data
 
