@@ -170,8 +170,16 @@ def _is_relevant_baseline(
     A baseline entry is irrelevant if:
     - It has a label key absent from the current data (unexpected label), or
     - For a non-excluded key, its value does not appear in the current data.
+
+    Legacy files may have KPI metadata mixed into labels - these are ignored.
     """
+    # Known KPI metadata fields that shouldn't be used for matching
+    kpi_metadata_fields = {"higher_is_better", "unit", "help", "is_2d"}
+
     for k, v in labels.items():
+        if k in kpi_metadata_fields:
+            # Skip KPI metadata fields from legacy files
+            continue
         if k not in current_keys:
             return False
         if k in excluded_labels:
@@ -752,14 +760,9 @@ def run_kpi_analysis(
             key = (rec.get("kpi_id"), mk)
 
             baseline_dict = baseline_index.get(key, {})
-            if config.comparison_labels:
-                current_ck = frozenset(
-                    (k, labels[k]) for k in config.comparison_labels if k in labels
-                )
-                baselines = [r for ck, r in baseline_dict.items() if ck != current_ck]
-                baseline_skipped_totals["same_version"] += len(baseline_dict) - len(baselines)
-            else:
-                baselines = list(baseline_dict.values())
+            current_ck = frozenset((k, labels[k]) for k in config.comparison_labels if k in labels)
+            baselines = [r for ck, r in baseline_dict.items() if ck != current_ck]
+            baseline_skipped_totals["same_version"] += len(baseline_dict) - len(baselines)
 
             if not baselines:
                 _log_baseline_miss(rec.get("kpi_id"), mk, baseline_index)
@@ -829,10 +832,8 @@ def run_kpi_analysis(
         }
 
         if (irr_count := current_source.pop("irrelevant_count")) != 0:
-            logging.error(
-                f"Found {irr_count} irrelevant entries in the current_source. Expected 0."
-            )
-
+            logger.error(f"Found {irr_count} irrelevant entries in the current_source. Expected 0.")
+        logger.info(f"Found {len(relevant_sources)} relevant files")
         if not baseline_skipped_totals["same_version"]:
             baseline_skipped_totals.pop("same_version")
         if not baseline_skipped_totals["duplicate"]:
