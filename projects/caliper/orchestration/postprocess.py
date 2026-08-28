@@ -1198,7 +1198,7 @@ class CaliperPostprocessOrchestrator:
             self.analyze_failed = True
             return
 
-        result = run_analyse_kpis(
+        status = run_analyse_kpis(
             postprocess_config=self.config,
             output_dir=self.output_dir,
             plugin_module=plugin_module,
@@ -1208,21 +1208,40 @@ class CaliperPostprocessOrchestrator:
             step_logs_dir=self.step_logs_dir,
         )
 
-        log_file = result.pop("log_file", None)
-        self._add_step("analyse_kpis", result, log_file)
+        # Convert typed status to dict for step logging
+        result = {
+            "status": status.status.value,
+            "completed_at": status.completed_at,
+            "success": status.success,
+            "exit_code": status.exit_code,
+        }
+
+        # Add optional fields
+        if status.output_file:
+            result["output_file"] = status.output_file
+        if status.error:
+            result["error"] = status.error
+        if status.message:
+            result["message"] = status.message
+        if status.regressions_detected:
+            result["regressions_detected"] = status.regressions_detected
+        if status.regression_count is not None:
+            result["regression_count"] = status.regression_count
+        if status.total_kpis is not None:
+            result["total_kpis"] = status.total_kpis
+
+        self._add_step("analyse_kpis", result, status.log_file)
 
         logger.info("KPI analysis result:")
         logger.info(json.dumps(result, indent=2, default=str))
 
-        if result.get("regressions_detected"):
+        # Handle regression policy - this is now handled in run_analyse_kpis
+        if status.regressions_detected:
             logger.info("Regression detected!")
             if self.config.analyze.fail_on_regression:
-                result["status"] = "failed"
-                logger.info("fail_on_regression is set, setting the status to 'failure'")
-                result["error"] = "regression detected"
+                logger.info("fail_on_regression is set")
             else:
-                result["status"] = "success"
-                logger.info("fail_on_regression is not set, setting the status to 'success'")
+                logger.info("fail_on_regression is not set")
 
         if not self.config.analyze.fail_on_regression:
             logger.info("analyse_kpis warning ignored: fail_on_regression is not set")
