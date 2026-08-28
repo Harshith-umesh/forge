@@ -310,7 +310,7 @@ def run_replot_from_orchestration_config(
                 postprocess_result = run_postprocess_from_orchestration_config(
                     postprocess_config_raw=postprocess_config or {},
                     artifacts_dir=artifact_directory,
-                    visualize_output_dir=None,  # Let Caliper resolve from config
+                    output_dir=None,  # Let Caliper resolve from config
                     test_outcome=TestPhaseOutcome("SUCCESS"),
                 )
         else:
