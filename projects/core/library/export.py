@@ -43,7 +43,7 @@ class FinishReason(StrEnum):
 
 def _update_fjob_export_status(status: dict):
     """Update FournosJob status with export artifacts status."""
-    if os.environ.get("FOURNOS_CI") != "true":
+    if not env.running_inside_fournos():
         return
 
     # Unset KUBECONFIG to use the pod SA access
