@@ -992,6 +992,22 @@ def find_baseline_kpis(historical_dir: Path) -> dict[Path, dict[str, Any]]:
             baseline_kpis[kpi_file] = kpi_data
             logger.debug("Loaded baseline: %s", kpi_file)
 
+        except json.JSONDecodeError as e:
+            # Try to read first line to check if it's v1 format (JSONL)
+            try:
+                with open(kpi_file) as f:
+                    first_line = f.readline().strip()
+                    if first_line:
+                        first_line_data = json.loads(first_line)
+                        if first_line_data.get("schema_version") == "1":
+                            logger.info(
+                                "Skipping %s: v1 KPI format (JSONL) is not supported, use v2 hierarchical format",
+                                kpi_file,
+                            )
+                            continue
+            except Exception:
+                pass  # If first line check fails, fall back to original error
+            logger.error("Failed to load %s: %s", kpi_file, e)
         except Exception as e:
             logger.error("Failed to load %s: %s", kpi_file, e)
 
