@@ -222,7 +222,7 @@ def _run_artifacts_to_ai_data(
     base_dir: Path,
     manifest_path: Path | None,
     step_logs_dir: Path,
-) -> dict[str, Any]:
+) -> AiDataStepResult:
     """Export AI evaluation payload using fork/exec subprocess execution."""
     try:
         # Create AI data directory and output file path
@@ -647,7 +647,7 @@ class CaliperPostprocessOrchestrator:
             # Make log file path relative to artifact root where logs are actually stored
             try:
                 artifact_root = Path(env.ARTIFACT_DIR)
-                relative_log_path = log_file.relative_to(artifact_root)
+                relative_log_path = Path(log_file).relative_to(artifact_root)
                 step_dict["log_file"] = str(relative_log_path)
             except ValueError:
                 # If log file is not under artifact root, use absolute path
@@ -685,23 +685,23 @@ class CaliperPostprocessOrchestrator:
 
             if status == "warning":
                 warning_msg = (
-                    getattr(result, "message", None)
-                    or getattr(result, "reason", None)
+                    getattr(result, "reason", None)
+                    or getattr(result, "message", None)
                     or "unknown warning"
                 )
                 logger.warning(f"Step '{step_name}' completed with warning: {warning_msg}")
             elif status == "failed":
                 error_msg = (
                     getattr(result, "error", None)
-                    or getattr(result, "message", None)
                     or getattr(result, "reason", None)
+                    or getattr(result, "message", None)
                     or "unknown error"
                 )
-                # Some step results may have detail field for traceback info
-                traceback_msg = getattr(result, "detail", None)
+                # Check for additional details (traceback/context info)
+                detail_msg = getattr(result, "detail", None)
                 logger.error(f"Step '{step_name}' failed: {error_msg}")
-                if traceback_msg:
-                    logger.error("Full traceback:\n%s", traceback_msg)
+                if detail_msg:
+                    logger.error("Additional details:\n%s", detail_msg)
 
             return True
         elif status == "success":
@@ -1130,7 +1130,7 @@ class CaliperPostprocessOrchestrator:
                 self.manifest_path,
                 self.step_logs_dir,
             )
-            log_file = result.pop("log_file", None)
+            log_file = result.log_file
             self._add_step("artifacts_to_ai_data", result, log_file)
 
             logger.info("AI eval export result:")

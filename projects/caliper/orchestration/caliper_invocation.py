@@ -438,6 +438,9 @@ def run_analyse_kpis(
             filtered_data = {
                 k: v for k, v in status_data.items() if k in KpiAnalysisStatus.__dataclass_fields__
             }
+            # Explicitly add log_file from _execute_caliper_command result
+            if "log_file" in KpiAnalysisStatus.__dataclass_fields__:
+                filtered_data["log_file"] = str(log_file) if log_file else None
 
             status = KpiAnalysisStatus(**filtered_data)
         else:

@@ -87,16 +87,16 @@ def format_postprocess_status_notification(
                     lines.append(_create_file_link(output_file, "📊", get_file_link))
 
                 elif step_name == "artifacts_to_ai_data":
-                    ai_eval_dir = step_data.get("ai_eval_dir")
-                    if ai_eval_dir:
+                    ai_data_dir = step_data.get("ai_data_dir")
+                    if ai_data_dir:
                         try:
                             dir_url = get_file_link("")  # Get base directory URL
                             # Extract relative path from the full path
-                            ai_eval_dir_relative = ai_eval_dir.split("/")[-1]  # Get just "ai_eval"
-                            dir_url = get_file_link(ai_eval_dir_relative)
+                            ai_data_dir_relative = ai_data_dir.split("/")[-1]  # Get just "ai_eval"
+                            dir_url = get_file_link(ai_data_dir_relative)
                             lines.append(f"  - 📁 [AI Eval Directory]({dir_url})")
                         except Exception:
-                            lines.append(f"  - 📁 AI Eval Directory: {ai_eval_dir}")
+                            lines.append(f"  - 📁 AI Eval Directory: {ai_data_dir}")
 
                     if output_file:
                         try:
@@ -105,9 +105,9 @@ def format_postprocess_status_notification(
 
                             output_file_relative = os.path.relpath(
                                 output_file,
-                                ai_eval_dir or "",
+                                ai_data_dir or "",
                             )
-                            if ai_eval_dir and "ai_eval" in ai_eval_dir:
+                            if ai_data_dir and "ai_eval" in ai_data_dir:
                                 output_file_relative = f"ai_eval/{output_file_relative}"
                             file_url = get_file_link(output_file_relative)
                             filename = output_file.split("/")[-1]

@@ -1005,7 +1005,7 @@ def analyse_kpis_cmd(
     if status_data.success:
         click.echo("✅ KPI analysis completed with success")
     else:
-        error_msg = getattr(status_data, "error", f"Status: {status_data.status}")
+        error_msg = status_data.error or f"Status: {status_data.status}"
         click.echo(f"❌ KPI analysis failed: {error_msg}", err=True)
 
     # Write status file if requested
