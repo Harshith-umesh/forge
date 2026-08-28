@@ -155,7 +155,6 @@ class GuideLLMKpiHandler:
                 # Use only extracted KPI labels, not test labels
                 all_labels = {
                     **test_condition_labels,
-                    "higher_is_better": kpi_func._kpi_higher_is_better,
                 }
 
                 kpi_record = {
@@ -186,7 +185,7 @@ class GuideLLMKpiHandler:
             if not curves or not request_rates:
                 continue
 
-            test_condition_labels = GuideLLMKpiHandler.LABEL_EXTRACTOR.extract(r)
+            kpi_labels = GuideLLMKpiHandler.LABEL_EXTRACTOR.extract(r)
             metadata_fields = GuideLLMKpiHandler.extract_metadata(r)
 
             # Generate 2D KPIs from performance curves
@@ -204,12 +203,6 @@ class GuideLLMKpiHandler:
                 if not value or value is None:
                     continue
 
-                # Use only extracted KPI labels, not test labels
-                all_labels = {
-                    **test_condition_labels,
-                    "higher_is_better": kpi_func._kpi_higher_is_better,
-                }
-
                 kpi_record = {
                     "schema_version": "1",
                     "kpi_id": kpi_id,
@@ -217,7 +210,7 @@ class GuideLLMKpiHandler:
                     "unit": kpi_func._kpi_unit,
                     "run_id": r.test_base_path,
                     "timestamp": ts,
-                    "labels": all_labels,
+                    "labels": kpi_labels,
                     "metadata": metadata_fields,
                     "source": {
                         "test_base_path": r.test_base_path,

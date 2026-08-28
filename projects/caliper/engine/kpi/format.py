@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
@@ -30,13 +33,11 @@ def transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
     tests_data = defaultdict(lambda: {"kpis": [], "labels": {}, "metadata": {}})
 
     # Get KPI function metadata from the plugin module
-    from projects.caliper.engine.kpi.decorators import get_kpi_functions
 
-    try:
-        plugin_module_obj = __import__(model.plugin_module, fromlist=[""])
-        kpi_functions = get_kpi_functions(plugin_module_obj)
-    except (ImportError, AttributeError):
-        kpi_functions = {}
+    plugin_module_obj = __import__(model.plugin_module, fromlist=[""])
+    kpi_catalog = plugin_module_obj.get_plugin().kpi_catalog()
+
+    kpi_models = {e["kpi_id"]: e for e in kpi_catalog}
 
     # First pass: determine which labels vary across KPIs in the same run
     run_label_values: dict[str, dict[str, set]] = defaultdict(lambda: defaultdict(set))
@@ -45,22 +46,20 @@ def transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
         for k, v in kpi.get("labels", {}).items():
             run_label_values[run_id][k].add(str(v))
 
-    per_kpi_label_keys: dict[str, set[str]] = {}
-    for run_id, label_vals in run_label_values.items():
-        per_kpi_label_keys[run_id] = {k for k, vals in label_vals.items() if len(vals) > 1}
-
     for kpi in kpis:
+        kpi_id = kpi.get("kpi_id")
+        if kpi_id not in kpi_models:
+            logger.warning(f"{kpi_id} not found in the KPI metadata, ignoring.")
+            continue
+        kpi_model = kpi_models[kpi_id]
+
         run_id = kpi.get("run_id", "unknown")
         test_data = tests_data[run_id]
-        varying_keys = per_kpi_label_keys.get(run_id, set())
 
-        kpi_labels = kpi.get("labels", {})
-        test_labels = {k: v for k, v in kpi_labels.items() if k not in varying_keys}
+        if "labels" not in test_data:
+            test_data["labels"] = {}
 
-        # KPI handlers may add project-specific labels only to a subset of the
-        # records. Preserve every label that is constant for this test instead
-        # of freezing the set from whichever KPI happened to be emitted first.
-        test_data["labels"].update(test_labels)
+        test_data["labels"].update(kpi["labels"])
 
         # Store test metadata from first KPI
         if not test_data["metadata"]:
@@ -70,110 +69,23 @@ def transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
                 "run_id": run_id,
             }
 
-        # Per-KPI labels that vary across rate points
-        kpi_specific_labels = {k: kpi_labels[k] for k in varying_keys if k in kpi_labels}
-
-        # Create KPI record with metadata
-        kpi_id = kpi.get("kpi_id")
         raw_value = kpi.get("value")
-
-        # Resolve _kpi_is_2d first as source of truth when metadata exists
-        is_2d = False
-        if kpi_id in kpi_functions:
-            func = kpi_functions[kpi_id]
-            is_2d = getattr(func, "_kpi_is_2d", False)
-        else:
-            # Consistent fallback heuristic when metadata is absent
-            is_2d = bool(
-                isinstance(raw_value, list)
-                and raw_value
-                and isinstance(raw_value[0], (list, tuple))
-                and len(raw_value[0]) == 2
-            )
+        is_2d = kpi_model["is_2d"]
 
         # Apply tuple-pair structural transform only for confirmed 2D KPIs
-        if is_2d and isinstance(raw_value, list) and raw_value and len(raw_value) > 0:
-            first_item = raw_value[0]
-            if isinstance(first_item, (list, tuple)) and len(first_item) == 2:
-                try:
-                    # Convert list of tuples [(x1, y1), (x2, y2), ...] to structured format
-                    structured_value = {
-                        "data_points": [{"x": float(x), "y": float(y)} for x, y in raw_value],
-                        "count": len(raw_value),
-                    }
-                    final_value = structured_value
-                except (ValueError, TypeError, IndexError):
-                    # If conversion fails, preserve original list-of-tuples representation
-                    final_value = raw_value
-            else:
-                # Preserve original list-of-tuples representation
-                final_value = raw_value
+        if is_2d:
+            final_value = {
+                "data_points": [{"x": float(x), "y": float(y)} for x, y in raw_value],
+                "count": len(raw_value),
+            }
         else:
-            # Not 2D or no valid tuple-pair structure, keep original value
             final_value = raw_value
 
-        kpi_record: dict[str, Any] = {
-            "id": kpi_id,
-            "value": final_value,
-            "higher_is_better": kpi.get("higher_is_better", True),
-            "is_2d": is_2d,
-        }
+        kpi_record: dict[str, Any] = kpi_model.copy()
+        kpi_record["value"] = final_value
 
-        # Only add unit field for non-2D KPIs
-        if not is_2d:
-            kpi_record["unit"] = kpi.get("unit")
-        if kpi_specific_labels:
-            kpi_record["labels"] = kpi_specific_labels
-
-        # Add KPI metadata from function decorator if available
-        if kpi_id in kpi_functions:
-            func = kpi_functions[kpi_id]
-            kpi_record.update(
-                {
-                    "name": (
-                        func.__doc__.replace(" KPI.", "")
-                        if func.__doc__
-                        else kpi_id.replace("_", " ").title()
-                    ),
-                    "help": getattr(func, "_kpi_help", ""),
-                }
-            )
-
-            # Add 2D-specific metadata if this is a 2D KPI
-            if is_2d:
-                kpi_record.update(
-                    {
-                        "x_unit": getattr(func, "_kpi_x_unit", ""),
-                        "x_help": getattr(func, "_kpi_x_help", ""),
-                        "y_unit": getattr(func, "_kpi_y_unit", None)
-                        or getattr(func, "_kpi_unit", ""),
-                        "y_help": getattr(func, "_kpi_y_help", None)
-                        or getattr(func, "_kpi_help", ""),
-                    }
-                )
-
-            # Add formatting info if available
-            if hasattr(func, "_kpi_format"):
-                kpi_record["format"] = func._kpi_format
-        else:
-            # Fallback if no function metadata available
-            kpi_record.update(
-                {
-                    "name": kpi_id.replace("_", " ").title(),
-                    "help": f"KPI: {kpi_id}",
-                }
-            )
-
-            # Add 2D-specific fallback metadata if this is a 2D KPI
-            if is_2d:
-                kpi_record.update(
-                    {
-                        "x_unit": kpi.get("x_unit", ""),
-                        "x_help": kpi.get("x_help", ""),
-                        "y_unit": kpi.get("y_unit", kpi.get("unit", "")),
-                        "y_help": kpi.get("y_help", ""),
-                    }
-                )
+        for fmt_key in "x_format", "y_format", "format":
+            kpi_record.pop(fmt_key, None)
 
         test_data["kpis"].append(kpi_record)
 
@@ -252,8 +164,13 @@ def flatten_hierarchical_kpis(data: dict[str, Any]) -> list[dict[str, Any]]:
             record = dict(test_base)
             record["kpi_id"] = kpi.get("id")
             for k, v in kpi.items():
-                if k != "id":
+                if k == "id":
+                    pass
+                elif k == "labels":
+                    record[k] = {} | test_base["labels"] | v
+                else:
                     record[k] = v
+
             records.append(record)
     return records
 

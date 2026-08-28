@@ -152,32 +152,60 @@ def _validate_analysis_config(config: AnalysisConfig, plugin_module: str) -> Non
         )
 
 
+def _filter_labels_for_matching(
+    labels: dict[str, Any], excluded_labels: set[str]
+) -> dict[str, Any]:
+    """Filter labels for matching, removing KPI metadata and excluded labels.
+
+    Returns only labels that should be used for baseline matching logic.
+    This ensures consistent filtering between analysis and reporting.
+    """
+    # Known KPI metadata fields that shouldn't be used for matching
+    kpi_metadata_fields = {"higher_is_better", "unit", "help", "is_2d"}
+
+    return {
+        k: v for k, v in labels.items() if k not in kpi_metadata_fields and k not in excluded_labels
+    }
+
+
 def _match_key(
     labels: dict[str, Any], ignored_labels: list[str], comparison_labels: list[str]
 ) -> tuple:
     """Build a hashable match key from labels, excluding ignored and comparison labels."""
     excluded = set(ignored_labels) | set(comparison_labels)
-    return tuple(sorted((k, str(v)) for k, v in labels.items() if k not in excluded))
+    filtered_labels = _filter_labels_for_matching(labels, excluded)
+    return tuple(sorted((k, str(v)) for k, v in filtered_labels.items()))
 
 
 def _is_relevant_baseline(
     labels: dict[str, Any],
     current_keys: dict[str, set[str]],
-    excluded_labels: set[str],
+    config: AnalysisConfig,
 ) -> bool:
     """Return True if a baseline entry is relevant to the current data.
 
-    A baseline entry is irrelevant if:
-    - It has a label key absent from the current data (unexpected label), or
-    - For a non-excluded key, its value does not appear in the current data.
+    A baseline entry is relevant if for every current test label (excluding
+    ignored/comparison labels), the baseline:
+    - Has the same label with a value that appears in current data
+
+    Baseline entries missing current test labels are rejected (different config).
+    Extra baseline labels not present in current are ignored.
+    Uses unified filtering logic for consistency between analysis and reporting.
     """
-    for k, v in labels.items():
-        if k not in current_keys:
-            return False
+    excluded_labels = set(config.ignored_labels) | set(config.comparison_labels)
+    baseline_filtered = _filter_labels_for_matching(labels, excluded_labels)
+
+    # Check each current test label against baseline
+    for k, current_values in current_keys.items():
         if k in excluded_labels:
-            continue
-        if str(v) not in current_keys[k]:
+            continue  # Skip ignored/comparison labels
+        if k not in baseline_filtered:
+            # Baseline missing this label - different configuration, reject
             return False
+        # Baseline has this label - check if value matches
+        if str(baseline_filtered[k]) not in current_values:
+            return False
+
     return True
 
 
@@ -195,14 +223,15 @@ def _build_baseline_index(
     Returns mapping from (kpi_id, match_key) -> {comparison_keys_frozenset: record}.
     Same-version entries are excluded at query time by the caller.
     """
-    excluded_labels = set(config.ignored_labels) | set(config.comparison_labels)
+
     index: dict[tuple, dict[frozenset, dict[str, Any]]] = {}
     for _path, data in baseline_kpi_data.items():
         records = _extract_kpi_records_from_hierarchical(data)
         for rec in records:
             labels = rec.get("labels", {})
-            if not _is_relevant_baseline(labels, current_keys, excluded_labels):
+            if not _is_relevant_baseline(labels, current_keys, config):
                 continue
+
             kpi_id = rec.get("kpi_id")
             mk = _match_key(labels, config.ignored_labels, config.comparison_labels)
             ck = frozenset((k, labels[k]) for k in config.comparison_labels if k in labels)
@@ -227,10 +256,17 @@ def _run_regression_test(
     higher_is_better = current.get("higher_is_better", True)
     is_2d = current.get("is_2d", False)
 
-    ignored = set(config.ignored_labels)
+    if "higher_is_better" not in config.ignored_labels:
+        logging.info(
+            "Adding 'higher_is_better' in the ignored_labels (workaround an incorrect label in old KPIs)"
+        )
+        config.ignored_labels.append("higher_is_better")
+
     comparison = set(config.comparison_labels)
     distinct_keys = {
-        k: v for k, v in raw_labels.items() if k not in comparison and k not in ignored
+        k: v
+        for k, v in raw_labels.items()
+        if k not in comparison and k not in config.ignored_labels
     }
     labels = {
         "comparison_keys": {k: raw_labels[k] for k in config.comparison_labels if k in raw_labels},
@@ -441,11 +477,18 @@ def _sort_results(results: list[dict[str, Any]], sorting_labels: list[str]) -> l
 
 def _summarize_label_sets(
     data: dict[str, Any],
-    comparison_labels: list[str],
-    ignored_labels: list[str],
+    config: AnalysisConfig,
     current_keys: dict[str, set[str]] | None = None,
+    current_comparison_combinations: set[frozenset] | None = None,
 ) -> dict[str, Any]:
     """Summarize label sets found in a hierarchical KPI doc.
+
+    Args:
+        data: Hierarchical KPI data
+        comparison_labels: List of comparison label keys
+        ignored_labels: List of ignored label keys
+        current_keys: Universe of label keys and values from current test data
+        current_comparison_combinations: Set of frozenset comparison key combinations from current data
 
     Returns:
       - comparison_labels: unique values per comparison key
@@ -463,18 +506,25 @@ def _summarize_label_sets(
                 seen.append(val)
         return sorted(seen)
 
-    # For relevant_labels, keep only relevant entries and exclude ignored labels
-    ignored = set(ignored_labels)
-    excluded_labels = ignored | set(comparison_labels)
     seen_all = []
     seen_filtered = []
     for labels in all_labels:
-        filtered = {k: v for k, v in labels.items() if k not in ignored}
+        # Use unified filtering logic
+        filtered = _filter_labels_for_matching(labels, set(config.ignored_labels))
         if filtered and filtered not in seen_all:
             seen_all.append(filtered)
         if current_keys is not None:
-            if not _is_relevant_baseline(labels, current_keys, excluded_labels):
+            if not _is_relevant_baseline(labels, current_keys, config):
                 continue
+
+        # Filter out entries with identical comparison key combinations
+        if current_comparison_combinations is not None and config.comparison_labels:
+            baseline_comparison_keys = frozenset(
+                (k, str(labels[k])) for k in config.comparison_labels if k in labels
+            )
+            if baseline_comparison_keys in current_comparison_combinations:
+                continue
+
         if filtered and filtered not in seen_filtered:
             seen_filtered.append(filtered)
 
@@ -500,8 +550,12 @@ def _summarize_label_sets(
         common, distinct_keys, distinct_labels = [], [], []
 
     return {
-        "comparison_keys": sorted(f"{k}={v}" for k in comparison_labels for v in _unique_values(k)),
-        "ignored_keys": sorted(f"{k}={v}" for k in ignored_labels for v in _unique_values(k)),
+        "comparison_keys": sorted(
+            f"{k}={v}" for k in config.comparison_labels for v in _unique_values(k)
+        ),
+        "ignored_keys": sorted(
+            f"{k}={v}" for k in config.ignored_labels for v in _unique_values(k)
+        ),
         "relevant_common_keys": common,
         "relevant_distinct_keys": distinct_keys,
         "relevant_distinct_labels": distinct_labels,
@@ -514,7 +568,8 @@ def _build_report(
     results: list[dict[str, Any]],
     config: AnalysisConfig,
     current_source: dict[str, Any],
-    baseline_sources: list[dict[str, Any]],
+    relevant_sources: list[dict[str, Any]],
+    irrelevant_sources: list[dict[str, Any]],
     baseline_skipped: dict[str, int],
 ) -> dict[str, Any]:
     """Build the final report structure."""
@@ -554,8 +609,11 @@ def _build_report(
         },
         "input_data": {
             "current_source": current_source,
-            "baseline_sources": baseline_sources,
-            "baseline_source_count": len(baseline_sources),
+            "baseline_sources": {
+                "relevant_sources": relevant_sources,
+                "irrelevant_sources": irrelevant_sources,
+            },
+            "baseline_source_count": len(relevant_sources) + len(irrelevant_sources),
             "baseline_skipped": baseline_skipped,
         },
         "results": passes + regressions,
@@ -703,9 +761,19 @@ def run_kpi_analysis(
 
         # Build label universe from current data for baseline filtering
         current_keys: dict[str, set[str]] = {}
+        current_comparison_combinations: set[frozenset] = set()
+
         for test in current_data.get("tests", []):
-            for k, v in test.get("labels", {}).items():
+            labels = test.get("labels", {})
+            for k, v in labels.items():
                 current_keys.setdefault(k, set()).add(str(v))
+
+            # Build comparison key combinations from current data
+            if config.comparison_labels:
+                comparison_combo = frozenset(
+                    (k, str(labels[k])) for k in config.comparison_labels if k in labels
+                )
+                current_comparison_combinations.add(comparison_combo)
 
         # Build baseline index (irrelevant entries are filtered out)
         baseline_index = _build_baseline_index(baseline_kpi_data, config, current_keys)
@@ -721,14 +789,9 @@ def run_kpi_analysis(
             key = (rec.get("kpi_id"), mk)
 
             baseline_dict = baseline_index.get(key, {})
-            if config.comparison_labels:
-                current_ck = frozenset(
-                    (k, labels[k]) for k in config.comparison_labels if k in labels
-                )
-                baselines = [r for ck, r in baseline_dict.items() if ck != current_ck]
-                baseline_skipped_totals["same_version"] += len(baseline_dict) - len(baselines)
-            else:
-                baselines = list(baseline_dict.values())
+            current_ck = frozenset((k, labels[k]) for k in config.comparison_labels if k in labels)
+            baselines = [r for ck, r in baseline_dict.items() if ck != current_ck]
+            baseline_skipped_totals["same_version"] += len(baseline_dict) - len(baselines)
 
             if not baselines:
                 _log_baseline_miss(rec.get("kpi_id"), mk, baseline_index)
@@ -744,10 +807,15 @@ def run_kpi_analysis(
 
         # Build report
         excluded_labels = set(config.ignored_labels) | set(config.comparison_labels)
-        baseline_sources = []
+        relevant_sources = []
+        irrelevant_sources = []
+
         for path, data in baseline_kpi_data.items():
             summary = _summarize_label_sets(
-                data, config.comparison_labels, config.ignored_labels, current_keys
+                data,
+                config,
+                current_keys,
+                current_comparison_combinations,
             )
 
             unexpected_labels: list[str] = []
@@ -766,29 +834,32 @@ def run_kpi_analysis(
                         if entry not in irrelevant_keys:
                             irrelevant_keys.append(entry)
 
-            baseline_sources.append(
-                {
-                    "path": str(path),
-                    **summary,
-                    "unexpected_labels": sorted(unexpected_labels),
-                    "irrelevant_keys": sorted(irrelevant_keys),
-                }
-            )
+            source_entry = {
+                "path": str(path),
+                **summary,
+                "unexpected_labels": sorted(unexpected_labels),
+                "irrelevant_keys": sorted(irrelevant_keys),
+            }
+
             if not unexpected_labels:
-                baseline_sources[-1].pop("unexpected_labels")
+                source_entry.pop("unexpected_labels")
             if not irrelevant_keys:
-                baseline_sources[-1].pop("irrelevant_keys")
+                source_entry.pop("irrelevant_keys")
+
+            # Split sources based on relevant_count
+            if summary.get("relevant_count", 0) > 0:
+                relevant_sources.append(source_entry)
+            else:
+                irrelevant_sources.append(source_entry)
 
         current_source = {
             "path": str(current_kpi_file),
-            **_summarize_label_sets(current_data, config.comparison_labels, config.ignored_labels),
+            **_summarize_label_sets(current_data, config, None, None),
         }
 
         if (irr_count := current_source.pop("irrelevant_count")) != 0:
-            logging.error(
-                f"Found {irr_count} irrelevant entries in the current_source. Expected 0."
-            )
-
+            logger.error(f"Found {irr_count} irrelevant entries in the current_source. Expected 0.")
+        logger.info(f"Found {len(relevant_sources)} relevant files")
         if not baseline_skipped_totals["same_version"]:
             baseline_skipped_totals.pop("same_version")
         if not baseline_skipped_totals["duplicate"]:
@@ -798,7 +869,8 @@ def run_kpi_analysis(
             results=results,
             config=config,
             current_source=current_source,
-            baseline_sources=baseline_sources,
+            relevant_sources=relevant_sources,
+            irrelevant_sources=irrelevant_sources,
             baseline_skipped=baseline_skipped_totals,
         )
 
@@ -867,7 +939,10 @@ def _write_no_baseline_report(
         },
         "processed": {
             "current_source": str(current_kpi_file),
-            "baseline_sources": [],
+            "baseline_sources": {
+                "relevant_sources": [],
+                "irrelevant_sources": [],
+            },
             "baseline_source_count": 0,
         },
         "tested": {"total_kpis": 0, "regressions": 0, "passes": 0, "skipped": 0},
@@ -914,21 +989,6 @@ def find_baseline_kpis(historical_dir: Path) -> dict[Path, dict[str, Any]]:
             baseline_kpis[kpi_file] = kpi_data
             logger.debug("Loaded baseline: %s", kpi_file)
 
-        except json.JSONDecodeError:
-            # Try parsing as JSONL (v1 format) fallback
-            try:
-                v1_records = []
-                with open(kpi_file) as f:
-                    for line in f:
-                        if line.strip():
-                            v1_records.append(json.loads(line))
-
-                if v1_records:
-                    v2_data = _convert_v1_to_v2(v1_records)
-                    baseline_kpis[kpi_file] = v2_data
-                    logger.debug("Loaded baseline (converted from v1): %s", kpi_file)
-            except Exception:
-                logger.error("Failed to parse %s as JSON or JSONL", kpi_file)
         except Exception as e:
             logger.error("Failed to load %s: %s", kpi_file, e)
 
@@ -962,142 +1022,6 @@ def run_analyze(
         output_file=Path(output_path),
         plugin_module=plugin_module,
     )
-
-
-def _convert_v1_to_v2(v1_records: list[dict]) -> dict:
-    """Convert v1 JSONL records to v2 hierarchical format."""
-    metrics = {}
-    for record in v1_records:
-        # Extract metric name and value
-        metric_name = record.get("name", "unknown_metric")
-        value = record.get("value")
-        unit = record.get("unit")
-        labels = record.get("labels", {})
-
-        # Create metric entry in v2 format
-        metric_entry = {
-            "value": value,
-            "unit": unit,
-            "labels": labels,
-        }
-
-        metric_entry["higher_is_better"] = record.get("higher_is_better", False)
-
-        metrics[metric_name] = metric_entry
-
-    return {
-        "schema_version": "2",
-        "metrics": metrics,
-        "metadata": {
-            "converted_from_v1": True,
-            "original_record_count": len(v1_records),
-        },
-    }
-
-
-def ensure_kpi_file_v2_format(file_path: Path) -> tuple[Path, bool]:
-    """Convert KPI file to v2 hierarchical format if it's in v1 JSONL format.
-
-    Args:
-        file_path: Path to KPI file (v1 or v2 format)
-
-    Returns:
-        Tuple of (converted_file_path, is_temporary_file)
-        - converted_file_path: Path to v2 format file
-        - is_temporary_file: True if a temporary file was created and needs cleanup
-    """
-    import json
-    import tempfile
-
-    logger.debug("Checking format of KPI file: %s", file_path)
-
-    try:
-        with open(file_path) as f:
-            content = f.read().strip()
-            if not content:
-                raise ValueError(f"KPI file {file_path} is empty")
-
-        # Try to parse as v2 (hierarchical JSON) first
-        try:
-            data = json.loads(content)
-            if isinstance(data, dict) and "schema_version" in data:
-                # Already in v2 format
-                logger.debug("KPI file %s is already in v2 format", file_path)
-                return file_path, False
-            elif isinstance(data, list):
-                raise ValueError(f"KPI file {file_path} appears to be in unexpected list format")
-            else:
-                # Single dict but missing schema_version - might be v1 single record
-                logger.debug(
-                    "KPI file %s appears to be single record without schema_version", file_path
-                )
-        except json.JSONDecodeError:
-            # Not valid single JSON, might be JSONL (v1 format)
-            logger.debug("KPI file %s not valid single JSON, checking JSONL format", file_path)
-
-        # Try to parse as v1 (JSONL) format
-        lines = content.split("\n")
-        non_empty_lines = [line.strip() for line in lines if line.strip()]
-
-        if len(non_empty_lines) == 0:
-            raise ValueError(f"KPI file {file_path} contains no data")
-
-        # Try to parse first line to validate v1 format
-        try:
-            first_record = json.loads(non_empty_lines[0])
-            if not isinstance(first_record, dict):
-                raise ValueError(f"KPI file {file_path} first line is not a JSON object")
-
-            # Parse all lines as v1 JSONL records
-            v1_records = []
-            for i, line in enumerate(non_empty_lines):
-                try:
-                    record = json.loads(line)
-                    v1_records.append(record)
-                except json.JSONDecodeError as line_err:
-                    raise ValueError(
-                        f"KPI file {file_path} line {i + 1} has invalid JSON: {line_err}"
-                    ) from line_err
-
-            # Convert v1 records to v2 hierarchical format
-            logger.info(
-                "Converting KPI file %s from v1 (JSONL) to v2 (hierarchical) format", file_path
-            )
-
-            # Transform to v2
-            v2_data = _convert_v1_to_v2(v1_records)
-
-            # Write v2 format to temporary file
-            temp_file = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
-            try:
-                json.dump(v2_data, temp_file, indent=2, ensure_ascii=False)
-                temp_file.flush()
-                temp_path = Path(temp_file.name)
-                logger.info(
-                    "Converted %s (%d records) to v2 format at %s",
-                    file_path,
-                    len(v1_records),
-                    temp_path,
-                )
-                return temp_path, True
-            except Exception as write_err:
-                temp_file.close()
-                Path(temp_file.name).unlink(missing_ok=True)
-                raise ValueError(
-                    f"Failed to write converted v2 format file: {write_err}"
-                ) from write_err
-            finally:
-                temp_file.close()
-
-        except Exception as v1_err:
-            raise ValueError(
-                f"KPI file {file_path} is not in valid v1 (JSONL) or v2 (hierarchical) format: {v1_err}"
-            ) from v1_err
-
-    except Exception as format_err:
-        raise ValueError(
-            f"Failed to process KPI file format for {file_path}: {format_err}"
-        ) from format_err
 
 
 def analyze_kpis(

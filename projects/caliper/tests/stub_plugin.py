@@ -101,9 +101,44 @@ class StubPlugin(PostProcessingPlugin):
             "optional": {},
         }
 
+    def kpi_catalog(self) -> list[dict[str, object]]:
+        """Return catalog of available KPIs for testing."""
+        return [
+            {
+                "kpi_id": "generic",
+                "name": "generic",
+                "unit": "count",
+                "higher_is_better": True,
+                "is_2d": False,
+            },
+            {
+                "kpi_id": "dashboard",
+                "name": "dashboard",
+                "unit": "score",
+                "higher_is_better": True,
+                "is_2d": False,
+            },
+            {
+                "kpi_id": "throughput_rps",
+                "name": "throughput_rps",
+                "unit": "req/s",
+                "higher_is_better": True,
+                "is_2d": False,
+            },
+        ]
+
 
 # Analysis configuration for testing KPI regression analysis
-analysis_config = AnalysisConfig()
+analysis_config = AnalysisConfig(
+    comparison_labels=["version"],  # Compare across different versions
+    ignored_labels=["higher_is_better"],  # Ignore KPI metadata
+    regression_config={
+        "SCALAR_RELATIVE_CHANGE": {
+            "max_relative_regression": 0.1,  # 10% threshold for tests
+            "min_baseline_points": 1,  # Allow single baseline for simple tests
+        },
+    },
+)
 
 
 def get_plugin() -> PostProcessingPlugin:

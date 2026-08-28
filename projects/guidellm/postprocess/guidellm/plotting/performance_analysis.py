@@ -22,6 +22,21 @@ from projects.caliper.postprocess.helpers.visualization_utils import (
 
 logger = logging.getLogger(__name__)
 
+# Plot configuration constants
+PLOT_CONFIG = {
+    "width": 1700,
+    "height": 500,
+    "font": {"size": 12},
+    "title_font_size": 16,
+}
+
+PLOT_CONFIG_LARGE = {
+    "width": 1700,
+    "height": 600,
+    "font": {"size": 12},
+    "title_font_size": 16,
+}
+
 
 def _image_to_base64(image_path: str | Path) -> str:
     """Convert an image file to a base64 data URI.
@@ -74,6 +89,30 @@ def _safe_get_curve_value(curves: dict, metric_name: str, index: int, default: A
         return default
     except (IndexError, TypeError, ValueError):
         return default
+
+
+def _custom_configuration_sort_key(config_name: str) -> tuple[int, str]:
+    """
+    Create a sort key that ensures heterogeneous configurations appear before multi-turn.
+
+    Args:
+        config_name: Configuration name from test_configuration column
+
+    Returns:
+        Tuple of (priority, config_name) for sorting
+    """
+    # Convert to lowercase for case-insensitive comparison
+    config_lower = config_name.lower()
+
+    # Priority: 0 = heterogeneous (first), 1 = multi-turn (second), 2 = others (last)
+    if "heterogeneous" in config_lower:
+        priority = 0
+    elif "multi-turn" in config_lower or "multi_turn" in config_lower:
+        priority = 1
+    else:
+        priority = 2
+
+    return (priority, config_name)
 
 
 def create_dataframe_from_records(records: list[UnifiedResultRecord]) -> pd.DataFrame:
@@ -207,10 +246,24 @@ def create_dataframe_from_records(records: list[UnifiedResultRecord]) -> pd.Data
 
     # Sort for consistent ordering
     logger.info("📋 Organizing data by configuration, concurrency, and request rate...")
+    # Add custom sort column to ensure heterogeneous comes before multi-turn
+    df["_config_sort_key"] = df["test_configuration"].apply(
+        lambda x: _custom_configuration_sort_key(x)[0]
+    )
+
     # Sort and fill any NaN values in numeric columns with 0 for consistent plotting
     df = df.sort_values(
-        ["test_configuration", "intended_concurrency", "request_rate", "rate_point_index"]
+        [
+            "_config_sort_key",
+            "test_configuration",
+            "intended_concurrency",
+            "request_rate",
+            "rate_point_index",
+        ]
     )
+
+    # Remove the temporary sort column
+    df = df.drop(columns=["_config_sort_key"])
 
     # Fill NaN values in numeric columns with appropriate defaults
     numeric_columns = [
@@ -222,8 +275,8 @@ def create_dataframe_from_records(records: list[UnifiedResultRecord]) -> pd.Data
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
-    # Show what we found
-    configs = df["test_configuration"].unique()
+    # Show what we found - preserve custom sort order
+    configs = df["test_configuration"].drop_duplicates().tolist()
     total_records = len(
         [
             r
@@ -261,6 +314,9 @@ def create_throughput_scaling_plot(df: pd.DataFrame, title_context: str = ""):
 
         title = f"Request Throughput vs Concurrency by Configuration{title_context}"
 
+        # Get ordered configuration list to maintain consistent legend order
+        config_order = df["test_configuration"].drop_duplicates().tolist()
+
         fig = px.scatter(
             df,
             x="intended_concurrency",
@@ -281,12 +337,11 @@ def create_throughput_scaling_plot(df: pd.DataFrame, title_context: str = ""):
                 "test_configuration": "Configuration",
                 "request_concurrency": "Achieved Concurrency",
             },
+            category_orders={"test_configuration": config_order},
         )
 
         fig.update_traces(textposition="top center")
-        fig.update_layout(
-            showlegend=True, width=800, height=500, font={"size": 12}, title_font_size=16
-        )
+        fig.update_layout(showlegend=True, **PLOT_CONFIG)
         fig.update_yaxes(rangemode="tozero")
 
         logger.info("✅ Throughput scaling plot created successfully")
@@ -309,6 +364,9 @@ def create_latency_vs_throughput_plot(df: pd.DataFrame, title_context: str = "")
 
         title = f"Latency vs Throughput Trade-off{title_context}"
 
+        # Get ordered configuration list to maintain consistent legend order
+        config_order = df["test_configuration"].drop_duplicates().tolist()
+
         fig = px.scatter(
             df,
             x="request_rate",
@@ -327,11 +385,10 @@ def create_latency_vs_throughput_plot(df: pd.DataFrame, title_context: str = "")
                 "request_latency_median_ms": "Latency (ms)",
                 "test_configuration": "Configuration",
             },
+            category_orders={"test_configuration": config_order},
         )
 
-        fig.update_layout(
-            showlegend=True, width=800, height=500, font={"size": 12}, title_font_size=16
-        )
+        fig.update_layout(showlegend=True, **PLOT_CONFIG)
 
         logger.info("✅ Latency vs throughput plot created successfully")
         return fig
@@ -378,6 +435,9 @@ def create_token_throughput_vs_concurrency_plot(df: pd.DataFrame, title_context:
         subtitle = " | ".join(subtitle_parts)
         title = f"Token Throughput vs Concurrency{title_context}<br><sub>{subtitle}</sub>"
 
+        # Get ordered configuration list to maintain consistent legend order
+        config_order = df["test_configuration"].drop_duplicates().tolist()
+
         fig = px.line(
             df,
             x="intended_concurrency",
@@ -398,12 +458,11 @@ def create_token_throughput_vs_concurrency_plot(df: pd.DataFrame, title_context:
                 "test_configuration": "Configuration",
                 "request_concurrency": "Achieved Concurrency",
             },
+            category_orders={"test_configuration": config_order},
         )
 
         fig.update_traces(mode="lines+markers")
-        fig.update_layout(
-            showlegend=True, width=800, height=500, font={"size": 12}, title_font_size=16
-        )
+        fig.update_layout(showlegend=True, **PLOT_CONFIG)
         fig.update_yaxes(rangemode="tozero")
 
         logger.info("✅ Token throughput vs concurrency plot created successfully")
@@ -426,6 +485,9 @@ def create_ttft_analysis_plot(df: pd.DataFrame, title_context: str = ""):
 
         title = f"TTFT vs Concurrency{title_context}<br><sub>Lower is better</sub>"
 
+        # Get ordered configuration list to maintain consistent legend order
+        config_order = df["test_configuration"].drop_duplicates().tolist()
+
         fig = px.line(
             df,
             x="intended_concurrency",
@@ -445,12 +507,11 @@ def create_ttft_analysis_plot(df: pd.DataFrame, title_context: str = ""):
                 "test_configuration": "Configuration",
                 "request_concurrency": "Achieved Concurrency",
             },
+            category_orders={"test_configuration": config_order},
         )
 
         fig.update_traces(mode="lines+markers")
-        fig.update_layout(
-            showlegend=True, width=800, height=500, font={"size": 12}, title_font_size=16
-        )
+        fig.update_layout(showlegend=True, **PLOT_CONFIG)
         fig.update_yaxes(rangemode="tozero")
 
         logger.info("✅ TTFT analysis plot created successfully")
@@ -476,8 +537,8 @@ def create_token_throughput_percentiles_plot(df: pd.DataFrame, title_context: st
 
         fig = go.Figure()
 
-        # Get unique configurations and colors
-        configurations = sorted(df["test_configuration"].unique())
+        # Get unique configurations and colors - maintain custom sort order
+        configurations = df["test_configuration"].drop_duplicates().tolist()
         logger.info(
             f"   Plotting {len(configurations)} configurations with percentile distributions..."
         )
@@ -518,10 +579,7 @@ def create_token_throughput_percentiles_plot(df: pd.DataFrame, title_context: st
             xaxis_title="Concurrency Level (Requested)",
             yaxis_title="Output Tokens per Second",
             showlegend=True,
-            width=900,
-            height=600,
-            font={"size": 12},
-            title_font_size=16,
+            **PLOT_CONFIG_LARGE,
         )
         fig.update_yaxes(rangemode="tozero")
 
@@ -634,8 +692,8 @@ def generate_token_throughput_percentiles_analysis(
         "token_throughput_percentiles",
         as_image,
         report_number,
-        width=900,
-        height=600,
+        width=PLOT_CONFIG_LARGE["width"],
+        height=PLOT_CONFIG_LARGE["height"],
     )
 
 
@@ -898,8 +956,9 @@ def generate_deployment_profile_report(
                         filename = f"{group_name}_{plot_name.lower().replace(' ', '_')}"
 
                         # Save PNG image
-                        width = 900 if "Percentiles" in plot_name else 800
-                        height = 600 if "Percentiles" in plot_name else 500
+                        config = PLOT_CONFIG_LARGE if "Percentiles" in plot_name else PLOT_CONFIG
+                        width = config["width"]
+                        height = config["height"]
                         png_path = save_figure(
                             fig, group_dir, filename, as_image=True, width=width, height=height
                         )
@@ -1146,7 +1205,7 @@ def generate_deployment_profile_report(
         <div style='padding:20px;'>
             <h4>🚀 {plot_name}</h4>
             <p>Token generation throughput scaling analysis across different concurrency levels.</p>
-            <img src='{png_base64}' style='width: 100%; max-width: 800px; height: auto; border: 1px solid #ddd; border-radius: 4px;' alt='{plot_name}' title='{plot_name}'/>
+            <img src='{png_base64}' style='width: 100%; max-width: 1700px; height: auto; border: 1px solid #ddd; border-radius: 4px;' alt='{plot_name}' title='{plot_name}'/>
         </div>
     </div>"""
             else:
@@ -1296,8 +1355,9 @@ def generate_comprehensive_performance_report(
                         filename = f"{loadshape}_{plot_name.lower().replace(' ', '_')}"
 
                         # Save PNG image
-                        width = 900 if "Percentiles" in plot_name else 800
-                        height = 600 if "Percentiles" in plot_name else 500
+                        config = PLOT_CONFIG_LARGE if "Percentiles" in plot_name else PLOT_CONFIG
+                        width = config["width"]
+                        height = config["height"]
                         png_path = save_figure(
                             fig, loadshape_dir, filename, as_image=True, width=width, height=height
                         )
@@ -1548,7 +1608,7 @@ def generate_comprehensive_performance_report(
                 <div style='padding:20px;'>
                     <h4>{plot_name}</h4>
                     <p>{description}</p>
-                    <img src='{png_base64}' style='width: 100%; max-width: 800px; height: auto; border: 1px solid #ddd; border-radius: 4px;' alt='{plot_name}' title='{plot_name}'/>
+                    <img src='{png_base64}' style='width: 100%; max-width: 1700px; height: auto; border: 1px solid #ddd; border-radius: 4px;' alt='{plot_name}' title='{plot_name}'/>
                 </div>
             </div>"""
 
@@ -1748,7 +1808,7 @@ def _create_comprehensive_html_report_with_images(
             html_parts.append(f"""
     <div class="plot-section">
         <h3>📈 {plot_name}</h3>
-        <img src="{png_base64}" style="width: 100%; max-width: 800px; height: auto; border: 1px solid #ddd; border-radius: 5px; margin: 10px 0;" alt="{plot_name}" title="{plot_name}"/>
+        <img src="{png_base64}" style="width: 100%; max-width: 1700px; height: auto; border: 1px solid #ddd; border-radius: 5px; margin: 10px 0;" alt="{plot_name}" title="{plot_name}"/>
         <br>
         <small>💡 Performance visualization with comprehensive metrics analysis</small>
     </div>""")

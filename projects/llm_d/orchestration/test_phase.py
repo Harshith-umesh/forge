@@ -374,7 +374,7 @@ def do_test() -> int:
 
         mlflow_destination = precreate_mlflow_run_if_configured()
     except Exception:
-        logger.warning("MLflow run pre-creation failed; continuing", exc_info=True)
+        logger.error("MLflow run pre-creation failed; continuing", exc_info=True)
         mlflow_destination = None
 
     endpoint_url: str | None = None

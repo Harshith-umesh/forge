@@ -568,7 +568,7 @@ def requires(**config_kwargs):
     return decorator
 
 
-def init(orchestration_dir, *, apply_config_overrides=True):
+def init(orchestration_dir, *, apply_config_overrides=True, apply_cluster_config=True):
     global project
 
     if project:
@@ -603,13 +603,14 @@ def init(orchestration_dir, *, apply_config_overrides=True):
 
     project.apply_config_overrides(ignore_not_found=lenient_presets)
     project.apply_presets_from_project_args(lenient=lenient_presets)
-    project.apply_presets_from_cluster_config()
+    if apply_cluster_config:
+        project.apply_presets_from_cluster_config()
     project.apply_config_overrides(
         ignore_not_found=lenient_presets
     )  # reapply so that the value overrides are applied last
 
 
-def reload(orchestration_dir, *, apply_config_overrides=True):
+def reload(orchestration_dir, *, apply_config_overrides=True, apply_cluster_config=True):
     global project
 
     project = None
@@ -622,7 +623,11 @@ def reload(orchestration_dir, *, apply_config_overrides=True):
     if presets_applied.exists():
         presets_applied.unlink()
 
-    init(orchestration_dir, apply_config_overrides=apply_config_overrides)
+    init(
+        orchestration_dir,
+        apply_config_overrides=apply_config_overrides,
+        apply_cluster_config=apply_cluster_config,
+    )
     return project
 
 

@@ -25,7 +25,6 @@ from projects.caliper.orchestration.postprocess_config import (
 from projects.caliper.orchestration.postprocess_outcome import TestPhaseOutcome
 from projects.core.library import ci as ci_lib
 from projects.core.library import config, env
-from projects.core.library.dict import get_nested, set_nested
 from projects.core.library.reports_index import generate_caliper_reports_index
 from projects.core.library.status_to_html import convert_status_yaml_to_html
 
@@ -374,7 +373,7 @@ def resolve_caliper_postprocess_artifacts_dir(
 def run_orchestration_postprocess(
     *,
     artifact_dir: Path | None,
-    visualize_output_dir: Path | None = None,
+    output_dir: Path | None = None,
     test_outcome: TestPhaseOutcome | None = None,
 ) -> dict[str, Any]:
     """Load ``caliper.postprocess`` from project config and run enabled post-processing steps."""
@@ -392,30 +391,15 @@ def run_orchestration_postprocess(
         artifact_dir=artifact_dir,
         postprocess_config=postprocess_config,
     )
-
-    # Resolve visualize_config path from FORGE_HOME if it's relative
-    visualize_config_path = get_nested(postprocess_config_raw, "visualize.visualize_config")
-    if visualize_config_path:
-        config_path = Path(visualize_config_path)
-        if not config_path.is_absolute():
-            resolved_path = env.FORGE_HOME / config_path
-            set_nested(postprocess_config_raw, "visualize.visualize_config", str(resolved_path))
-            logger.info(
-                "Resolved visualize_config path from %s to %s", visualize_config_path, resolved_path
-            )
-
+    output_dir = output_dir or env.ARTIFACT_DIR
     result = run_postprocess_from_orchestration_config(
         postprocess_config_raw,
         artifacts_dir=artifacts_dir,
-        visualize_output_dir=visualize_output_dir,
+        output_dir=output_dir,
         test_outcome=test_outcome,
     )
 
-    status_base = visualize_output_dir
-    if status_base is None:
-        return result
-
-    status_path = Path(status_base) / "postprocess_status.yaml"
+    status_path = output_dir / "postprocess_status.yaml"
     try:
         status_path.parent.mkdir(parents=True, exist_ok=True)
         status_path.write_text(
@@ -428,12 +412,14 @@ def run_orchestration_postprocess(
 
     # Generate HTML reports
     try:
-        generate_caliper_reports_index(result, Path(status_base), "reports_index.html")
+        generate_caliper_reports_index(result, output_dir or env.ARTIFACT_DIR, "reports_index.html")
     except Exception as e:
         logger.warning("Failed to generate reports index: %s", e)
 
     try:
-        generate_postprocess_status_report(result, Path(status_base), "postprocess_status.html")
+        generate_postprocess_status_report(
+            result, output_dir or env.ARTIFACT_DIR, "postprocess_status.html"
+        )
     except Exception as e:
         logger.warning("Failed to generate postprocessing status report: %s", e)
 
@@ -471,7 +457,7 @@ def postprocess_command(_ctx, artifact_dir: Path, output_dir: Path):
         status = run_orchestration_postprocess(
             artifact_dir=artifact_dir,
             test_outcome=TestPhaseOutcome("NOT_AVAILABLE"),
-            visualize_output_dir=None,  # Let config resolution handle it
+            output_dir=env.ARTIFACT_DIR,
         )
     logger.info("Caliper postprocess status:\n" + yaml.dump(status, indent=2))
 

@@ -18,7 +18,7 @@ def test_hierarchical_format_merges_common_labels_from_all_kpis():
             "labels": {"model": "llama", "tensor_parallel_size": "2"},
         },
     ]
-    model = type("Model", (), {"plugin_module": "missing.plugin"})()
+    model = type("Model", (), {"plugin_module": "projects.caliper.tests.stub_plugin"})()
 
     output = transform_kpis_to_hierarchical_format(kpis, model)
 
