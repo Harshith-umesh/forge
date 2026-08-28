@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from projects.caliper.engine.kpi.analyze import AnalysisConfig
 from projects.caliper.engine.model import (
     ParseResult,
     PostProcessingPlugin,
@@ -106,6 +107,23 @@ class SkeletonDefaultPlugin(PostProcessingPlugin):
             },
             "optional": {},
         }
+
+    def kpi_catalog(self) -> list[dict[str, object]]:
+        """Return catalog of available KPIs for hierarchical formatting."""
+        return self.kpi_handler.get_catalog()
+
+
+# Analysis configuration for KPI regression analysis
+analysis_config = AnalysisConfig(
+    comparison_labels=["version"],  # Compare across different versions (dates in YYYY-MM-DD format)
+    ignored_labels=["higher_is_better"],  # Ignore KPI metadata labels
+    regression_config={
+        "SCALAR_RELATIVE_CHANGE": {
+            "max_relative_regression": 0.1,  # 10% threshold
+            "min_baseline_points": 1,  # Minimum baseline points needed
+        },
+    },
+)
 
 
 def get_plugin() -> PostProcessingPlugin:
