@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+import yaml
+
 
 class StatusLevel(StrEnum):
     """Status level enumeration for all Caliper commands."""
@@ -23,6 +25,11 @@ class StatusLevel(StrEnum):
     REGRESSION_DETECTED = "regression_detected"
 
 
+yaml.add_representer(
+    StatusLevel, lambda dumper, data: dumper.represent_scalar("tag:yaml.org,2002:str", str(data))
+)
+
+
 @dataclass
 class BaseStatus:
     """Base status class with common fields for all Caliper commands."""
@@ -32,6 +39,13 @@ class BaseStatus:
     log_file: str | None = None
     error: str | None = None
     message: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        result = {}
+        for field_name, field_value in self.__dict__.items():
+            result[field_name] = field_value
+        return result
 
 
 @dataclass

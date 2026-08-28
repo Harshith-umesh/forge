@@ -427,9 +427,9 @@ def run_analyse_kpis(
             # Map status field if needed
             if "status" not in status_data:
                 if status_data.get("success"):
-                    status_data["status"] = StatusLevel.SUCCESS
+                    status_data["status"] = StatusLevel.SUCCESS.value
                 else:
-                    status_data["status"] = StatusLevel.FAILED
+                    status_data["status"] = StatusLevel.FAILED.value
             elif isinstance(status_data["status"], str):
                 # Convert string status back to StatusLevel enum (from YAML deserialization)
                 status_data["status"] = StatusLevel(status_data["status"])
