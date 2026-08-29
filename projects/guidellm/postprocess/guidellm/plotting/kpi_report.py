@@ -7,6 +7,10 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
+from projects.caliper.engine.kpi import (
+    KpiRecord,
+    SourceInfo,
+)
 from projects.caliper.postprocess.helpers.visualization_utils import (
     create_report_filename,
 )
@@ -75,28 +79,39 @@ def generate_kpi_report(
             else:
                 value = None  # None for missing/failed scalar KPIs
 
-        kpi_record = {
-            "kpi_id": kpi_id,
-            "value": value,
-            "unit": kpi_func._kpi_unit,
-            "help": kpi_func._kpi_help,
-            "format": getattr(kpi_func, "_kpi_format", "{:.2f}"),
-            "labels": {"higher_is_better": kpi_func._kpi_higher_is_better},
-        }
+        # Create structured KPI record using core dataclass
+        kpi_record = KpiRecord(
+            schema_version="1",
+            kpi_id=kpi_id,
+            value=value if value is not None else 0,  # KpiRecord requires non-null value
+            unit=kpi_func._kpi_unit,
+            run_id=first_record.test_base_path,
+            timestamp="",  # Not critical for display
+            labels={"higher_is_better": kpi_func._kpi_higher_is_better},
+            metadata={
+                "help": kpi_func._kpi_help,
+                "format": getattr(kpi_func, "_kpi_format", "{:.2f}"),
+                "is_2d": is_2d_kpi(kpi_func),
+            },
+            source=SourceInfo(
+                test_base_path=first_record.test_base_path,
+                plugin_module="guidellm.plotting.kpi_report",
+            ),
+        )
 
-        # Add 2D-specific metadata
+        # Add 2D-specific metadata if applicable
         if is_2d_kpi(kpi_func):
-            kpi_record["is_2d"] = True
-            kpi_record["x_unit"] = kpi_func._kpi_x_unit
-            kpi_record["x_help"] = kpi_func._kpi_x_help
-            kpi_record["x_format"] = getattr(kpi_func, "_kpi_x_format", "{:.1f}")
-            kpi_record["y_unit"] = getattr(kpi_func, "_kpi_y_unit", None) or kpi_func._kpi_unit
-            kpi_record["y_help"] = getattr(kpi_func, "_kpi_y_help", None) or kpi_func._kpi_help
-            kpi_record["y_format"] = getattr(kpi_func, "_kpi_y_format", "{:.1f}")
-        else:
-            kpi_record["is_2d"] = False
+            kpi_record.x_unit = kpi_func._kpi_x_unit
+            kpi_record.x_help = kpi_func._kpi_x_help
+            kpi_record.y_unit = getattr(kpi_func, "_kpi_y_unit", None) or kpi_func._kpi_unit
+            kpi_record.y_help = getattr(kpi_func, "_kpi_y_help", None) or kpi_func._kpi_help
+            # Add formatting info to metadata
+            kpi_record.metadata["x_format"] = getattr(kpi_func, "_kpi_x_format", "{:.1f}")
+            kpi_record.metadata["y_format"] = getattr(kpi_func, "_kpi_y_format", "{:.1f}")
 
-        kpi_data.append(kpi_record)
+        # Skip null values for display (can't create KpiRecord with None value)
+        if value is not None:
+            kpi_data.append(kpi_record.to_dict())
 
     # Extract metadata fields
     metadata = GuideLLMKpiHandler.extract_metadata(first_record)
@@ -482,28 +497,39 @@ def _generate_multi_test_kpi_report(
                 else:
                     value = None  # None for missing/failed scalar KPIs
 
-            kpi_record = {
-                "kpi_id": kpi_id,
-                "value": value,
-                "unit": kpi_func._kpi_unit,
-                "help": kpi_func._kpi_help,
-                "format": getattr(kpi_func, "_kpi_format", "{:.2f}"),
-                "labels": {"higher_is_better": kpi_func._kpi_higher_is_better},
-            }
+            # Create structured KPI record using core dataclass
+            kpi_record = KpiRecord(
+                schema_version="1",
+                kpi_id=kpi_id,
+                value=value if value is not None else 0,  # KpiRecord requires non-null value
+                unit=kpi_func._kpi_unit,
+                run_id=record.test_base_path,
+                timestamp="",  # Not critical for display
+                labels={"higher_is_better": kpi_func._kpi_higher_is_better},
+                metadata={
+                    "help": kpi_func._kpi_help,
+                    "format": getattr(kpi_func, "_kpi_format", "{:.2f}"),
+                    "is_2d": is_2d_kpi(kpi_func),
+                },
+                source=SourceInfo(
+                    test_base_path=record.test_base_path,
+                    plugin_module="guidellm.plotting.kpi_report",
+                ),
+            )
 
-            # Add 2D-specific metadata
+            # Add 2D-specific metadata if applicable
             if is_2d_kpi(kpi_func):
-                kpi_record["is_2d"] = True
-                kpi_record["x_unit"] = kpi_func._kpi_x_unit
-                kpi_record["x_help"] = kpi_func._kpi_x_help
-                kpi_record["x_format"] = getattr(kpi_func, "_kpi_x_format", "{:.1f}")
-                kpi_record["y_unit"] = getattr(kpi_func, "_kpi_y_unit", None) or kpi_func._kpi_unit
-                kpi_record["y_help"] = getattr(kpi_func, "_kpi_y_help", None) or kpi_func._kpi_help
-                kpi_record["y_format"] = getattr(kpi_func, "_kpi_y_format", "{:.1f}")
-            else:
-                kpi_record["is_2d"] = False
+                kpi_record.x_unit = kpi_func._kpi_x_unit
+                kpi_record.x_help = kpi_func._kpi_x_help
+                kpi_record.y_unit = getattr(kpi_func, "_kpi_y_unit", None) or kpi_func._kpi_unit
+                kpi_record.y_help = getattr(kpi_func, "_kpi_y_help", None) or kpi_func._kpi_help
+                # Add formatting info to metadata
+                kpi_record.metadata["x_format"] = getattr(kpi_func, "_kpi_x_format", "{:.1f}")
+                kpi_record.metadata["y_format"] = getattr(kpi_func, "_kpi_y_format", "{:.1f}")
 
-            kpi_data.append(kpi_record)
+            # Skip null values for display (can't create KpiRecord with None value)
+            if value is not None:
+                kpi_data.append(kpi_record.to_dict())
 
         # Extract metadata and test info
         metadata = GuideLLMKpiHandler.extract_metadata(record)
