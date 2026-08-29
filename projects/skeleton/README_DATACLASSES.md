@@ -144,43 +144,14 @@ catalog = SkeletonKpiHandler.get_catalog()
 
 ### Regression Analysis
 
+Regression analysis is handled by the Caliper engine using the KPI dataclasses. The plugin should only focus on generating KPIs using the standardized `KpiRecord` format. Regression analysis is performed by the Caliper orchestration system using the `projects.caliper.engine.kpi.analyze` module.
+
 ```python
-# Sample data
-baseline_kpis = [
-    {
-        "kpi_id": "kpi_skeleton_throughput_rps",
-        "value": 1000.0,
-        "unit": "req/s",
-        "labels": {"version": "2024-03-15", "higher_is_better": True},
-    }
-]
+# Plugins should focus on generating KPIs, not analyzing them
+kpis = handler.generate_kpis(model)
 
-current_kpis = [
-    {
-        "kpi_id": "kpi_skeleton_throughput_rps",
-        "value": 800.0,  # 20% decrease - regression!
-        "unit": "req/s",
-        "labels": {"version": "2024-03-20", "higher_is_better": True},
-    }
-]
-
-# Create regression report
-report = SkeletonKpiHandler.create_regression_report(
-    baseline_kpis=baseline_kpis,
-    current_kpis=current_kpis,
-    threshold=0.1,  # 10% threshold
-)
-
-# Access structured results
-print(f"Status: {report.status}")  # "regression_detected"
-print(f"Regressions: {report.regression_count}")  # 1
-print(f"Has regressions: {report.has_regressions()}")  # True
-
-# Detailed findings
-for finding in report.findings:
-    print(
-        f"{finding.kpi_id}: {finding.baseline_value} → {finding.current_value} ({finding.change_percent:.1f}%)"
-    )
+# The Caliper engine handles regression analysis automatically
+# using the analyze.py module and the standardized RegressionReport dataclass
 ```
 
 ### Test Structure with Dates

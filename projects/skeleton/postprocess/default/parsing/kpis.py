@@ -17,9 +17,6 @@ from projects.caliper.engine.kpi import (
     KPIMetadata,
     KpiRecord,
     LowerBetter,
-    OverallStatus,
-    RegressionFinding,
-    RegressionReport,
     SourceInfo,
     build_catalog_from_functions,
     create_label_extractor,
@@ -199,6 +196,7 @@ class SkeletonKpiHandler:
                     timestamp=ts,
                     labels=all_labels,
                     metadata=metadata_fields,
+                    is_2d=False,  # Scalar KPI
                     source=SourceInfo(
                         test_base_path=r.test_base_path,
                         plugin_module=model.plugin_module,
@@ -215,117 +213,3 @@ class SkeletonKpiHandler:
                 out.append(kpi_record.to_dict())
 
         return out
-
-    @staticmethod
-    def create_regression_report(
-        baseline_kpis: list[dict[str, Any]],
-        current_kpis: list[dict[str, Any]],
-        threshold: float = 0.1,
-    ) -> RegressionReport:
-        """
-        Create a regression analysis report comparing baseline vs current KPIs.
-
-        Args:
-            baseline_kpis: List of baseline KPI records
-            current_kpis: List of current KPI records
-            threshold: Regression threshold (default 10%)
-
-        Returns:
-            Structured regression report
-        """
-        ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-        findings = []
-        regression_count = 0
-
-        # Group KPIs by ID for comparison
-        baseline_by_id = {kpi["kpi_id"]: kpi for kpi in baseline_kpis}
-        current_by_id = {kpi["kpi_id"]: kpi for kpi in current_kpis}
-
-        # Extract version information
-        baseline_version = None
-        current_version = None
-        if baseline_kpis:
-            baseline_version = baseline_kpis[0].get("labels", {}).get("version")
-        if current_kpis:
-            current_version = current_kpis[0].get("labels", {}).get("version")
-
-        # Compare KPIs
-        for kpi_id in current_by_id:
-            if kpi_id not in baseline_by_id:
-                continue
-
-            baseline_kpi = baseline_by_id[kpi_id]
-            current_kpi = current_by_id[kpi_id]
-
-            baseline_value = baseline_kpi.get("value")
-            current_value = current_kpi.get("value")
-            higher_is_better = current_kpi.get("labels", {}).get("higher_is_better", True)
-
-            if baseline_value is None or current_value is None:
-                continue
-
-            # Calculate relative change
-            if baseline_value == 0:
-                continue
-
-            relative_change = (current_value - baseline_value) / baseline_value
-
-            # Check for regression
-            is_regression = False
-            if higher_is_better and relative_change < -threshold:
-                is_regression = True
-            elif not higher_is_better and relative_change > threshold:
-                is_regression = True
-
-            if is_regression:
-                regression_count += 1
-
-            # Create finding using core dataclass
-            finding = RegressionFinding(
-                kpi_id=kpi_id,
-                baseline_value=baseline_value,
-                current_value=current_value,
-                relative_change=relative_change,
-                change_percent=relative_change * 100,
-                is_regression=is_regression,
-                higher_is_better=higher_is_better,
-                unit=current_kpi.get("unit", ""),
-                baseline_labels=baseline_kpi.get("labels", {}),
-                current_labels=current_kpi.get("labels", {}),
-                threshold_used=threshold,
-            )
-            findings.append(finding)
-
-        # Determine overall status using enum
-        if regression_count > 0:
-            status = OverallStatus.REGRESSION_DETECTED
-        elif not findings:
-            status = OverallStatus.NO_TEST_PERFORMED
-        elif not current_kpis:
-            status = OverallStatus.NO_BASELINE
-        else:
-            status = OverallStatus.PASS
-
-        # Count improvements
-        improvement_count = sum(
-            1
-            for f in findings
-            if not f.is_regression
-            and (
-                (f.higher_is_better and f.relative_change > 0)
-                or (not f.higher_is_better and f.relative_change < 0)
-            )
-        )
-
-        return RegressionReport(
-            status=status,
-            total_kpis=len(findings),
-            regression_count=regression_count,
-            improvement_count=improvement_count,
-            analysis_timestamp=ts,
-            baseline_version=baseline_version,
-            current_version=current_version,
-            findings=findings,
-            threshold_percent=threshold * 100,
-            comparison_labels=["version"],  # Skeleton uses version for comparison
-        )

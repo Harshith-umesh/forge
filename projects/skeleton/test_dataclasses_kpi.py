@@ -2,11 +2,7 @@
 """Test script for skeleton plugin dataclasses implementation."""
 
 import json
-import sys
 from datetime import UTC, datetime
-
-# Add the forge root to the path
-sys.path.insert(0, "/home/kpouget/openshift/forge")
 
 from projects.skeleton.postprocess.default.parsing.kpis import (
     SkeletonKpiCatalogEntry,
@@ -77,33 +73,46 @@ def test_kpi_catalog_dataclass():
 
 
 def test_regression_report_dataclass():
-    """Test regression report dataclass."""
+    """Test regression report dataclass creation directly."""
     print("=== Testing Regression Report Dataclass ===")
 
-    # Create sample KPI data
-    baseline_kpis = [
-        {
-            "kpi_id": "kpi_skeleton_throughput_rps",
-            "value": 1000.0,
-            "unit": "req/s",
-            "labels": {"version": "2024-03-15", "higher_is_better": True},
-        }
-    ]
+    # Create sample regression findings
+    from datetime import UTC, datetime
 
-    current_kpis = [
-        {
-            "kpi_id": "kpi_skeleton_throughput_rps",
-            "value": 800.0,  # 20% decrease - regression
-            "unit": "req/s",
-            "labels": {"version": "2024-03-20", "higher_is_better": True},
-        }
-    ]
+    from projects.caliper.engine.kpi.dataclasses import (
+        OverallStatus,
+        RegressionFinding,
+        RegressionReport,
+    )
 
-    # Create regression report
-    report = SkeletonKpiHandler.create_regression_report(
-        baseline_kpis=baseline_kpis,
-        current_kpis=current_kpis,
-        threshold=0.1,  # 10% threshold
+    # Create a sample regression finding
+    finding = RegressionFinding(
+        kpi_id="kpi_skeleton_throughput_rps",
+        baseline_value=1000.0,
+        current_value=800.0,
+        relative_change=-0.2,
+        change_percent=-20.0,
+        is_regression=True,
+        higher_is_better=True,
+        unit="req/s",
+        baseline_labels={"version": "2024-03-15"},
+        current_labels={"version": "2024-03-20"},
+        threshold_used=0.1,
+    )
+
+    # Create regression report using dataclass constructor
+    ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    report = RegressionReport(
+        status=OverallStatus.REGRESSION_DETECTED,
+        total_kpis=1,
+        regression_count=1,
+        improvement_count=0,
+        analysis_timestamp=ts,
+        baseline_version="2024-03-15",
+        current_version="2024-03-20",
+        findings=[finding],
+        threshold_percent=10.0,
+        comparison_labels=["version"],
     )
 
     print(f"✅ Regression report created: {report.status}")
@@ -117,11 +126,11 @@ def test_regression_report_dataclass():
     # Test findings
     if report.findings:
         finding = report.findings[0]
-        print(f"✅ First finding: {finding['kpi_id']}")
+        print(f"✅ First finding: {finding.kpi_id}")
         print(
-            f"✅ Change: {finding['baseline_value']} → {finding['current_value']} ({finding['change_percent']:.1f}%)"
+            f"✅ Change: {finding.baseline_value} → {finding.current_value} ({finding.change_percent:.1f}%)"
         )
-        print(f"✅ Is regression: {finding['is_regression']}")
+        print(f"✅ Is regression: {finding.is_regression}")
 
     # Test serialization
     report_dict = report.to_dict()
