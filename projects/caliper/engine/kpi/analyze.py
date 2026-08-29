@@ -6,10 +6,18 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from projects.caliper.engine.kpi.dataclasses import (
+    AnalysisSummary,
+    OverallStatus,
+    RegressionFinding,
+    RegressionReport,
+    ReportMetadata,
+)
 from projects.caliper.engine.kpi.format import (
     flatten_hierarchical_kpis as _extract_kpi_records_from_hierarchical,
 )
@@ -29,15 +37,6 @@ class Verdict(StrEnum):
     REGRESSION = "REGRESSION"
     IMPROVEMENT = "IMPROVEMENT"
     SKIPPED = "SKIPPED"
-
-
-class OverallStatus(StrEnum):
-    """Overall analysis status."""
-
-    PASS = "PASS"
-    REGRESSION_DETECTED = "REGRESSION_DETECTED"
-    NO_BASELINE = "NO_BASELINE"
-    NO_TEST_PERFORMED = "NO_TEST_PERFORMED"
 
 
 class Algorithm(StrEnum):
@@ -67,15 +66,52 @@ class AnalysisConfig:
     regression_config: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass
-class AnalysisReport:
-    """Full analysis report."""
+def create_analysis_summary(
+    results: list[dict[str, Any]],
+    config: AnalysisConfig,
+    current_source: dict[str, Any],
+    relevant_sources: list[dict[str, Any]],
+    irrelevant_sources: list[dict[str, Any]],
+    baseline_skipped: dict[str, int],
+    improvement_count: int = 0,
+    message: str = "",
+) -> AnalysisSummary:
+    """Create AnalysisSummary from analysis data."""
+    from .dataclasses import BaselineSummary, ConfigSummary, TestSummary
 
-    status: str  # "success", "no_regression", "regression_detected", "error"
-    processed: dict[str, Any]
-    tested: list[dict[str, Any]]
-    results: list[dict[str, Any]]
-    overall: dict[str, Any]
+    passes = [r for r in results if r.get("verdict") == Verdict.PASS]
+    regressions = [r for r in results if r.get("verdict") == Verdict.REGRESSION]
+    skipped = [r for r in results if r.get("verdict") == Verdict.SKIPPED]
+
+    test_summary = TestSummary(
+        total_kpis=len(results),
+        pass_count=len(passes),
+        regression_count=len(regressions),
+        skipped_count=len(skipped),
+        improvement_count=improvement_count,
+    )
+
+    config_summary = ConfigSummary(
+        comparison_labels=config.comparison_labels,
+        ignored_labels=config.ignored_labels,
+        sorting_labels=config.sorting_labels,
+        regression_config=config.regression_config,
+    )
+
+    baseline_summary = BaselineSummary(
+        relevant_sources=relevant_sources,
+        irrelevant_sources=irrelevant_sources,
+        baseline_source_count=len(relevant_sources) + len(irrelevant_sources),
+        baseline_skipped=baseline_skipped,
+        current_source=current_source,
+    )
+
+    return AnalysisSummary(
+        tested=test_summary,
+        config=config_summary,
+        baseline_info=baseline_summary,
+        message=message,
+    )
 
 
 def _load_analysis_config(plugin_module: str) -> AnalysisConfig:
@@ -576,8 +612,8 @@ def _build_report(
     relevant_sources: list[dict[str, Any]],
     irrelevant_sources: list[dict[str, Any]],
     baseline_skipped: dict[str, int],
-) -> dict[str, Any]:
-    """Build the final report structure."""
+) -> tuple[OverallStatus, RegressionReport]:
+    """Build the final report structure using core dataclasses."""
     regressions = [r for r in results if r["verdict"] == Verdict.REGRESSION]
     passes = [r for r in results if r["verdict"] == Verdict.PASS]
     skipped = [r for r in results if r["verdict"] == Verdict.SKIPPED]
@@ -589,48 +625,98 @@ def _build_report(
     else:
         overall_status = OverallStatus.PASS
 
-    report = {
-        "analysis": {
-            "status": overall_status,
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        },
-        "config": {
-            "comparison_labels": config.comparison_labels,
-            "ignored_labels": config.ignored_labels,
-            "sorting_labels": config.sorting_labels,
-            "regression_config": config.regression_config,
-        },
-        "tested": {
-            "total_kpis": len(results),
-            "pass": len(passes),
-            "regression": len(regressions),
-            "skipped": len(skipped),
-        },
-        "overall": {
-            "verdict": overall_status,
-            "regression_count": len(regressions),
-            "total_tested": len(passes) + len(regressions),
-            "total_skipped": len(skipped),
-        },
-        "input_data": {
-            "current_source": current_source,
-            "baseline_sources": {
-                "relevant_sources": relevant_sources,
-                "irrelevant_sources": irrelevant_sources,
-            },
-            "baseline_source_count": len(relevant_sources) + len(irrelevant_sources),
-            "baseline_skipped": baseline_skipped,
-        },
-        "results": passes + regressions,
-        "skipped": skipped,
-    }
+    # Convert results to RegressionFinding objects
+    findings = []
+    improvement_count = 0
 
-    if not skipped:
-        report.pop("skipped")
-    if not baseline_skipped:
-        report["input_data"].pop("baseline_skipped")
+    for result in results:
+        verdict = result["verdict"]
 
-    return report
+        # Skip entries that aren't regression findings
+        if verdict == Verdict.SKIPPED:
+            continue
+
+        is_regression = verdict == Verdict.REGRESSION
+
+        # Extract values for RegressionFinding
+        current_value_info = result.get("current_value", {})
+        current_value = (
+            current_value_info.get("value", 0) if isinstance(current_value_info, dict) else 0
+        )
+
+        # Get values from the details section where they're already calculated
+        details = result.get("details", {})
+        baseline_value = details.get("baseline_mean", 0)
+        relative_change = details.get("relative_change", 0.0)
+
+        # Check if this is an improvement (only for PASS cases)
+        if verdict == Verdict.PASS and relative_change != 0:
+            higher_is_better = result.get("higher_is_better", True)
+            if (higher_is_better and relative_change > 0) or (
+                not higher_is_better and relative_change < 0
+            ):
+                improvement_count += 1
+
+        # Create RegressionFinding for all tested KPIs (regression and pass)
+        finding = RegressionFinding(
+            kpi_id=result.get("kpi_id", ""),
+            baseline_value=baseline_value,
+            current_value=current_value,
+            relative_change=relative_change,
+            change_percent=relative_change * 100,
+            is_regression=is_regression,
+            higher_is_better=result.get("higher_is_better", True),
+            unit=result.get("unit", ""),
+            baseline_labels=result.get("baseline_labels", {}),
+            current_labels=result.get("current_labels", {}),
+            threshold_used=result.get("threshold_used", 0.0),
+        )
+        findings.append(finding)
+
+    # Extract version information from current data
+    baseline_version = None
+    current_version = None
+
+    # Try to extract versions from the first finding
+    if findings:
+        baseline_version = findings[0].baseline_labels.get("version")
+        current_version = findings[0].current_labels.get("version")
+
+    # Calculate regression config threshold
+    regression_config = config.regression_config.get("SCALAR_RELATIVE_CHANGE", {})
+    threshold_percent = regression_config.get("max_relative_regression", 0.1) * 100
+
+    # Build structured summary using dataclasses
+    summary = create_analysis_summary(
+        results=results,
+        config=config,
+        current_source=current_source,
+        relevant_sources=relevant_sources,
+        irrelevant_sources=irrelevant_sources,
+        baseline_skipped=baseline_skipped,
+        improvement_count=improvement_count,
+        message="",
+    )
+
+    report = RegressionReport(
+        status=overall_status,
+        total_kpis=len(results),
+        regression_count=len(regressions),
+        analysis_timestamp=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        improvement_count=improvement_count,
+        baseline_version=baseline_version,
+        current_version=current_version,
+        findings=findings,
+        threshold_percent=threshold_percent,
+        comparison_labels=config.comparison_labels,
+        summary=summary,
+        metadata=ReportMetadata(
+            total_tested=len(passes) + len(regressions),
+            total_skipped=len(skipped),
+        ),
+    )
+
+    return overall_status, report
 
 
 def _log_baseline_miss(
@@ -862,7 +948,7 @@ def run_kpi_analysis(
         if not baseline_skipped_totals["duplicate"]:
             baseline_skipped_totals.pop("duplicate")
 
-        report = _build_report(
+        overall_status, report = _build_report(
             results=results,
             config=config,
             current_source=current_source,
@@ -871,14 +957,13 @@ def run_kpi_analysis(
             baseline_skipped=baseline_skipped_totals,
         )
 
-        # Write JSON report
+        # Write JSON report using dataclass serialization
         output_file.parent.mkdir(parents=True, exist_ok=True)
         with open(output_file, "w") as f:
-            json.dump(report, f, indent=2, ensure_ascii=False)
+            json.dump(report.to_dict(), f, indent=2, ensure_ascii=False)
 
-        regressions = report["overall"]["regression_count"]
-        total = report["overall"]["total_tested"]
-        overall_verdict = report["overall"]["verdict"]
+        regressions = report.regression_count
+        total = report.metadata.total_tested
         logger.info(
             "Analysis complete: %d/%d KPIs tested, %d regressions",
             total,
@@ -886,11 +971,11 @@ def run_kpi_analysis(
             regressions,
         )
 
-        # Return status based on the overall verdict from the report
+        # Return status based on the overall verdict from the enum
         baseline_files_count = len(baseline_kpi_data)
         total_kpis = len(current_records)
 
-        if overall_verdict == OverallStatus.REGRESSION_DETECTED:
+        if overall_status == OverallStatus.REGRESSION_DETECTED:
             return KpiAnalysisStatus(
                 status=StatusLevel.REGRESSION_DETECTED,
                 success=False,
@@ -901,8 +986,8 @@ def run_kpi_analysis(
                 regression_count=regressions,
                 total_kpis=total_kpis,
                 baseline_files_count=baseline_files_count,
-            ), report
-        elif overall_verdict == OverallStatus.NO_TEST_PERFORMED:
+            ), report.to_dict()
+        elif overall_status == OverallStatus.NO_TEST_PERFORMED:
             return KpiAnalysisStatus(
                 status=StatusLevel.WARNING,
                 success=True,
@@ -912,15 +997,15 @@ def run_kpi_analysis(
                 completed_at=time.time(),
                 total_kpis=total_kpis,
                 baseline_files_count=baseline_files_count,
-            ), report
-        else:  # OverallStatus.PASS
+            ), report.to_dict()
+        else:  # "success"
             return create_success_status(
                 KpiAnalysisStatus,
                 output_file=str(output_file),
                 total_kpis=total_kpis,
                 regression_count=0,
                 baseline_files_count=baseline_files_count,
-            ), report
+            ), report.to_dict()
 
     except Exception as e:
         logger.exception("KPI analysis failed")
@@ -935,32 +1020,36 @@ def _write_no_baseline_report(
     output_file: Path, current_kpi_file: Path, plugin_module: str
 ) -> None:
     """Write a warning-level report when no baselines are available."""
-    report = {
-        "analysis": {
-            "status": OverallStatus.NO_BASELINE,
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        },
-        "processed": {
-            "current_source": str(current_kpi_file),
-            "baseline_sources": {
-                "relevant_sources": [],
-                "irrelevant_sources": [],
-            },
-            "baseline_source_count": 0,
-        },
-        "tested": {"total_kpis": 0, "regressions": 0, "passes": 0, "skipped": 0},
-        "results": [],
-        "overall": {
-            "verdict": OverallStatus.NO_BASELINE,
-            "message": "No historical KPI files found for regression testing",
-            "regression_count": 0,
-            "total_tested": 0,
-            "total_skipped": 0,
-        },
-    }
+    # Create an empty RegressionReport for no-baseline case
+    report = RegressionReport(
+        status=OverallStatus.NO_BASELINE,
+        total_kpis=0,
+        regression_count=0,
+        analysis_timestamp=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        improvement_count=0,
+        baseline_version=None,
+        current_version=None,
+        findings=[],
+        threshold_percent=10.0,
+        comparison_labels=[],
+        summary=create_analysis_summary(
+            results=[],
+            config=AnalysisConfig(),  # Empty config for no-baseline case
+            current_source={"file": str(current_kpi_file)},
+            relevant_sources=[],
+            irrelevant_sources=[],
+            baseline_skipped={},
+            improvement_count=0,
+            message="No historical KPI files found for regression testing",
+        ),
+        metadata=ReportMetadata(
+            total_tested=0,
+            total_skipped=0,
+        ),
+    )
     output_file.parent.mkdir(parents=True, exist_ok=True)
     with open(output_file, "w") as f:
-        json.dump(report, f, indent=2, ensure_ascii=False)
+        json.dump(report.to_dict(), f, indent=2, ensure_ascii=False)
 
 
 def find_baseline_kpis(historical_dir: Path) -> dict[Path, dict[str, Any]]:
