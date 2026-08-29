@@ -682,7 +682,8 @@ def handle_caliper_output_and_completion(
                 "error": "Status file is empty or contains no valid YAML data",
             }
     except Exception as e:
-        status_data = {"success": False, "error": f"Failed to read status file: {e}"}
+        logger.exception("Failed to read status file: %s", e)
+        raise
 
     # Log status file content for visibility
     logger.info("📄 Status file content:")

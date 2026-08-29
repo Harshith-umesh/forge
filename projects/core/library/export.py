@@ -43,7 +43,7 @@ class FinishReason(StrEnum):
 
 def _update_fjob_export_status(status: dict):
     """Update FournosJob status with export artifacts status."""
-    if os.environ.get("FOURNOS_CI") != "true":
+    if not env.running_inside_fournos():
         return
 
     # Unset KUBECONFIG to use the pod SA access
@@ -444,11 +444,11 @@ def _process_caliper_postprocess_status(
             # Import notification functions from caliper
             from projects.caliper.orchestration.notification import (
                 format_postprocess_status_notification,
-                parse_postprocess_result,
+                parse_postprocess_status,
             )
 
             # Parse status data into structured object
-            result = parse_postprocess_result(status_data)
+            result = parse_postprocess_status(status_data)
             if not result:
                 continue
 
@@ -679,7 +679,7 @@ def _get_overall_status_from_steps() -> str:
             return "🟢"  # All successful = green
 
     except Exception as e:
-        logger.warning(f"Failed to check step statuses: {e}")
+        logger.exception(f"Failed to check step statuses: {e}")
         return "🔴"  # Error checking = red
 
 
@@ -742,6 +742,7 @@ def _build_enhanced_notification(
     except Exception as e:
         logger.warning(f"Failed to extract artifact links: {e}")
         notification_parts.append("**Artifact Links:** Error extracting links")
+        raise
 
     return "\n".join(notification_parts)
 
@@ -1041,7 +1042,6 @@ def _update_artifacts(
     Intended to be called after all post-export work (notifications, etc.) completes,
     so uploaded files contain the full session output.
     """
-    from pathlib import Path
 
     artifact_dir_path = Path(artifact_dir)
 

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import inspect
+import re
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from projects.caliper.engine.kpi import (
@@ -46,11 +48,12 @@ def kpi_skeleton_latency_ms(unified_record) -> float:
 class SkeletonKpiHandler:
     """Handles KPI catalog and computation for skeleton project."""
 
-    # Create label extractor for test condition labels
+    # Create label extractor for test condition labels including version
     LABEL_EXTRACTOR = create_label_extractor(
         {
             "scenario": "distinguishing_labels.scenario",
             "workload": "distinguishing_labels.workload",
+            "version": lambda record: SkeletonKpiHandler.extract_version(record),
         }
     )
 
@@ -61,6 +64,42 @@ class SkeletonKpiHandler:
             "test_config": record.run_identity.get("test_config", {}),
             "environment": record.run_identity.get("environment", "unknown"),
         }
+
+    @staticmethod
+    def extract_version(record) -> str:
+        """Extract version (date) from test record for analysis.
+
+        Tries multiple sources for date information:
+        1. 'version' or 'date' from distinguishing labels
+        2. Date pattern (YYYY-MM-DD) from test path
+        3. Current date as fallback
+
+        Returns:
+            Date string in YYYY-MM-DD format
+        """
+        # Check if version/date is explicitly in labels
+        labels = record.distinguishing_labels
+        if "version" in labels:
+            return str(labels["version"])
+        if "date" in labels:
+            return str(labels["date"])
+
+        # Try to extract date from test path
+        test_path = record.test_base_path
+        date_pattern = r"\b(\d{4}-\d{2}-\d{2})\b"
+        match = re.search(date_pattern, test_path)
+        if match:
+            return match.group(1)
+
+        # Try to extract date from directory structure
+        path_parts = Path(test_path).parts
+        for part in path_parts:
+            match = re.search(date_pattern, part)
+            if match:
+                return match.group(1)
+
+        # Fallback: use current date
+        return datetime.now(UTC).strftime("%Y-%m-%d")
 
     @staticmethod
     def get_catalog() -> list[dict[str, Any]]:
@@ -112,10 +151,14 @@ class SkeletonKpiHandler:
                 if value is None or (isinstance(value, list) and not value):
                     continue
 
+                # Extract date for version label
+                version_label = SkeletonKpiHandler.extract_version(r)
+
                 # Merge base labels, test condition labels, and system labels
                 all_labels = {
                     **base_labels,
                     **test_condition_labels,
+                    "version": version_label,  # Include date as version for analysis
                     "higher_is_better": kpi_func._kpi_higher_is_better,
                 }
 

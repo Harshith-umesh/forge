@@ -219,6 +219,10 @@ def next_artifact_index():
     return len(list(current_artifact_dir.glob("*__*")))
 
 
+def running_inside_fournos():
+    return os.environ.get("FOURNOS_CI", "") == "true"
+
+
 class MuteStdOut:
     """Context manager to mute stdout, stderr, and logging with a startup message."""
 

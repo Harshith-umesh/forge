@@ -83,7 +83,6 @@ class StubPlugin(PostProcessingPlugin):
                     "timestamp": ts,
                     "labels": {
                         **r.distinguishing_labels,
-                        "higher_is_better": True,
                     },
                     "source": {
                         "test_base_path": r.test_base_path,
@@ -131,7 +130,7 @@ class StubPlugin(PostProcessingPlugin):
 # Analysis configuration for testing KPI regression analysis
 analysis_config = AnalysisConfig(
     comparison_labels=["version"],  # Compare across different versions
-    ignored_labels=["higher_is_better"],  # Ignore KPI metadata
+    ignored_labels=[],
     regression_config={
         "SCALAR_RELATIVE_CHANGE": {
             "max_relative_regression": 0.1,  # 10% threshold for tests

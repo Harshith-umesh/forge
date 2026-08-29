@@ -158,4 +158,4 @@ def _generate_index_html_content(
         ]
     )
 
-    return "\n".join(html_parts)
+    return "\n".join(html_parts) + "\n"

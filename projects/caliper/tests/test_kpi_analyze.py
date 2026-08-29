@@ -199,14 +199,15 @@ class TestEndToEnd:
         self._write_hierarchical_kpi(historical_dir / "run1" / "kpis.json", baseline1)
         self._write_hierarchical_kpi(historical_dir / "run2" / "kpis.json", baseline2)
 
-        test_status, _ = run_kpi_analysis(
+        test_status, report = run_kpi_analysis(
             current_kpi_file=current_dir / "kpis.json",
             historical_data_dir=historical_dir,
             output_file=output_file,
             plugin_module="projects.caliper.tests.stub_plugin",
         )
 
-        assert test_status["exit_code"] == 0
+        assert test_status.exit_code == 0
+        assert test_status.success is True
         assert output_file.exists()
 
         with open(output_file) as f:
@@ -249,14 +250,15 @@ class TestEndToEnd:
         )
         self._write_hierarchical_kpi(historical_dir / "run1" / "kpis.json", baseline)
 
-        test_status, _ = run_kpi_analysis(
+        test_status, report = run_kpi_analysis(
             current_kpi_file=current_dir / "kpis.json",
             historical_data_dir=historical_dir,
             output_file=output_file,
             plugin_module="projects.caliper.tests.stub_plugin",
         )
 
-        assert test_status["exit_code"] == 3
+        assert test_status.exit_code == 3
+        assert test_status.regressions_detected is True
         with open(output_file) as f:
             report = yaml.safe_load(f)
 
@@ -284,17 +286,18 @@ class TestEndToEnd:
         )
         self._write_hierarchical_kpi(current_dir / "kpis.json", current)
 
-        test_status, _ = run_kpi_analysis(
+        test_status, report = run_kpi_analysis(
             current_kpi_file=current_dir / "kpis.json",
             historical_data_dir=historical_dir,
             output_file=output_file,
             plugin_module="projects.caliper.tests.stub_plugin",
         )
 
-        assert test_status["exit_code"] == 2
+        assert test_status.exit_code == 2
+        assert test_status.success is True  # Warning, not failure
         with open(output_file) as f:
-            report = yaml.safe_load(f)
-        assert report["overall"]["verdict"] == "NO_BASELINE"
+            report_data = yaml.safe_load(f)
+        assert report_data["overall"]["verdict"] == "NO_BASELINE"
 
     def test_mixed_regression_and_pass(self, tmp_path):
         current_dir = tmp_path / "current"
@@ -329,14 +332,15 @@ class TestEndToEnd:
         )
         self._write_hierarchical_kpi(historical_dir / "run1" / "kpis.json", baseline)
 
-        test_status, _ = run_kpi_analysis(
+        test_status, report = run_kpi_analysis(
             current_kpi_file=current_dir / "kpis.json",
             historical_data_dir=historical_dir,
             output_file=output_file,
             plugin_module="projects.caliper.tests.stub_plugin",
         )
 
-        assert test_status["exit_code"] == 3
+        assert test_status.exit_code == 3
+        assert test_status.regressions_detected is True
         with open(output_file) as f:
             report = yaml.safe_load(f)
 
@@ -378,14 +382,15 @@ class TestEndToEnd:
         )
         self._write_hierarchical_kpi(historical_dir / "run1" / "kpis.json", baseline)
 
-        test_status, _ = run_kpi_analysis(
+        test_status, report = run_kpi_analysis(
             current_kpi_file=current_dir / "kpis.json",
             historical_data_dir=historical_dir,
             output_file=output_file,
             plugin_module="projects.caliper.tests.stub_plugin",
         )
 
-        assert test_status["exit_code"] == 0
+        assert test_status.exit_code == 0
+        assert test_status.success is True
         with open(output_file) as f:
             report = yaml.safe_load(f)
 
@@ -428,7 +433,7 @@ class TestEndToEnd:
 
         # With version as comparison_key, both match on platform=A100
         # (version excluded from match key, so records with different versions can be compared)
-        test_status, _ = run_kpi_analysis(
+        test_status, report = run_kpi_analysis(
             current_kpi_file=current_dir / "kpis.json",
             historical_data_dir=historical_dir,
             output_file=output_file,
@@ -437,7 +442,8 @@ class TestEndToEnd:
 
         # With comparison_labels=["version"], version is excluded from matching
         # Current v2.0 and baseline v1.0 both match on platform=A100 → regression test performed
-        assert test_status["exit_code"] == 0
+        assert test_status.exit_code == 0
+        assert test_status.success is True
         with open(output_file) as f:
             report = yaml.safe_load(f)
         # Both records matched and regression test was performed (100.0 vs 95.0 = +5.26% improvement)

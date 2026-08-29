@@ -46,6 +46,19 @@ from projects.caliper.orchestration.postprocess_outcome import (
 from projects.caliper.orchestration.step_logging import (
     cleanup_step_logging,
 )
+
+# Import step result dataclasses
+from projects.caliper.public import (
+    AiDataStepResult,
+    BaseStepResult,
+    CsvExportStepResult,
+    KpiAnalysisStepResult,
+    KpiGenerateStepResult,
+    ParseStepResult,
+    S3StepResult,
+    StepStatus,
+    VisualizeStepResult,
+)
 from projects.core.library import env
 
 logger = logging.getLogger(__name__)
@@ -119,19 +132,21 @@ def _run_artifacts_to_kpis(
     """Generate KPI JSON using fork/exec subprocess execution."""
 
     if not postprocess_config.kpi.enabled:
-        return {
-            "status": "disabled",
-            "reason": "kpi disabled",
-            "completed_at": time.time(),
-            "log_file": None,
-        }
+        result = KpiGenerateStepResult(
+            status=StepStatus.DISABLED,
+            completed_at=time.time(),
+            reason="kpi disabled",
+            log_file=None,
+        )
+        return result
     if not postprocess_config.kpi.artifacts_to_kpis.enabled:
-        return {
-            "status": "disabled",
-            "reason": "kpi.artifacts_to_kpis disabled",
-            "completed_at": time.time(),
-            "log_file": None,
-        }
+        result = KpiGenerateStepResult(
+            status=StepStatus.DISABLED,
+            completed_at=time.time(),
+            reason="kpi.artifacts_to_kpis disabled",
+            log_file=None,
+        )
+        return result
 
     try:
         # Prepare paths — reject absolute or parent-traversal output names
@@ -168,19 +183,21 @@ def _run_artifacts_to_kpis(
             logger.info(
                 f"KPI generate: output_file={output_file}, env.ARTIFACT_DIR={env.ARTIFACT_DIR}, relative_path={relative_path}"
             )
-            return {
-                "status": "success",
-                "output_file": relative_path,
-                "completed_at": time.time(),
-                "log_file": log_file,
-            }
+            result = KpiGenerateStepResult(
+                status=StepStatus.SUCCESS,
+                completed_at=time.time(),
+                output_file=relative_path,
+                log_file=log_file,
+            )
+            return result
         else:
-            return {
-                "status": "failed",
-                "error": status_data.get("error", "Unknown error"),
-                "completed_at": time.time(),
-                "log_file": log_file,
-            }
+            result = KpiGenerateStepResult(
+                status=StepStatus.FAILED,
+                completed_at=time.time(),
+                error=status_data.get("error", "Unknown error"),
+                log_file=log_file,
+            )
+            return result
 
     except Exception as e:
         # Log the full traceback to help with debugging
@@ -189,12 +206,13 @@ def _run_artifacts_to_kpis(
         full_traceback = traceback.format_exc()
         logger.error(f"KPI generation failed: {e}")
         logger.error(f"Full traceback:\n{full_traceback}")
-        return {
-            "status": "failed",
-            "message": str(e),
-            "completed_at": time.time(),
-            "log_file": None,
-        }
+        result = KpiGenerateStepResult(
+            status=StepStatus.FAILED,
+            completed_at=time.time(),
+            error=str(e),
+            log_file=None,
+        )
+        return result
 
 
 def _run_artifacts_to_ai_data(
@@ -204,7 +222,7 @@ def _run_artifacts_to_ai_data(
     base_dir: Path,
     manifest_path: Path | None,
     step_logs_dir: Path,
-) -> dict[str, Any]:
+) -> AiDataStepResult:
     """Export AI evaluation payload using fork/exec subprocess execution."""
     try:
         # Create AI data directory and output file path
@@ -235,20 +253,22 @@ def _run_artifacts_to_ai_data(
 
         # Convert to expected format
         if status_data.get("success"):
-            return {
-                "status": "success",
-                "output_file": status_data.get("output_file", str(ai_data_dir)),
-                "ai_data_dir": _make_path_relative_to_base(ai_data_dir, env.ARTIFACT_DIR),
-                "completed_at": time.time(),
-                "log_file": log_file,
-            }
+            result = AiDataStepResult(
+                status=StepStatus.SUCCESS,
+                completed_at=time.time(),
+                output_file=status_data.get("output_file", str(ai_data_dir)),
+                ai_data_dir=_make_path_relative_to_base(ai_data_dir, env.ARTIFACT_DIR),
+                log_file=log_file,
+            )
+            return result
         else:
-            return {
-                "status": "failed",
-                "error": status_data.get("error", "Unknown error"),
-                "completed_at": time.time(),
-                "log_file": log_file,
-            }
+            result = AiDataStepResult(
+                status=StepStatus.FAILED,
+                completed_at=time.time(),
+                error=status_data.get("error", "Unknown error"),
+                log_file=log_file,
+            )
+            return result
 
     except Exception as e:
         # Log the full traceback to help with debugging
@@ -257,12 +277,13 @@ def _run_artifacts_to_ai_data(
         full_traceback = traceback.format_exc()
         logger.error(f"AI eval export failed: {e}")
         logger.error(f"Full traceback:\n{full_traceback}")
-        return {
-            "status": "failed",
-            "message": str(e),
-            "completed_at": time.time(),
-            "log_file": None,
-        }
+        result = AiDataStepResult(
+            status=StepStatus.FAILED,
+            completed_at=time.time(),
+            error=str(e),
+            log_file=None,
+        )
+        return result
 
 
 def _load_test_labels(test_dir: Path) -> dict[str, Any]:
@@ -302,19 +323,21 @@ def _run_kpis_to_csv(
     """Export KPI data to CSV format using fork/exec subprocess execution."""
 
     if not postprocess_config.kpi.enabled:
-        return {
-            "status": "disabled",
-            "reason": "kpi disabled",
-            "completed_at": time.time(),
-            "log_file": None,
-        }
+        result = CsvExportStepResult(
+            status=StepStatus.DISABLED,
+            completed_at=time.time(),
+            reason="kpi disabled",
+            log_file=None,
+        )
+        return result
     if not postprocess_config.kpi.kpis_to_csv.enabled:
-        return {
-            "status": "disabled",
-            "reason": "kpi.kpis_to_csv disabled",
-            "completed_at": time.time(),
-            "log_file": None,
-        }
+        result = CsvExportStepResult(
+            status=StepStatus.DISABLED,
+            completed_at=time.time(),
+            reason="kpi.kpis_to_csv disabled",
+            log_file=None,
+        )
+        return result
 
     try:
         csv_output = postprocess_config.kpi.kpis_to_csv.output
@@ -348,20 +371,22 @@ def _run_kpis_to_csv(
 
         # Convert to expected format
         if status_data.get("success"):
-            return {
-                "status": "success",
-                "kpi_count": status_data.get("kpi_count", 0),
-                "output_file": _make_path_relative_to_base(output_file, env.ARTIFACT_DIR),
-                "completed_at": time.time(),
-                "log_file": log_file,
-            }
+            result = CsvExportStepResult(
+                status=StepStatus.SUCCESS,
+                completed_at=time.time(),
+                kpi_count=status_data.get("kpi_count", 0),
+                output_file=_make_path_relative_to_base(output_file, env.ARTIFACT_DIR),
+                log_file=log_file,
+            )
+            return result
         else:
-            return {
-                "status": "failed",
-                "error": status_data.get("error", "Unknown error"),
-                "completed_at": time.time(),
-                "log_file": log_file,
-            }
+            result = CsvExportStepResult(
+                status=StepStatus.FAILED,
+                completed_at=time.time(),
+                error=status_data.get("error", "Unknown error"),
+                log_file=log_file,
+            )
+            return result
 
     except Exception as e:
         # Log the full traceback to help with debugging
@@ -370,12 +395,13 @@ def _run_kpis_to_csv(
         full_traceback = traceback.format_exc()
         logger.error(f"KPI CSV export failed: {e}")
         logger.error(f"Full traceback:\n{full_traceback}")
-        return {
-            "status": "failed",
-            "message": str(e),
-            "completed_at": time.time(),
-            "log_file": None,
-        }
+        result = CsvExportStepResult(
+            status=StepStatus.FAILED,
+            completed_at=time.time(),
+            error=str(e),
+            log_file=None,
+        )
+        return result
 
 
 def _run_analyse_kpis(
@@ -390,12 +416,13 @@ def _run_analyse_kpis(
     """Analyze KPIs using fork/exec subprocess execution."""
 
     if not postprocess_config.analyze.enabled:
-        return {
-            "status": "disabled",
-            "reason": "analyze disabled",
-            "completed_at": time.time(),
-            "log_file": None,
-        }
+        result = BaseStepResult(
+            status=StepStatus.DISABLED,
+            completed_at=time.time(),
+            reason="analyze disabled",
+            log_file=None,
+        )
+        return result
 
     try:
         # Prepare paths
@@ -453,7 +480,7 @@ def _run_analyse_kpis(
     except Exception as e:
         logger.exception("KPI analysis failed in _run_analyse_kpis")
         return {
-            "status": "failed",
+            "status": StepStatus.FAILED,
             "message": str(e),
             "completed_at": time.time(),
             "log_file": None,
@@ -604,32 +631,41 @@ class CaliperPostprocessOrchestrator:
         self.step_logs_dir.mkdir(parents=True, exist_ok=True)
 
     def _add_step(
-        self, step_name: str, step_data: dict[str, Any], log_file: Path | None = None
+        self,
+        step_name: str,
+        step_data: dict[str, Any] | BaseStepResult,
+        log_file: Path | None = None,
     ) -> None:
         """Add a step result to the steps list."""
+        # Convert dataclass to dict if needed
+        if isinstance(step_data, BaseStepResult):
+            step_dict = step_data.to_dict()
+        else:
+            step_dict = step_data.copy()  # Copy to avoid modifying original
+
         if log_file:
             # Make log file path relative to artifact root where logs are actually stored
             try:
                 artifact_root = Path(env.ARTIFACT_DIR)
-                relative_log_path = log_file.relative_to(artifact_root)
-                step_data["log_file"] = str(relative_log_path)
+                relative_log_path = Path(log_file).relative_to(artifact_root)
+                step_dict["log_file"] = str(relative_log_path)
             except ValueError:
                 # If log file is not under artifact root, use absolute path
-                step_data["log_file"] = str(log_file)
+                step_dict["log_file"] = str(log_file)
 
-        self.steps.append({step_name: step_data})
+        self.steps.append({step_name: step_dict})
 
-    def _check_step_result_and_set_failure(self, step_name: str, result: dict[str, Any]) -> bool:
+    def _check_step_result_and_set_failure(self, step_name: str, result: BaseStepResult) -> bool:
         """Check step result status and set appropriate failure flag.
 
         Args:
             step_name: Name of the step
-            result: Step result dictionary
+            result: Step result dataclass object
 
         Returns:
             True if step failed or warned, False if successful
         """
-        status = result.get("status")
+        status = result.status.value
 
         # Map step names to their failure flags
         step_failure_map = {
@@ -648,14 +684,24 @@ class CaliperPostprocessOrchestrator:
             setattr(self, failure_attr, True)
 
             if status == "warning":
-                warning_msg = result.get("message", "unknown warning")
+                warning_msg = (
+                    getattr(result, "reason", None)
+                    or getattr(result, "message", None)
+                    or "unknown warning"
+                )
                 logger.warning(f"Step '{step_name}' completed with warning: {warning_msg}")
             elif status == "failed":
-                error_msg = result.get("error", result.get("message", "unknown error"))
-                traceback_msg = result.get("traceback")
+                error_msg = (
+                    getattr(result, "error", None)
+                    or getattr(result, "reason", None)
+                    or getattr(result, "message", None)
+                    or "unknown error"
+                )
+                # Check for additional details (traceback/context info)
+                detail_msg = getattr(result, "detail", None)
                 logger.error(f"Step '{step_name}' failed: {error_msg}")
-                if traceback_msg:
-                    logger.error("Full traceback:\n%s", traceback_msg)
+                if detail_msg:
+                    logger.error("Additional details:\n%s", detail_msg)
 
             return True
         elif status == "success":
@@ -745,29 +791,29 @@ class CaliperPostprocessOrchestrator:
             if result.returncode == 0 and status_data and status_data.get("success", False):
                 record_count = status_data.get("parsed_records", 0)
 
-                # Build common step data
-                step_data = {
-                    "plugin_module": status_data.get("plugin_module", "unknown"),
-                    "record_count": record_count,
-                    "parse_cache_ref": status_data.get("cache_ref"),
-                    "completed_at": time.time(),
-                }
-
                 # Check if any records were parsed - fail if none found
                 if record_count == 0:
                     self.parse_failed = True
                     logger.error("Caliper parse completed but found no records to process")
-                    step_data.update(
-                        {
-                            "status": "failed",
-                            "message": "No records found - parsing completed successfully but no test data was extracted",
-                        }
+                    step_result = ParseStepResult(
+                        status=StepStatus.FAILED,
+                        completed_at=time.time(),
+                        plugin_module=status_data.get("plugin_module", "unknown"),
+                        record_count=record_count,
+                        parse_cache_ref=status_data.get("cache_ref"),
+                        reason="No records found - parsing completed successfully but no test data was extracted",
                     )
                 else:
                     self.parse_failed = False
-                    step_data["status"] = "success"
+                    step_result = ParseStepResult(
+                        status=StepStatus.SUCCESS,
+                        completed_at=time.time(),
+                        plugin_module=status_data.get("plugin_module", "unknown"),
+                        record_count=record_count,
+                        parse_cache_ref=status_data.get("cache_ref"),
+                    )
 
-                self._add_step("parse", step_data, log_file)
+                self._add_step("parse", step_result, log_file)
             else:
                 self.parse_failed = True
                 error_msg = (status_data or {}).get(
@@ -779,12 +825,12 @@ class CaliperPostprocessOrchestrator:
                     logger.error("Full traceback:\n%s", traceback_msg)
                 self._add_step(
                     "parse",
-                    {
-                        "status": "failure",
-                        "detail": error_msg,
-                        "exit_code": result.returncode,
-                        "completed_at": time.time(),
-                    },
+                    ParseStepResult(
+                        status=StepStatus.FAILED,
+                        completed_at=time.time(),
+                        detail=error_msg,
+                        exit_code=result.returncode,
+                    ),
                     log_file,
                 )
 
@@ -793,12 +839,11 @@ class CaliperPostprocessOrchestrator:
             logger.exception("Parse step execution failed")
             self._add_step(
                 "parse",
-                {
-                    "status": "failure",
-                    "detail": str(e),
-                    "traceback": traceback.format_exc(),
-                    "completed_at": time.time(),
-                },
+                ParseStepResult(
+                    status=StepStatus.FAILED,
+                    completed_at=time.time(),
+                    detail=f"{str(e)}\n{traceback.format_exc()}",
+                ),
                 None,  # No log file if we couldn't even start
             )
 
@@ -861,14 +906,14 @@ class CaliperPostprocessOrchestrator:
                 self.visualize_failed = False
                 self._add_step(
                     "visualize",
-                    {
-                        "status": "success",
-                        "plugin_module": status_data.get("plugin_module", "unknown"),
-                        "output_files": relative_paths,
-                        "output_dir": relative_output_dir,
-                        "generated_files": status_data.get("generated_files", len(relative_paths)),
-                        "completed_at": time.time(),
-                    },
+                    VisualizeStepResult(
+                        status=StepStatus.SUCCESS,
+                        completed_at=time.time(),
+                        plugin_module=status_data.get("plugin_module", "unknown"),
+                        output_files=relative_paths,
+                        output_dir=relative_output_dir,
+                        generated_files=status_data.get("generated_files", len(relative_paths)),
+                    ),
                     log_file,
                 )
             else:
@@ -882,12 +927,12 @@ class CaliperPostprocessOrchestrator:
                     logger.error("Full traceback:\n%s", traceback_msg)
                 self._add_step(
                     "visualize",
-                    {
-                        "status": "failure",
-                        "detail": error_msg,
-                        "exit_code": result.returncode,
-                        "completed_at": time.time(),
-                    },
+                    VisualizeStepResult(
+                        status=StepStatus.FAILED,
+                        completed_at=time.time(),
+                        detail=error_msg,
+                        exit_code=result.returncode,
+                    ),
                     log_file,
                 )
 
@@ -896,12 +941,11 @@ class CaliperPostprocessOrchestrator:
             logger.exception("Visualize step execution failed")
             self._add_step(
                 "visualize",
-                {
-                    "status": "failure",
-                    "detail": str(e),
-                    "traceback": traceback.format_exc(),
-                    "completed_at": time.time(),
-                },
+                VisualizeStepResult(
+                    status=StepStatus.FAILED,
+                    completed_at=time.time(),
+                    detail=f"{str(e)}\n{traceback.format_exc()}",
+                ),
                 None,  # No log file if we couldn't even start
             )
 
@@ -932,11 +976,11 @@ class CaliperPostprocessOrchestrator:
             ]:
                 self._add_step(
                     step_name,
-                    {
-                        "status": "failed",
-                        "error": f"Setup failed: {e}",
-                        "completed_at": completion_time,
-                    },
+                    BaseStepResult(
+                        status=StepStatus.FAILED,
+                        completed_at=completion_time,
+                        reason=f"Setup failed: {e}",
+                    ),
                 )
             self.artifacts_to_kpis_failed = True
             self.ai_data_failed = True
@@ -972,11 +1016,11 @@ class CaliperPostprocessOrchestrator:
         if not self.config.kpi.artifacts_to_kpis.enabled:
             self._add_step(
                 "artifacts_to_kpis",
-                {
-                    "status": "disabled",
-                    "reason": "kpi.artifacts_to_kpis disabled",
-                    "completed_at": time.time(),
-                },
+                KpiGenerateStepResult(
+                    status=StepStatus.DISABLED,
+                    completed_at=time.time(),
+                    reason="kpi.artifacts_to_kpis disabled",
+                ),
             )
             return
 
@@ -988,7 +1032,7 @@ class CaliperPostprocessOrchestrator:
             self.manifest_path,
             self.step_logs_dir,
         )
-        log_file = result.pop("log_file", None)
+        log_file = result.log_file
         self._add_step("artifacts_to_kpis", result, log_file)
         self._check_step_result_and_set_failure("artifacts_to_kpis", result)
 
@@ -1019,14 +1063,18 @@ class CaliperPostprocessOrchestrator:
             step_logs_dir=self.step_logs_dir,
         )
 
-        step_result = {
-            "status": "success" if status_data.get("success") else "failed",
+        # Create a dict with all necessary fields since we need dynamic fields for MLflow
+        step_result_dict = {
+            "status": StepStatus.SUCCESS if status_data.get("success") else StepStatus.FAILED,
             "completed_at": time.time(),
         }
         if status_data.get("success"):
-            step_result["tests_processed"] = status_data.get("tests_processed", 0)
-            step_result["total_tests"] = status_data.get("total_tests", 0)
-        self._add_step("kpis_to_mlflow", step_result, log_file)
+            step_result_dict["tests_processed"] = status_data.get("tests_processed", 0)
+            step_result_dict["total_tests"] = status_data.get("total_tests", 0)
+
+        # Convert enum to string for proper serialization
+        step_result_dict["status"] = step_result_dict["status"].value
+        self._add_step("kpis_to_mlflow", step_result_dict, log_file)
 
         if result.returncode != 0 or not status_data.get("success"):
             error = status_data.get("error", f"exit code {result.returncode}")
@@ -1037,11 +1085,11 @@ class CaliperPostprocessOrchestrator:
         if not self.config.kpi.kpis_to_csv.enabled:
             self._add_step(
                 "kpis_to_csv",
-                {
-                    "status": "disabled",
-                    "reason": "kpi.kpis_to_csv disabled",
-                    "completed_at": time.time(),
-                },
+                CsvExportStepResult(
+                    status=StepStatus.DISABLED,
+                    completed_at=time.time(),
+                    reason="kpi.kpis_to_csv disabled",
+                ),
             )
             return
 
@@ -1054,9 +1102,9 @@ class CaliperPostprocessOrchestrator:
             self.manifest_path,
             self.step_logs_dir,
         )
-        log_file = result.pop("log_file", None)
+        log_file = result.log_file
         self._add_step("kpis_to_csv", result, log_file)
-        if result.get("status") == "failed":
+        if result.status == StepStatus.FAILED:
             # CSV export failure doesn't affect overall status - it's supplementary
             logger.warning("KPI CSV export failed but continuing execution")
 
@@ -1065,11 +1113,11 @@ class CaliperPostprocessOrchestrator:
         if not self.config.kpi.artifacts_to_ai_data.enabled:
             self._add_step(
                 "artifacts_to_ai_data",
-                {
-                    "status": "disabled",
-                    "reason": "kpi.artifacts_to_ai_data disabled",
-                    "completed_at": time.time(),
-                },
+                AiDataStepResult(
+                    status=StepStatus.DISABLED,
+                    completed_at=time.time(),
+                    reason="kpi.artifacts_to_ai_data disabled",
+                ),
             )
             return
 
@@ -1082,18 +1130,22 @@ class CaliperPostprocessOrchestrator:
                 self.manifest_path,
                 self.step_logs_dir,
             )
-            log_file = result.pop("log_file", None)
+            log_file = result.log_file
             self._add_step("artifacts_to_ai_data", result, log_file)
 
             logger.info("AI eval export result:")
-            logger.info(json.dumps(result, indent=2, default=str))
+            logger.info(json.dumps(result.to_dict(), indent=2, default=str))
 
             # Check if the result indicates failure or warning
             self._check_step_result_and_set_failure("artifacts_to_ai_data", result)
 
         except Exception as e:
             logger.exception("AI eval export failed")
-            step_result = {"status": "failed", "error": str(e)}
+            step_result = AiDataStepResult(
+                status=StepStatus.FAILED,
+                completed_at=time.time(),
+                error=str(e),
+            )
             self._add_step("artifacts_to_ai_data", step_result, None)
             self._check_step_result_and_set_failure("artifacts_to_ai_data", step_result)
 
@@ -1102,11 +1154,11 @@ class CaliperPostprocessOrchestrator:
         if not self.config.s3.import_.enabled:
             self._add_step(
                 "s3_import",
-                {
-                    "status": "disabled",
-                    "reason": "s3_import disabled",
-                    "completed_at": time.time(),
-                },
+                S3StepResult(
+                    status=StepStatus.DISABLED,
+                    completed_at=time.time(),
+                    reason="s3_import disabled",
+                ),
             )
             return
 
@@ -1133,35 +1185,36 @@ class CaliperPostprocessOrchestrator:
             if status_data.get("success"):
                 # Get the actual import directory (where files were downloaded)
                 import_dir = self.output_dir / self.config.s3.import_.output_dir
-                step_result = {
-                    "status": "success",
-                    "output_dir": _make_path_relative_to_base(import_dir, env.ARTIFACT_DIR),
-                    "file_count": status_data.get("file_count", 0),
-                    "completed_at": time.time(),
-                }
-                if status_data.get("warning"):
-                    step_result["warning"] = status_data["warning"]
-                if status_data.get("imported_path"):
-                    step_result["imported_path"] = status_data["imported_path"]
+                step_result = S3StepResult(
+                    status=StepStatus.SUCCESS,
+                    completed_at=time.time(),
+                    output_dir=_make_path_relative_to_base(import_dir, env.ARTIFACT_DIR),
+                    file_count=status_data.get("file_count", 0),
+                    reason=status_data.get("warning"),
+                    imported_path=status_data.get("imported_path"),
+                )
             else:
-                step_result = {
-                    "status": "failed",
-                    "error": status_data.get("error", "Unknown error"),
-                    "completed_at": time.time(),
-                }
-                if status_data.get("imported_path"):
-                    step_result["imported_path"] = status_data["imported_path"]
+                step_result = S3StepResult(
+                    status=StepStatus.FAILED,
+                    completed_at=time.time(),
+                    error=status_data.get("error", "Unknown error"),
+                    imported_path=status_data.get("imported_path"),
+                )
 
             self._add_step("s3_import", step_result, log_file)
 
             logger.info("S3 import result:")
-            logger.info(json.dumps(step_result, indent=2, default=str))
+            logger.info(json.dumps(step_result.to_dict(), indent=2, default=str))
 
             self._check_step_result_and_set_failure("s3_import", step_result)
 
         except Exception as e:
             logger.exception("S3 import failed")
-            step_result = {"status": "failed", "error": str(e), "completed_at": time.time()}
+            step_result = S3StepResult(
+                status=StepStatus.FAILED,
+                completed_at=time.time(),
+                error=str(e),
+            )
             self._add_step("s3_import", step_result, None)
             self._check_step_result_and_set_failure("s3_import", step_result)
 
@@ -1170,11 +1223,11 @@ class CaliperPostprocessOrchestrator:
         if not self.config.analyze.enabled:
             self._add_step(
                 "analyse_kpis",
-                {
-                    "status": "disabled",
-                    "reason": "analyze disabled",
-                    "completed_at": time.time(),
-                },
+                KpiAnalysisStepResult(
+                    status=StepStatus.DISABLED,
+                    completed_at=time.time(),
+                    reason="analyze disabled",
+                ),
             )
             return
 
@@ -1189,16 +1242,16 @@ class CaliperPostprocessOrchestrator:
         if not current_kpis_path.exists():
             self._add_step(
                 "analyse_kpis",
-                {
-                    "status": "failed",
-                    "error": f"Current KPI file not found: {current_kpis_path}",
-                    "completed_at": time.time(),
-                },
+                KpiAnalysisStepResult(
+                    status=StepStatus.FAILED,
+                    completed_at=time.time(),
+                    error=f"Current KPI file not found: {current_kpis_path}",
+                ),
             )
             self.analyze_failed = True
             return
 
-        result = run_analyse_kpis(
+        status = run_analyse_kpis(
             postprocess_config=self.config,
             output_dir=self.output_dir,
             plugin_module=plugin_module,
@@ -1208,21 +1261,33 @@ class CaliperPostprocessOrchestrator:
             step_logs_dir=self.step_logs_dir,
         )
 
-        log_file = result.pop("log_file", None)
-        self._add_step("analyse_kpis", result, log_file)
+        # Convert typed status to KpiAnalysisStepResult
+        result = KpiAnalysisStepResult(
+            status=status.status,
+            completed_at=status.completed_at,
+            success=status.success,
+            exit_code=status.exit_code,
+            output_file=status.output_file,
+            error=status.error,
+            message=status.message,
+            regressions_detected=status.regressions_detected,
+            regression_count=status.regression_count,
+            total_kpis=status.total_kpis,
+            log_file=status.log_file,
+        )
+
+        self._add_step("analyse_kpis", result, result.log_file)
 
         logger.info("KPI analysis result:")
-        logger.info(json.dumps(result, indent=2, default=str))
+        logger.info(json.dumps(result.to_dict(), indent=2, default=str))
 
-        if result.get("regressions_detected"):
+        # Handle regression policy - this is now handled in run_analyse_kpis
+        if status.regressions_detected:
             logger.info("Regression detected!")
             if self.config.analyze.fail_on_regression:
-                result["status"] = "failed"
-                logger.info("fail_on_regression is set, setting the status to 'failure'")
-                result["error"] = "regression detected"
+                logger.info("fail_on_regression is set")
             else:
-                result["status"] = "success"
-                logger.info("fail_on_regression is not set, setting the status to 'success'")
+                logger.info("fail_on_regression is not set")
 
         if not self.config.analyze.fail_on_regression:
             logger.info("analyse_kpis warning ignored: fail_on_regression is not set")
@@ -1234,11 +1299,11 @@ class CaliperPostprocessOrchestrator:
         if not self.config.s3.export.enabled:
             self._add_step(
                 "s3_export",
-                {
-                    "status": "disabled",
-                    "reason": "s3_export disabled",
-                    "completed_at": time.time(),
-                },
+                S3StepResult(
+                    status=StepStatus.DISABLED,
+                    completed_at=time.time(),
+                    reason="s3_export disabled",
+                ),
             )
             return
 
@@ -1316,29 +1381,29 @@ class CaliperPostprocessOrchestrator:
 
             # Convert to expected format
             if status_data.get("success"):
-                step_result = {
-                    "status": "success",
-                    "exported_path": status_data.get("exported_path", ""),
-                    "uploaded_files": status_data.get("uploaded_files", 0),
-                    "total_files": status_data.get("total_files", 0),
-                    "completed_at": time.time(),
-                }
+                step_result = S3StepResult(
+                    status=StepStatus.SUCCESS,
+                    completed_at=time.time(),
+                    exported_path=status_data.get("exported_path", ""),
+                    uploaded_files=status_data.get("uploaded_files", 0),
+                    total_files=status_data.get("total_files", 0),
+                )
 
                 # Format status for better readability
-                uploaded_files = step_result.get("uploaded_files", 0)
-                total_files = step_result.get("total_files", 0)
-                s3_path = step_result.get("exported_path", "")
+                uploaded_files = step_result.uploaded_files or 0
+                total_files = step_result.total_files or 0
+                s3_path = step_result.exported_path or ""
 
                 logger.info(
                     f"S3 export completed successfully: "
                     f"{uploaded_files}/{total_files} files uploaded to {s3_path}"
                 )
             else:
-                step_result = {
-                    "status": "failed",
-                    "error": status_data.get("error", "Unknown error"),
-                    "completed_at": time.time(),
-                }
+                step_result = S3StepResult(
+                    status=StepStatus.FAILED,
+                    completed_at=time.time(),
+                    error=status_data.get("error", "Unknown error"),
+                )
                 self._check_step_result_and_set_failure("s3_export", step_result)
 
             self._add_step("s3_export", step_result, log_file)
@@ -1354,12 +1419,12 @@ class CaliperPostprocessOrchestrator:
                 logger.error(error_msg)
                 logger.exception("Full traceback:")
 
-            step_result = {
-                "status": "failed",
-                "error": error_msg,
-                "exception_type": type(e).__name__,
-                "completed_at": time.time(),
-            }
+            step_result = S3StepResult(
+                status=StepStatus.FAILED,
+                completed_at=time.time(),
+                error=error_msg,
+                detail=type(e).__name__,
+            )
             self._add_step("s3_export", step_result, None)
             self._check_step_result_and_set_failure("s3_export", step_result)
 
@@ -1412,13 +1477,19 @@ class CaliperPostprocessOrchestrator:
     def _save_postprocess_status_yaml(self, result: dict[str, Any]) -> None:
         """Save postprocess status as YAML for GitHub notifications."""
         try:
-            import yaml
+            from projects.caliper.public import (
+                PostprocessStatus,
+                save_postprocess_status_yaml,
+            )
 
             self.output_dir.mkdir(parents=True, exist_ok=True)
             status_file = self.output_dir / "postprocess_status.yaml"
 
-            with open(status_file, "w", encoding="utf-8") as f:
-                yaml.dump(result, f, default_flow_style=False, sort_keys=True)
+            # Convert to typed status object
+            status = PostprocessStatus.from_orchestration_result(result)
+
+            # Save using typed YAML function
+            save_postprocess_status_yaml(status, status_file)
 
             logger.info(f"Saved postprocess status to {status_file}")
 

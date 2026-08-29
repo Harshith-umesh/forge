@@ -27,6 +27,8 @@ from projects.caliper.orchestration.cli_builder import (
 from projects.caliper.orchestration.postprocess_config import (
     CaliperOrchestrationPostprocessConfig,
 )
+from projects.caliper.public import KpiAnalysisStatus, StatusLevel
+from projects.caliper.public.status_models import create_disabled_status
 from projects.core.library import env
 
 logger = logging.getLogger(__name__)
@@ -372,16 +374,14 @@ def run_analyse_kpis(
     manifest_path: Path | None,
     current_kpis_file: Path,
     step_logs_dir: Path,
-) -> dict[str, Any]:
-    """Analyze KPIs using fork/exec subprocess execution."""
+) -> KpiAnalysisStatus:
+    """Analyze KPIs using subprocess execution."""
 
     if not postprocess_config.analyze.enabled:
-        return {
-            "status": "disabled",
-            "reason": "analyze disabled",
-            "completed_at": time.time(),
-            "log_file": None,
-        }
+        return create_disabled_status(
+            KpiAnalysisStatus,
+            reason="analyze disabled",
+        )
 
     try:
         # Prepare paths
@@ -394,7 +394,7 @@ def run_analyse_kpis(
             historical_kpis_dir = output_dir / historical_kpis_dir
 
         # Create automatic status file path
-        status_file = _generate_automatic_status_file_path(output_dir, "analyse_kpis")
+        status_file = _generate_automatic_status_file_path(output_dir, "kpi_analysis")
 
         # Build CLI command
         command = build_analyse_kpis_command(
@@ -415,47 +415,67 @@ def run_analyse_kpis(
             step_logs_dir=step_logs_dir,
         )
 
-        command_succeeded = result.returncode == 0 and status_data.get("success")
+        # Convert dict status to KpiAnalysisStatus object
+        if status_data:
+            # Convert relative paths back to absolute for proper path handling
+            if status_data.get("output_file"):
+                status_data["output_file"] = str(Path(status_data["output_file"]).resolve())
 
-        summary_fields = [
-            "success",
-            "regressions_detected",
-            "baseline_source_count",
-            "tested",
-            "overall",
-        ]
-        analysis_summary = {k: v for k, v in status_data.items() if k in summary_fields}
+            # Ensure required fields are present with defaults
+            status_data.setdefault("completed_at", time.time())
 
-        # Determine final status based on command success and regression policy
-        if command_succeeded:
-            final_status = "success"
-            error_message = None
+            # Map status field if needed
+            if "status" not in status_data:
+                if status_data.get("success"):
+                    status_data["status"] = StatusLevel.SUCCESS.value
+                else:
+                    status_data["status"] = StatusLevel.FAILED.value
+            elif isinstance(status_data["status"], str):
+                # Convert string status back to StatusLevel enum (from YAML deserialization)
+                status_data["status"] = StatusLevel(status_data["status"])
+
+            # Create status object with filtered fields
+            filtered_data = {
+                k: v for k, v in status_data.items() if k in KpiAnalysisStatus.__dataclass_fields__
+            }
+            # Explicitly add log_file from _execute_caliper_command result
+            if "log_file" in KpiAnalysisStatus.__dataclass_fields__:
+                filtered_data["log_file"] = str(log_file) if log_file else None
+
+            status = KpiAnalysisStatus(**filtered_data)
         else:
-            # Command failed - check if we should treat as failure or warning
-            fail_on_regression = postprocess_config.analyze.fail_on_regression
-            final_status = "failed" if fail_on_regression else "warning"
-            error_message = status_data.get("error") or status_data.get(
-                "message", "Analysis failed"
+            from projects.caliper.public.status_models import create_failure_status
+
+            return create_failure_status(
+                KpiAnalysisStatus,
+                error="No status data returned from CLI command",
+                exit_code=result.returncode,
             )
 
-        # Build result data with consistent field usage
-        result_data = {
-            "completed_at": time.time(),
-            "log_file": log_file,
-            "output_file": _make_path_relative_to_base(output_file, env.ARTIFACT_DIR),
-            "status": final_status,
-            **analysis_summary,
-        }
+        # Handle fail_on_regression policy
+        if (
+            status.status == StatusLevel.REGRESSION_DETECTED
+            and not postprocess_config.analyze.fail_on_regression
+        ):
+            # Convert regression to warning if fail_on_regression is False
+            status.status = StatusLevel.WARNING
+            status.success = True
 
-        # Add error/message field if there's an issue
-        if error_message:
-            result_data["error"] = error_message
+        # Make output file path relative to artifacts directory
+        if status.output_file:
+            status.output_file = str(Path(status.output_file).relative_to(env.ARTIFACT_DIR))
 
-        return result_data
+        return status
 
     except Exception as e:
+        from projects.caliper.public.status_models import create_failure_status
+
         logger.exception("KPI analysis failed in run_analyse_kpis")
-        return {"status": "failed", "error": str(e), "completed_at": time.time(), "log_file": None}
+        return create_failure_status(
+            KpiAnalysisStatus,
+            error=str(e),
+            exit_code=1,
+        )
 
 
 def run_parse_step(

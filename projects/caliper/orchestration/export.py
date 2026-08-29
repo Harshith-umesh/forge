@@ -459,7 +459,7 @@ def build_mlflow_run_url(
     assert_tracking_uri_has_no_userinfo(tracking_uri)
 
     qs = f"?workspace={quote(workspace, safe='')}" if workspace else ""
-    return f"{tracking_uri}/#/experiments/{experiment_id}/runs/{run_id}/artifacts{qs}"
+    return f"{tracking_uri}{qs}#/experiments/{experiment_id}/runs/{run_id}/artifacts"
 
 
 def _discover_precreated_mlflow_run_id(from_path: Path) -> str | None:

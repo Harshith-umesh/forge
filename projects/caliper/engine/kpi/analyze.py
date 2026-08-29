@@ -13,6 +13,11 @@ from typing import Any
 from projects.caliper.engine.kpi.format import (
     flatten_hierarchical_kpis as _extract_kpi_records_from_hierarchical,
 )
+from projects.caliper.public import KpiAnalysisStatus, StatusLevel
+from projects.caliper.public.status_models import (
+    create_failure_status,
+    create_success_status,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -664,7 +669,7 @@ def run_kpi_analysis(
     historical_data_dir: Path,
     output_file: Path,
     plugin_module: str,
-) -> dict[str, Any]:
+) -> tuple[KpiAnalysisStatus, dict[str, Any] | None]:
     """Run KPI regression analysis and generate a JSON report.
 
     Args:
@@ -674,7 +679,7 @@ def run_kpi_analysis(
         plugin_module: Plugin module name (for loading analysis config)
 
     Returns:
-        Status dictionary with success/error information and exit_code for CLI compatibility
+        Tuple of (KpiAnalysisStatus, analysis_report)
     """
     try:
         logger.info("Running KPI regression analysis")
@@ -685,35 +690,29 @@ def run_kpi_analysis(
 
         if not current_kpi_file.exists():
             logger.error("Current KPI file not found: %s", current_kpi_file)
-            return {
-                "status": "failed",
-                "success": False,
-                "error": f"Current KPI file not found: {current_kpi_file}",
-                "exit_code": 1,
-                "completed_at": time.time(),
-            }, None
+            return create_failure_status(
+                KpiAnalysisStatus,
+                error=f"Current KPI file not found: {current_kpi_file}",
+                exit_code=1,
+            ), None
 
         if not historical_data_dir.exists():
             logger.error("Historical data directory not found: %s", historical_data_dir)
-            return {
-                "status": "failed",
-                "success": False,
-                "error": f"Historical data directory not found: {historical_data_dir}",
-                "exit_code": 1,
-                "completed_at": time.time(),
-            }, None
+            return create_failure_status(
+                KpiAnalysisStatus,
+                error=f"Historical data directory not found: {historical_data_dir}",
+                exit_code=1,
+            ), None
 
         try:
             config = _load_analysis_config(plugin_module)
         except ValueError as exc:
             logger.error("Failed to load analysis config: %s", exc)
-            return {
-                "status": "failed",
-                "success": False,
-                "error": f"Analysis configuration error: {exc}",
-                "exit_code": 1,
-                "completed_at": time.time(),
-            }, None
+            return create_failure_status(
+                KpiAnalysisStatus,
+                error=f"Analysis configuration error: {exc}",
+                exit_code=1,
+            ), None
 
         logger.info(
             "  config: comparison_labels=%s, ignored_labels=%s",
@@ -727,37 +726,35 @@ def run_kpi_analysis(
 
         if current_data.get("schema_version") != "2":
             logger.error("Current KPI file must be schema_version 2 (hierarchical)")
-            return {
-                "status": "failed",
-                "success": False,
-                "error": "Current KPI file must be schema_version 2 (hierarchical)",
-                "exit_code": 1,
-                "completed_at": time.time(),
-            }, None
+            return create_failure_status(
+                KpiAnalysisStatus,
+                error="Current KPI file must be schema_version 2 (hierarchical)",
+                exit_code=1,
+            ), None
 
         current_records = _extract_kpi_records_from_hierarchical(current_data)
         if not current_records:
             logger.warning("No KPI records found in current file")
-            return {
-                "status": "failed",
-                "success": False,
-                "error": "No KPI records found in current file",
-                "exit_code": 1,
-                "completed_at": time.time(),
-            }, None
+            return create_failure_status(
+                KpiAnalysisStatus,
+                error="No KPI records found in current file",
+                exit_code=1,
+            ), None
 
         # Load baseline KPIs
         baseline_kpi_data = find_baseline_kpis(historical_data_dir)
         if not baseline_kpi_data:
             _write_no_baseline_report(output_file, current_kpi_file, plugin_module)
-            return {
-                "status": "warning",
-                "success": True,
-                "message": "no historical KPI found for regression testing",
-                "output_file": str(output_file),
-                "exit_code": 2,
-                "completed_at": time.time(),
-            }, None
+            return KpiAnalysisStatus(
+                status=StatusLevel.WARNING,
+                success=True,
+                message="no historical KPI found for regression testing",
+                output_file=str(output_file),
+                exit_code=2,
+                completed_at=time.time(),
+                total_kpis=len(current_records),
+                baseline_files_count=0,
+            ), None
 
         # Build label universe from current data for baseline filtering
         current_keys: dict[str, set[str]] = {}
@@ -890,42 +887,48 @@ def run_kpi_analysis(
         )
 
         # Return status based on the overall verdict from the report
+        baseline_files_count = len(baseline_kpi_data)
+        total_kpis = len(current_records)
+
         if overall_verdict == OverallStatus.REGRESSION_DETECTED:
-            return {
-                "status": "regression_detected",
-                "success": False,
-                "regressions_detected": True,  # For orchestration compatibility
-                "output_file": str(output_file),
-                "exit_code": 3,
-                "completed_at": time.time(),
-            }, report
+            return KpiAnalysisStatus(
+                status=StatusLevel.REGRESSION_DETECTED,
+                success=False,
+                regressions_detected=True,
+                output_file=str(output_file),
+                exit_code=3,
+                completed_at=time.time(),
+                regression_count=regressions,
+                total_kpis=total_kpis,
+                baseline_files_count=baseline_files_count,
+            ), report
         elif overall_verdict == OverallStatus.NO_TEST_PERFORMED:
-            return {
-                "status": "warning",
-                "success": True,
-                "message": "all KPIs were skipped, no regression test performed",
-                "output_file": str(output_file),
-                "exit_code": 2,
-                "completed_at": time.time(),
-            }, report
+            return KpiAnalysisStatus(
+                status=StatusLevel.WARNING,
+                success=True,
+                message="all KPIs were skipped, no regression test performed",
+                output_file=str(output_file),
+                exit_code=2,
+                completed_at=time.time(),
+                total_kpis=total_kpis,
+                baseline_files_count=baseline_files_count,
+            ), report
         else:  # OverallStatus.PASS
-            return {
-                "status": "success",
-                "success": True,
-                "output_file": str(output_file),
-                "exit_code": 0,
-                "completed_at": time.time(),
-            }, report
+            return create_success_status(
+                KpiAnalysisStatus,
+                output_file=str(output_file),
+                total_kpis=total_kpis,
+                regression_count=0,
+                baseline_files_count=baseline_files_count,
+            ), report
 
     except Exception as e:
         logger.exception("KPI analysis failed")
-        return {
-            "status": "failed",
-            "success": False,
-            "error": f"KPI analysis failed: {e}",
-            "exit_code": 1,
-            "completed_at": time.time(),
-        }, None
+        return create_failure_status(
+            KpiAnalysisStatus,
+            error=f"KPI analysis failed: {e}",
+            exit_code=1,
+        ), None
 
 
 def _write_no_baseline_report(
@@ -989,6 +992,22 @@ def find_baseline_kpis(historical_dir: Path) -> dict[Path, dict[str, Any]]:
             baseline_kpis[kpi_file] = kpi_data
             logger.debug("Loaded baseline: %s", kpi_file)
 
+        except json.JSONDecodeError as e:
+            # Try to read first line to check if it's v1 format (JSONL)
+            try:
+                with open(kpi_file) as f:
+                    first_line = f.readline().strip()
+                    if first_line:
+                        first_line_data = json.loads(first_line)
+                        if first_line_data.get("schema_version") == "1":
+                            logger.info(
+                                "Skipping %s: v1 KPI format (JSONL) is not supported, use v2 hierarchical format",
+                                kpi_file,
+                            )
+                            continue
+            except Exception:
+                pass  # If first line check fails, fall back to original error
+            logger.error("Failed to load %s: %s", kpi_file, e)
         except Exception as e:
             logger.error("Failed to load %s: %s", kpi_file, e)
 
@@ -1029,7 +1048,7 @@ def analyze_kpis(
     historical_kpis_dir: Path,
     output_file: Path,
     plugin_module: str,
-):
+) -> tuple[KpiAnalysisStatus, dict[str, Any]]:
     """Analyze KPIs with automatic v1/v2 format conversion.
 
     This function handles:
@@ -1062,10 +1081,8 @@ def analyze_kpis(
 
     except Exception as e:
         logger.exception("KPI analysis with format conversion failed")
-        return {
-            "status": "failed",
-            "success": False,
-            "error": str(e),
-            "exit_code": 1,
-            "completed_at": time.time(),
-        }, {}
+        return create_failure_status(
+            KpiAnalysisStatus,
+            error=str(e),
+            exit_code=1,
+        ), {}

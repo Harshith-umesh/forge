@@ -1002,23 +1002,41 @@ def analyse_kpis_cmd(
     )
 
     # Display result
-    if status_data.get("success"):
+    if status_data.success:
         click.echo("✅ KPI analysis completed with success")
     else:
-        error_msg = status_data.get("status", "Unknown error")
+        error_msg = status_data.error or f"Status: {status_data.status}"
         click.echo(f"❌ KPI analysis failed: {error_msg}", err=True)
 
     # Write status file if requested
     if status_file:
         try:
+            # Convert status object to dict for YAML serialization
+            from dataclasses import asdict
+            from enum import Enum
+
+            def enum_to_value(obj):
+                """Convert enums to their string values recursively."""
+                if isinstance(obj, Enum):
+                    return obj.value
+                elif isinstance(obj, dict):
+                    return {k: enum_to_value(v) for k, v in obj.items()}
+                elif isinstance(obj, (list, tuple)):
+                    return [enum_to_value(item) for item in obj]
+                return obj
+
+            status_dict = asdict(status_data)
+            # Convert enums to their string values
+            status_dict = enum_to_value(status_dict)
+
             with open(status_file, "w", encoding="utf-8") as f:
-                yaml.dump(status_data, f, default_flow_style=False)
+                yaml.dump(status_dict, f, default_flow_style=False)
         except Exception as status_err:
             click.echo(f"Failed to write status file {status_file}: {status_err}", err=True)
             sys.exit(4)
 
     # Use exit code directly from analysis result
-    exit_code = status_data.get("exit_code", 1)
+    exit_code = getattr(status_data, "exit_code", 1)
     sys.exit(exit_code)
 
 

@@ -185,3 +185,19 @@ class PostProcessingPlugin(ABC):
             ]
         """
         return []
+
+    def kpi_catalog(self) -> list[dict[str, object]]:
+        """Return catalog of available KPIs for hierarchical formatting.
+
+        Default implementation returns an empty catalog. Plugins should override
+        this method to provide KPI metadata for hierarchical format generation.
+
+        Returns:
+            List of KPI metadata dictionaries with keys like:
+            - kpi_id: str - Unique identifier for the KPI
+            - name: str - Display name
+            - unit: str - Measurement unit
+            - higher_is_better: bool - Whether higher values are better
+            - is_2d: bool - Whether this is a 2D metric
+        """
+        return []
