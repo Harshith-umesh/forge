@@ -6,6 +6,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 from projects.caliper.engine.kpi import (
+    KpiCatalogEntry,
+    KpiRecord,
+    SourceInfo,
     build_catalog_from_functions,
     get_kpi_functions,
     is_2d_kpi,
@@ -58,15 +61,34 @@ class GuideLLMKpiHandler:
     @staticmethod
     def get_catalog() -> list[dict[str, Any]]:
         """
-        Return the KPI catalog for GuideLLM metrics.
+        Return the KPI catalog for GuideLLM metrics using dataclasses.
 
         Returns:
-            List of KPI definitions
+            List of KPI catalog entries as dictionaries
         """
         # Import the module containing the KPI functions
         from projects.guidellm.postprocess.guidellm.parsing import kpis as guidellm_kpis
 
-        return build_catalog_from_functions(guidellm_kpis)
+        raw_catalog = build_catalog_from_functions(guidellm_kpis)
+
+        # Convert to structured dataclass format
+        catalog_entries = []
+        for entry in raw_catalog:
+            catalog_entry = KpiCatalogEntry(
+                kpi_id=entry.get("kpi_id", ""),
+                name=entry.get("name", ""),
+                unit=entry.get("unit", ""),
+                higher_is_better=entry.get("higher_is_better", True),
+                is_2d=entry.get("is_2d", False),
+                help=entry.get("help", ""),
+                x_unit=entry.get("x_unit", ""),
+                x_help=entry.get("x_help", ""),
+                y_unit=entry.get("y_unit", ""),
+                y_help=entry.get("y_help", ""),
+            )
+            catalog_entries.append(catalog_entry.to_dict())
+
+        return catalog_entries
 
     @staticmethod
     def compute_kpis(
@@ -157,23 +179,24 @@ class GuideLLMKpiHandler:
                     **test_condition_labels,
                 }
 
-                kpi_record = {
-                    "schema_version": "1",
-                    "kpi_id": kpi_id,
-                    "value": value,
-                    "unit": kpi_func._kpi_unit,
-                    "run_id": r.test_base_path,
-                    "timestamp": ts,
-                    "labels": all_labels,
-                    "metadata": metadata_fields,
-                    "source": {
-                        "test_base_path": r.test_base_path,
-                        "plugin_module": model.plugin_module,
-                    },
-                    "is_2d": False,
-                }
+                # Create structured KPI record using core dataclass
+                kpi_record = KpiRecord(
+                    schema_version="1",
+                    kpi_id=kpi_id,
+                    value=value,  # Core enforces int|float only
+                    unit=kpi_func._kpi_unit,
+                    run_id=r.test_base_path,
+                    timestamp=ts,
+                    labels=all_labels,
+                    metadata=metadata_fields,
+                    is_2d=False,  # Scalar KPI
+                    source=SourceInfo(
+                        test_base_path=r.test_base_path,
+                        plugin_module=model.plugin_module,
+                    ),
+                )
 
-                out.append(kpi_record)
+                out.append(kpi_record.to_dict())
 
         # Generate 2D curve KPIs for records that have performance curves
         for r in valid_records:
@@ -203,26 +226,27 @@ class GuideLLMKpiHandler:
                 if not value or value is None:
                     continue
 
-                kpi_record = {
-                    "schema_version": "1",
-                    "kpi_id": kpi_id,
-                    "value": value,
-                    "unit": kpi_func._kpi_unit,
-                    "run_id": r.test_base_path,
-                    "timestamp": ts,
-                    "labels": kpi_labels,
-                    "metadata": metadata_fields,
-                    "source": {
-                        "test_base_path": r.test_base_path,
-                        "plugin_module": model.plugin_module,
-                    },
-                    "is_2d": True,
-                    "x_unit": kpi_func._kpi_x_unit,
-                    "x_help": kpi_func._kpi_x_help,
-                    "y_unit": getattr(kpi_func, "_kpi_y_unit", None) or kpi_func._kpi_unit,
-                    "y_help": getattr(kpi_func, "_kpi_y_help", None) or kpi_func._kpi_help,
-                }
+                # Create structured 2D KPI record using core dataclass
+                kpi_record = KpiRecord(
+                    schema_version="1",
+                    kpi_id=kpi_id,
+                    value=value,
+                    unit=kpi_func._kpi_unit,
+                    run_id=r.test_base_path,
+                    timestamp=ts,
+                    labels=kpi_labels,
+                    metadata=metadata_fields,
+                    is_2d=True,  # 2D KPI
+                    source=SourceInfo(
+                        test_base_path=r.test_base_path,
+                        plugin_module=model.plugin_module,
+                    ),
+                    x_unit=kpi_func._kpi_x_unit,
+                    x_help=kpi_func._kpi_x_help,
+                    y_unit=getattr(kpi_func, "_kpi_y_unit", None) or kpi_func._kpi_unit,
+                    y_help=getattr(kpi_func, "_kpi_y_help", None) or kpi_func._kpi_help,
+                )
 
-                out.append(kpi_record)
+                out.append(kpi_record.to_dict())
 
         return out
