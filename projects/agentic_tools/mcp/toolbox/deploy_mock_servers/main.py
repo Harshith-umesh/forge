@@ -34,9 +34,11 @@ def run(
     image: str,
     name_prefix: str = "mock-server",
     tools_per_server: int = 10,
+    protocol_mode: str = "stateful",
     labels: dict[str, str] | None = None,
     node_selector: dict[str, str] | None = None,
     tolerations: list[dict[str, str]] | None = None,
+    resources: dict[str, Any] | None = None,
     rollout_timeout: str = "120s",
 ) -> int:
     """Deploy mock servers and wait for readiness."""
@@ -59,6 +61,7 @@ def generate_and_apply_manifests(args, ctx):
     """Generate YAML manifests for all servers and apply them."""
     merged_labels = dict(args.labels) if args.labels else {}
     merged_labels["forge.openshift.io/component"] = "mock-mcp"
+    merged_labels["forge.openshift.io/mcp-protocol"] = args.protocol_mode
 
     ctx.names = [f"{args.name_prefix}-{i}" for i in range(1, args.count + 1)]
 
@@ -69,9 +72,11 @@ def generate_and_apply_manifests(args, ctx):
             namespace=args.namespace,
             image=args.image,
             tools_per_server=args.tools_per_server,
+            protocol_mode=args.protocol_mode,
             labels=merged_labels,
             node_selector=args.node_selector,
             tolerations=args.tolerations,
+            resources=args.resources,
         )
         all_manifests.append(manifest)
 
@@ -225,34 +230,42 @@ def _generate_server_manifest(
     namespace: str,
     image: str,
     tools_per_server: int,
+    protocol_mode: str,
     labels: dict[str, str],
     node_selector: dict[str, str] | None = None,
     tolerations: list[dict[str, str]] | None = None,
+    resources: dict[str, Any] | None = None,
 ) -> str:
     """Generate a YAML manifest for a single mock server Deployment + Service."""
     label_set = {"app": name}
     label_set.update(labels)
 
-    pod_spec: dict[str, Any] = {
-        "containers": [
+    container: dict[str, Any] = {
+        "name": "server",
+        "image": image,
+        "imagePullPolicy": "Always",
+        "args": ["--addr", ":8080"],
+        "env": [
+            {"name": "GOGC", "value": "off"},
+            {"name": "NUM_TOOLS", "value": str(tools_per_server)},
             {
-                "name": "server",
-                "image": image,
-                "imagePullPolicy": "Always",
-                "args": ["--addr", ":8080"],
-                "env": [
-                    {"name": "GOGC", "value": "off"},
-                    {"name": "NUM_TOOLS", "value": str(tools_per_server)},
-                ],
-                "ports": [{"containerPort": 8080, "name": "http"}],
-                "readinessProbe": {
-                    "tcpSocket": {"port": 8080},
-                    "initialDelaySeconds": 2,
-                    "periodSeconds": 5,
-                    "timeoutSeconds": 2,
-                },
-            }
+                "name": "STATELESS",
+                "value": "true" if protocol_mode == "stateless" else "false",
+            },
         ],
+        "ports": [{"containerPort": 8080, "name": "http"}],
+        "readinessProbe": {
+            "tcpSocket": {"port": 8080},
+            "initialDelaySeconds": 2,
+            "periodSeconds": 5,
+            "timeoutSeconds": 2,
+        },
+    }
+    if resources:
+        container["resources"] = resources
+
+    pod_spec: dict[str, Any] = {
+        "containers": [container],
     }
     if node_selector:
         pod_spec["nodeSelector"] = node_selector
