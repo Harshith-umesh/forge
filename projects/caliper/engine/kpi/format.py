@@ -46,6 +46,10 @@ def transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
         for k, v in kpi.get("labels", {}).items():
             run_label_values[run_id][k].add(str(v))
 
+    per_kpi_label_keys: dict[str, set[str]] = {}
+    for run_id, label_vals in run_label_values.items():
+        per_kpi_label_keys[run_id] = {k for k, vals in label_vals.items() if len(vals) > 1}
+
     for kpi in kpis:
         kpi_id = kpi.get("kpi_id")
         if kpi_id not in kpi_models:
@@ -55,11 +59,11 @@ def transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
 
         run_id = kpi.get("run_id", "unknown")
         test_data = tests_data[run_id]
+        varying_keys = per_kpi_label_keys.get(run_id, set())
 
-        if "labels" not in test_data:
-            test_data["labels"] = {}
-
-        test_data["labels"].update(kpi["labels"])
+        kpi_labels = kpi.get("labels", {})
+        test_labels = {k: v for k, v in kpi_labels.items() if k not in varying_keys}
+        test_data["labels"].update(test_labels)
 
         # Store test metadata from first KPI
         if not test_data["metadata"]:
@@ -83,6 +87,10 @@ def transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
 
         kpi_record: dict[str, Any] = kpi_model.copy()
         kpi_record["value"] = final_value
+
+        kpi_specific_labels = {k: kpi_labels[k] for k in varying_keys if k in kpi_labels}
+        if kpi_specific_labels:
+            kpi_record["labels"] = kpi_specific_labels
 
         for fmt_key in "x_format", "y_format", "format":
             kpi_record.pop(fmt_key, None)
