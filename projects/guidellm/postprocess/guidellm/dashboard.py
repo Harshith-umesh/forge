@@ -423,7 +423,7 @@ def export_dashboard_kpis_to_csv(
     labels_by_group: dict[tuple[str, str], dict[str, Any]] = {}
     for kpi in kpi_records:
         labels = kpi.get("labels", {})
-        key = (str(kpi.get("run_path", "")), str(labels.get("rate_index", "0")))
+        key = (str(kpi.get("run_path") or kpi.get("run_id", "")), str(labels.get("rate_index", "0")))
         column = kpi_to_column.get(kpi.get("kpi_id", ""))
         if column:
             groups.setdefault(key, {})[column] = kpi.get("value")

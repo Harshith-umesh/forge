@@ -86,6 +86,8 @@ def transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
             final_value = raw_value
 
         kpi_record: dict[str, Any] = kpi_model.copy()
+        if "kpi_id" in kpi_record:
+            kpi_record["id"] = kpi_record.pop("kpi_id")
         kpi_record["value"] = final_value
 
         kpi_specific_labels = {k: kpi_labels[k] for k in varying_keys if k in kpi_labels}
