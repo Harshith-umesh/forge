@@ -402,6 +402,7 @@ def dashboard_kpi_catalog(*, prefix: str) -> list[dict[str, Any]]:
             "name": f"{prefix}_{suffix}",
             "unit": unit,
             "higher_is_better": higher_is_better,
+            "is_2d": False,
         }
         for suffix, _, _, unit, higher_is_better in DASHBOARD_METRICS
     ]
