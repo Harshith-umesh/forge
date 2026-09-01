@@ -17,7 +17,7 @@ from projects.caliper.engine.kpi import (
     build_catalog_from_functions,
     create_label_extractor,
     get_kpi_functions,
-    is_2d_kpi,
+    is_curve_kpi,
 )
 from projects.caliper.engine.model import UnifiedRunModel
 
@@ -267,7 +267,7 @@ class MCPGatewayKpiHandler:
                 name=entry.get("name", ""),
                 unit=entry.get("unit", ""),
                 higher_is_better=entry.get("higher_is_better", True),
-                is_2d=entry.get("is_2d", False),
+                is_curve=entry.get("is_curve", False),
                 help=entry.get("help", ""),
                 x_unit=entry.get("x_unit", ""),
                 x_help=entry.get("x_help", ""),
@@ -300,7 +300,7 @@ class MCPGatewayKpiHandler:
             test_condition_labels = MCPGatewayKpiHandler.LABEL_EXTRACTOR.extract(r)
 
             for kpi_id, kpi_func in kpi_functions.items():
-                if is_2d_kpi(kpi_func):
+                if is_curve_kpi(kpi_func):
                     continue
 
                 try:
@@ -327,7 +327,7 @@ class MCPGatewayKpiHandler:
                     timestamp=ts,
                     labels=all_labels,
                     metadata={},
-                    is_2d=False,  # Scalar KPI
+                    is_curve=False,  # Scalar KPI
                     source=SourceInfo(
                         test_base_path=r.test_base_path,
                         plugin_module=model.plugin_module,
