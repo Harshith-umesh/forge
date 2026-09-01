@@ -11,7 +11,7 @@ from projects.caliper.engine.kpi import (
     SourceInfo,
     build_catalog_from_functions,
     get_kpi_functions,
-    is_2d_kpi,
+    is_curve_kpi,
 )
 from projects.caliper.engine.model import UnifiedRunModel
 
@@ -79,7 +79,7 @@ class GuideLLMKpiHandler:
                 name=entry.get("name", ""),
                 unit=entry.get("unit", ""),
                 higher_is_better=entry.get("higher_is_better", True),
-                is_2d=entry.get("is_2d", False),
+                is_curve=entry.get("is_curve", False),
                 help=entry.get("help", ""),
                 x_unit=entry.get("x_unit", ""),
                 x_help=entry.get("x_help", ""),
@@ -147,7 +147,7 @@ class GuideLLMKpiHandler:
 
             return [], status_details
 
-        # Group records by test path for 2D KPIs (same test, different rates)
+        # Group records by test path for curve KPIs (same test, different rates)
         from collections import defaultdict
 
         records_by_test = defaultdict(list)
@@ -161,8 +161,8 @@ class GuideLLMKpiHandler:
 
             # Compute scalar KPIs only
             for kpi_id, kpi_func in kpi_functions.items():
-                # Skip 2D KPIs for individual records - they'll be handled separately
-                if is_2d_kpi(kpi_func):
+                # Skip curve KPIs for individual records - they'll be handled separately
+                if is_curve_kpi(kpi_func):
                     continue
 
                 try:
@@ -189,7 +189,7 @@ class GuideLLMKpiHandler:
                     timestamp=ts,
                     labels=all_labels,
                     metadata=metadata_fields,
-                    is_2d=False,  # Scalar KPI
+                    is_curve=False,  # Scalar KPI
                     source=SourceInfo(
                         test_base_path=r.test_base_path,
                         plugin_module=model.plugin_module,
@@ -198,35 +198,35 @@ class GuideLLMKpiHandler:
 
                 out.append(kpi_record.to_dict())
 
-        # Generate 2D curve KPIs for records that have performance curves
+        # Generate curve KPIs for records that have performance curves
         for r in valid_records:
             # Check if this record has performance curves (indicating it's aggregated data)
             curves = r.metrics.get("performance_curves", {})
             request_rates = r.metrics.get("request_rate", [])
 
-            # Only generate 2D KPIs if we have performance curves with data
+            # Only generate curve KPIs if we have performance curves with data
             if not curves or not request_rates:
                 continue
 
             kpi_labels = GuideLLMKpiHandler.LABEL_EXTRACTOR.extract(r)
             metadata_fields = GuideLLMKpiHandler.extract_metadata(r)
 
-            # Generate 2D KPIs from performance curves
+            # Generate curve KPIs from performance curves
             for kpi_id, kpi_func in kpi_functions.items():
-                if not is_2d_kpi(kpi_func):
+                if not is_curve_kpi(kpi_func):
                     continue
 
                 try:
-                    # Pass the single record with performance curves to the 2D KPI function
+                    # Pass the single record with performance curves to the curve KPI function
                     value = kpi_func(r)
                 except (TypeError, ValueError, KeyError):
-                    value = []  # Empty list for failed 2D KPIs
+                    value = []  # Empty list for failed curve KPIs
 
-                # Skip 2D KPIs with empty or null values
+                # Skip curve KPIs with empty or null values
                 if not value or value is None:
                     continue
 
-                # Create structured 2D KPI record using core dataclass
+                # Create structured curve KPI record using core dataclass
                 kpi_record = KpiRecord(
                     schema_version="1",
                     kpi_id=kpi_id,
@@ -236,7 +236,7 @@ class GuideLLMKpiHandler:
                     timestamp=ts,
                     labels=kpi_labels,
                     metadata=metadata_fields,
-                    is_2d=True,  # 2D KPI
+                    is_curve=True,  # curve KPI
                     source=SourceInfo(
                         test_base_path=r.test_base_path,
                         plugin_module=model.plugin_module,
