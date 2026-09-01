@@ -57,7 +57,7 @@ def test_kpi_catalog_dataclass():
         name="Skeleton Throughput",
         unit="req/s",
         higher_is_better=True,
-        is_2d=False,
+        is_curve=False,
         help="Number of requests processed per second",
     )
 

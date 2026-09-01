@@ -21,7 +21,7 @@ from projects.caliper.engine.kpi import (
     build_catalog_from_functions,
     create_label_extractor,
     get_kpi_functions,
-    is_2d_kpi,
+    is_curve_kpi,
 )
 from projects.caliper.engine.model import UnifiedRunModel
 
@@ -125,7 +125,7 @@ class SkeletonKpiHandler:
                 name=entry.get("name", ""),
                 unit=entry.get("unit", ""),
                 higher_is_better=entry.get("higher_is_better", True),
-                is_2d=entry.get("is_2d", False),
+                is_curve=entry.get("is_curve", False),
                 help=entry.get("help", ""),
                 x_unit=entry.get("x_unit", ""),
                 x_help=entry.get("x_help", ""),
@@ -166,8 +166,8 @@ class SkeletonKpiHandler:
                 try:
                     value = kpi_func(r)
                 except (TypeError, ValueError, KeyError):
-                    if is_2d_kpi(kpi_func):
-                        value = []  # Empty list for failed 2D KPIs
+                    if is_curve_kpi(kpi_func):
+                        value = []  # Empty list for failed curve KPIs
                     else:
                         value = None  # None for missing/failed scalar KPIs
 
@@ -196,7 +196,7 @@ class SkeletonKpiHandler:
                     timestamp=ts,
                     labels=all_labels,
                     metadata=metadata_fields,
-                    is_2d=False,  # Scalar KPI
+                    is_curve=False,  # Scalar KPI
                     source=SourceInfo(
                         test_base_path=r.test_base_path,
                         plugin_module=model.plugin_module,
@@ -204,7 +204,7 @@ class SkeletonKpiHandler:
                 )
 
                 # Add 2D-specific metadata if applicable
-                if is_2d_kpi(kpi_func):
+                if is_curve_kpi(kpi_func):
                     kpi_record.x_unit = kpi_func._kpi_x_unit
                     kpi_record.x_help = kpi_func._kpi_x_help
                     kpi_record.y_unit = getattr(kpi_func, "_kpi_y_unit", None) or kpi_func._kpi_unit
