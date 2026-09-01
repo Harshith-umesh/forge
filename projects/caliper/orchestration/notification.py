@@ -148,6 +148,14 @@ def format_postprocess_status_notification(
                     if output_file:
                         lines.append(_create_file_link(output_file, "📊", get_file_link))
 
+                    if step_data.get("regressions_detected"):
+                        lines.append("  - ❌ Regression detected")
+                        lines.append(
+                            f"  - {step_data.get('regression_count')} regressions out of {step_data.get('total_kpis')} KPIs"
+                        )
+                    else:
+                        lines.append(f"  - No regression in {step_data.get('total_kpis')} KPIs")
+
                     # Show baseline files count if available
                     baseline_files_count = step_data.get("baseline_files_count")
                     if baseline_files_count is not None:
