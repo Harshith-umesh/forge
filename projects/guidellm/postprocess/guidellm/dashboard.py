@@ -391,7 +391,7 @@ def compute_dashboard_kpis(model: UnifiedRunModel, *, prefix: str) -> list[dict[
                     timestamp=timestamp,
                     labels=kpi_labels,
                     metadata={"run_path": record.test_base_path},  # Move run_path to metadata
-                    is_2d=False,  # Scalar KPI
+                    is_curve=False,  # Scalar KPI
                     source=SourceInfo(
                         test_base_path=record.test_base_path,
                         plugin_module=model.plugin_module,
@@ -410,7 +410,7 @@ def dashboard_kpi_catalog(*, prefix: str) -> list[dict[str, Any]]:
             name=f"{prefix}_{suffix}",
             unit=unit,
             higher_is_better=higher_is_better if higher_is_better is not None else True,
-            is_2d=False,
+            is_curve=False,
             help=f"Dashboard metric: {suffix}",
         )
         catalog_entries.append(catalog_entry.to_dict())
