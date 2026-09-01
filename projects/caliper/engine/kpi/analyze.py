@@ -195,7 +195,7 @@ def _filter_labels_for_matching(
     This ensures consistent filtering between analysis and reporting.
     """
     # Known KPI metadata fields that shouldn't be used for matching
-    kpi_metadata_fields = {"higher_is_better", "unit", "help", "is_2d"}
+    kpi_metadata_fields = {"higher_is_better", "unit", "help", "is_curve"}
 
     return {
         k: v for k, v in labels.items() if k not in kpi_metadata_fields and k not in excluded_labels
@@ -288,7 +288,7 @@ def _run_regression_test(
     raw_labels = current.get("labels", {})
     value = current.get("value")
     higher_is_better = current.get("higher_is_better", True)
-    is_2d = current.get("is_2d", False)
+    is_curve = current.get("is_curve", False)
 
     if "higher_is_better" not in config.ignored_labels:
         logging.info(
@@ -325,15 +325,15 @@ def _run_regression_test(
         verdict=Verdict.SKIPPED,  # Temporary, will be overridden
         labels=labels,
         run_id=run_id,
-        is_2d=is_2d,
+        is_curve=is_curve,
         higher_is_better=higher_is_better,
         current_value=CurrentValueInfo(comparison_keys=current_comparison_keys, value=value),
         baseline_values=baseline_values_list,
         baseline_count=len(baseline_values_list),
     )
 
-    if is_2d:
-        return _2d_auc_change_regression(
+    if is_curve:
+        return _curve_auc_change_regression(
             base, value, higher_is_better, baseline_values_list, config.regression_config
         )
     else:
@@ -396,20 +396,20 @@ def _scalar_relative_change_regression(
     return base
 
 
-def _2d_auc_change_regression(
+def _curve_auc_change_regression(
     base: RegressionTestResult,
     current_value: list,
     higher_is_better: bool,
     baseline_values_list: list[dict[str, Any]],
     regression_config: dict[str, Any],
 ) -> RegressionTestResult:
-    """2D curve regression via AUC → scalar relative change.
+    """Curve regression via AUC → scalar relative change.
 
     Converts each curve to a scalar Area Under Curve (trapezoidal rule),
     then applies the same relative change test as SCALAR_RELATIVE_CHANGE.
     baseline_values_list entries: {"comparison_keys": {...}, "value": [[x, y], ...]}
     """
-    curve_config = regression_config.get(Algorithm.TWO_DIM_AUC_CHANGE, {})
+    curve_config = regression_config.get(Algorithm.CURVE_AUC_CHANGE, {})
     min_baseline_points = curve_config.get("min_baseline_points", 1)
     max_relative_regression = curve_config.get("max_relative_regression", 0.1)
 
@@ -453,7 +453,7 @@ def _2d_auc_change_regression(
         )
 
     details = {
-        "algorithm": Algorithm.TWO_DIM_AUC_CHANGE,
+        "algorithm": Algorithm.CURVE_AUC_CHANGE,
         "current_auc": round(current_auc, 6),
         "baseline_mean_auc": round(baseline_mean_auc, 6),
         "baseline_aucs": baseline_auc_entries,
@@ -661,7 +661,7 @@ def _build_report(
         current_value_info = result.current_value
 
         # For all KPIs, use the original value from current_value_info
-        # The processed AUC is already in details for 2D KPIs
+        # The processed AUC is already in details for curve KPIs
         algorithm = details.get("algorithm")
         current_val = current_value_info.value if current_value_info else 0
 
@@ -686,7 +686,7 @@ def _build_report(
             verdict=result.verdict,  # Already a Verdict enum
             labels=ResultLabels(comparison_keys=current_labels, distinct_keys={}, ignore_keys={}),
             run_id=result.run_id,
-            is_2d=(algorithm == Algorithm.TWO_DIM_AUC_CHANGE),
+            is_curve=(algorithm == Algorithm.CURVE_AUC_CHANGE),
             higher_is_better=result.higher_is_better,
             current_value=ResultCurrentValue(comparison_keys=current_labels, value=current_val),
             baseline_values=baseline_values_list,

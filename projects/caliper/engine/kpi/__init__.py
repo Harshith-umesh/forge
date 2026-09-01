@@ -13,16 +13,16 @@ from .dataclasses import (
     TestSummary,
 )
 from .decorators import (
+    Curve,
     Format,
     HigherBetter,
     KPIMetadata,
     LowerBetter,
     TestLabelExtractor,
-    TwoDimensional,
     build_catalog_from_functions,
     create_label_extractor,
     get_kpi_functions,
-    is_2d_kpi,
+    is_curve_kpi,
 )
 
 __all__ = [
@@ -40,14 +40,14 @@ __all__ = [
     "ConfigSummary",
     "BaselineSummary",
     # KPI function decorators and utilities
+    "Curve",
     "Format",
     "HigherBetter",
     "KPIMetadata",
     "LowerBetter",
     "TestLabelExtractor",
-    "TwoDimensional",
     "build_catalog_from_functions",
     "create_label_extractor",
     "get_kpi_functions",
-    "is_2d_kpi",
+    "is_curve_kpi",
 ]

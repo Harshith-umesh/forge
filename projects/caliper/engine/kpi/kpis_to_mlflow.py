@@ -36,7 +36,7 @@ class HierarchicalKpi:
     name: str = ""
     unit: str = ""
     higher_is_better: bool = False
-    is_2d: bool = False
+    is_curve: bool = False
     help: str = ""  # noqa: A003
     description: str = ""
     category: str = ""
@@ -51,7 +51,7 @@ class HierarchicalKpi:
             name=data.get("name", ""),
             unit=data.get("unit", ""),
             higher_is_better=data.get("higher_is_better", False),
-            is_2d=data.get("is_2d", False),
+            is_curve=data.get("is_curve", False),
             help=data.get("help", ""),
             description=data.get("description", ""),
             category=data.get("category", ""),
@@ -140,15 +140,15 @@ def _build_run_dir_index(artifact_tree: Path) -> dict[str, Path]:
 
 
 def _is_scalar(value: Any) -> bool:
-    """Check if a KPI value is a scalar number (not 2D data)."""
+    """Check if a KPI value is a scalar number (not curve data)."""
     return isinstance(value, int | float) and not isinstance(value, bool)
 
 
-def _extract_2d_points(value: Any) -> list[dict[str, float]] | None:
-    """Extract sorted (x, y) data points from a 2D KPI value.
+def _extract_curve_points(value: Any) -> list[dict[str, float]] | None:
+    """Extract sorted (x, y) data points from a curve KPI value.
 
     Returns a list of ``{"x": ..., "y": ...}`` dicts sorted by x,
-    or ``None`` if the value is not a valid 2D structure.
+    or ``None`` if the value is not a valid curve structure.
     """
     if not isinstance(value, dict):
         return None
@@ -236,8 +236,8 @@ def generate_metrics_from_kpis(
             if not kpi.id:
                 continue
 
-            if kpi.is_2d:
-                points = _extract_2d_points(kpi.value)
+            if kpi.is_curve:
+                points = _extract_curve_points(kpi.value)
                 if points:
                     metrics[kpi.id] = points
             elif _is_scalar(kpi.value):

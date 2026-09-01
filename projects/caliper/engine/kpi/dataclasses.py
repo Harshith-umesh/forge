@@ -42,7 +42,7 @@ class Algorithm(StrEnum):
     """Regression testing algorithms."""
 
     SCALAR_RELATIVE_CHANGE = "SCALAR_RELATIVE_CHANGE"
-    TWO_DIM_AUC_CHANGE = "TWO_DIM_AUC_CHANGE"
+    CURVE_AUC_CHANGE = "CURVE_AUC_CHANGE"
 
 
 class Verdict(StrEnum):
@@ -67,8 +67,8 @@ class KpiRecord:
     source: dict[str, Any] = field(default_factory=dict)
     timestamp: str = ""
     run_id: str = ""
-    is_2d: bool = False
-    # 2D KPI support fields
+    is_curve: bool = False
+    # Curve KPI support fields
     x_unit: str = ""
     x_help: str = ""
     y_unit: str = ""
@@ -78,9 +78,9 @@ class KpiRecord:
         """Convert to dictionary for JSON serialization."""
         result = asdict(self)
 
-        # Only include 2D fields if this is a 2D KPI
-        if not self.is_2d:
-            # Remove 2D-specific fields for scalar KPIs
+        # Only include curve fields if this is a curve KPI
+        if not self.is_curve:
+            # Remove curve-specific fields for scalar KPIs
             result.pop("x_unit", None)
             result.pop("x_help", None)
             result.pop("y_unit", None)
@@ -289,7 +289,7 @@ class ResultEntry:
     verdict: Verdict
     labels: ResultLabels = field(default_factory=ResultLabels)
     run_id: str = ""
-    is_2d: bool = False
+    is_curve: bool = False
     higher_is_better: bool = True
     current_value: ResultCurrentValue = field(default_factory=ResultCurrentValue)
     baseline_values: list[ResultBaselineValue] = field(default_factory=list)
@@ -384,7 +384,7 @@ class KpiCatalogEntry:
     name: str = ""
     unit: str = ""
     higher_is_better: bool = True
-    is_2d: bool = False
+    is_curve: bool = False
     help: str = ""
     x_unit: str = ""
     x_help: str = ""
@@ -466,7 +466,7 @@ class RegressionTestResult:
     reason: str = ""
     labels: dict[str, Any] = field(default_factory=dict)
     run_id: str = ""
-    is_2d: bool = False
+    is_curve: bool = False
     higher_is_better: bool = True
     baseline_values: list[dict[str, Any]] = field(default_factory=list)
 
