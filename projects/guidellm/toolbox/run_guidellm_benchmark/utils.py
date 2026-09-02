@@ -5,6 +5,7 @@ Utilities for the GuideLL-M benchmark toolbox module.
 from __future__ import annotations
 
 import json as _json
+import logging
 import re
 import shlex
 from dataclasses import dataclass
@@ -13,6 +14,10 @@ from typing import Any
 import yaml
 
 from projects.core.dsl import template
+
+logger = logging.getLogger(__name__)
+
+BENCHCONF_CONFIG_PATH = "/tmp/benchconf.yaml"
 
 
 @dataclass(frozen=True)
@@ -106,7 +111,43 @@ def expand_guidellm_runs(guidellm_args: list[str]) -> list[GuideLLMRun]:
     return runs
 
 
+def resolve_benchconf_content(benchmark: dict[str, object]) -> str | None:
+    """Read the benchconf config YAML content if the benchmark references one.
+
+    Returns:
+        The raw YAML content as a string, or None if no benchconf reference.
+    """
+    benchconf_ref = benchmark.get("benchconf")
+    if not benchconf_ref:
+        return None
+
+    try:
+        import benchconf
+    except ImportError:
+        raise ImportError(
+            "benchconf package is required for benchconf-based benchmarks. "
+            "Install with: pip install 'benchconf @ git+https://github.com/openshift-psap/benchconf'"
+        )
+
+    parts = benchconf_ref.split("/", 1)
+    if len(parts) != 2:
+        raise ValueError(
+            f"Invalid benchconf reference '{benchconf_ref}'. "
+            "Expected format: 'suite/name' (e.g. 'llm-d/concurrent-1k-1k')"
+        )
+
+    suite, name = parts
+    config_path = benchconf.get_config(suite, name)
+    logger.info("Resolved benchconf '%s' to %s", benchconf_ref, config_path)
+    return config_path.read_text()
+
+
 def build_guidellm_args(benchmark: dict[str, object]) -> list[str]:
+    # When using a benchconf config file, GuideLLM reads all parameters
+    # (data spec, rates, constraints) from the config — no CLI args needed.
+    if benchmark.get("benchconf"):
+        return [f"--config={BENCHCONF_CONFIG_PATH}"]
+
     guidellm_args: list[str] = []
     benchmark_args = benchmark.get("args", {})
     if benchmark_args:
@@ -285,9 +326,23 @@ def _build_run_args(endpoint_url: str, old_args: list[str]) -> list[str]:
     return new_args
 
 
-def _build_multi_run_script(*, endpoint_url: str, runs: list[GuideLLMRun]) -> str:
+def _build_config_heredoc(benchconf_content: str) -> str:
+    """Build a shell heredoc that writes the benchconf YAML to a file."""
+    return (
+        f"cat > {BENCHCONF_CONFIG_PATH} <<'__BENCHCONF_EOF__'\n{benchconf_content}__BENCHCONF_EOF__"
+    )
+
+
+def _build_multi_run_script(
+    *,
+    endpoint_url: str,
+    runs: list[GuideLLMRun],
+    benchconf_content: str | None = None,
+) -> str:
     """Shell script for multiple GuideLLM runs (rate-expression expansion)."""
     lines = ["set -euo pipefail", "mkdir -p /results"]
+    if benchconf_content:
+        lines.append(_build_config_heredoc(benchconf_content))
     for run in runs:
         run_args = _build_run_args(endpoint_url, run.args)
         output_path = f"/results/benchmarks-{run.label}.json"
@@ -346,6 +401,7 @@ def render_guidellm_job_from_parts(
     timeout_seconds: int,
     hf_token_secret: str = "",
     fs_group: int | None = None,
+    benchconf_content: str | None = None,
 ) -> dict[str, Any]:
     """Render a GuideLL-M job manifest from individual components.
 
@@ -360,6 +416,9 @@ def render_guidellm_job_from_parts(
         fs_group: If set, adds a pod-level securityContext.fsGroup to ensure
             the PVC is writable by the container. Needed on clusters where the
             CSI driver provisions volumes with root-only permissions.
+        benchconf_content: Raw YAML content of a benchconf config file to embed
+            in the container. When set, the job uses a shell script that writes
+            the config before invoking guidellm.
 
     Returns:
         Job manifest as dict
@@ -379,7 +438,9 @@ def render_guidellm_job_from_parts(
     manifest["spec"]["activeDeadlineSeconds"] = timeout_seconds
     container = manifest["spec"]["template"]["spec"]["containers"][0]
 
-    if len(runs) == 1 and runs[0].rate is None:
+    # Benchconf configs require a shell script to write the config file first.
+    # Non-benchconf single runs can invoke guidellm directly.
+    if not benchconf_content and len(runs) == 1 and runs[0].rate is None:
         container["command"] = ["/opt/app-root/bin/guidellm"]
         container["args"] = [
             "run",
@@ -388,7 +449,11 @@ def render_guidellm_job_from_parts(
         return manifest
 
     container["command"] = ["/bin/sh", "-lc"]
-    container["args"] = [_build_multi_run_script(endpoint_url=endpoint_url, runs=runs)]
+    container["args"] = [
+        _build_multi_run_script(
+            endpoint_url=endpoint_url, runs=runs, benchconf_content=benchconf_content
+        )
+    ]
     return manifest
 
 
@@ -402,6 +467,7 @@ def render_guidellm_shared_volume_job_from_parts(
     timeout_seconds: int,
     hf_token_secret: str = "",
     fs_group: int | None = None,
+    benchconf_content: str | None = None,
 ) -> dict[str, Any]:
     """Render a GuideLL-M job manifest with shared volume (main + sidecar containers).
 
@@ -415,6 +481,8 @@ def render_guidellm_shared_volume_job_from_parts(
         hf_token_secret: Name of the K8s secret containing HF_TOKEN. If empty, HF_TOKEN is not injected.
         fs_group: If set, adds a pod-level securityContext.fsGroup to ensure
             the shared volume is writable by both containers.
+        benchconf_content: Raw YAML content of a benchconf config file to embed
+            in the container.
 
     Returns:
         Job manifest as dict with main and sidecar containers
@@ -433,7 +501,8 @@ def render_guidellm_shared_volume_job_from_parts(
     manifest = yaml.safe_load(rendered_yaml)
     manifest["spec"]["activeDeadlineSeconds"] = timeout_seconds
 
-    if len(runs) == 1 and runs[0].rate is None:
+    # Benchconf configs always use a shell script to write the config first.
+    if not benchconf_content and len(runs) == 1 and runs[0].rate is None:
         run_args = _build_run_args(endpoint_url, runs[0].args)
         cmd = shlex.join(["/opt/app-root/bin/guidellm", "run", *run_args])
         main_script = "\n".join(
@@ -444,7 +513,9 @@ def render_guidellm_shared_volume_job_from_parts(
             ]
         )
     else:
-        main_script = _build_multi_run_script(endpoint_url=endpoint_url, runs=runs)
+        main_script = _build_multi_run_script(
+            endpoint_url=endpoint_url, runs=runs, benchconf_content=benchconf_content
+        )
 
     manifest["spec"]["template"]["spec"]["containers"][0]["command"] = ["/bin/sh", "-c"]
     manifest["spec"]["template"]["spec"]["containers"][0]["args"] = [main_script]
