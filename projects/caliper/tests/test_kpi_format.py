@@ -56,7 +56,8 @@ def test_unregistered_kpis_are_included_from_record_fields():
     assert kpi["is_curve"] is False
     assert kpi["unit"] == "tokens/s"
     assert kpi["value"] == 42.0
-    assert test["metadata"]["run_path"] == "/artifacts/run-1"
+    assert "run_path" not in test["metadata"]
+    assert test["metadata"]["run_id"] == "run-1"
 
 
 def test_varying_labels_stay_on_kpi_records():

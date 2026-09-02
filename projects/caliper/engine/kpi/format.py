@@ -67,13 +67,12 @@ def transform_kpis_to_hierarchical_format(kpis: list[dict], model) -> dict:
         test_labels = {k: v for k, v in kpi_labels.items() if k not in varying_keys}
         test_data["labels"].update(test_labels)
 
-        # Store test metadata from first KPI, including record metadata (e.g. run_path)
+        # Store test metadata from first KPI
         if not test_data["metadata"]:
             test_data["metadata"] = {
                 "timestamp": kpi.get("timestamp"),
                 "source": kpi.get("source", {}),
                 "run_id": run_id,
-                **(kpi.get("metadata") or {}),
             }
 
         raw_value = kpi.get("value")
