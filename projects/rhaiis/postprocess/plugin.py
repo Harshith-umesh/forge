@@ -16,18 +16,9 @@ from .parser import RhaiisParser
 
 
 def _prefix_caching_from_runtime_args(runtime_args: str) -> str:
-    """Derive yes/no prefix-caching status from the vLLM runtime_args string.
-
-    runtime_args is a semicolon-separated "key: value" echo of the deployed
-    engine args (e.g. from rhaiis.engines.vllm.args), such as
-    "...; no-enable-prefix-caching: True; ...". enable-prefix-caching and
-    no-enable-prefix-caching are a boolean optional pair sharing one vLLM
-    CLI destination, so if both appear (e.g. a config override appended
-    one without removing the other's default), the one appearing LAST
-    wins, matching argparse's actual behavior. A "false" value flips the
-    meaning of whichever flag it's attached to (e.g.
-    no-enable-prefix-caching: false means prefix caching is NOT disabled).
-    Returns "" when neither flag is present (i.e. not explicitly set).
+    """Return "yes"/"no" from the enable/no-enable-prefix-caching flag in
+    runtime_args, or "" if neither is set. If both appear, the last one
+    wins (matches vLLM/argparse's BooleanOptionalAction behavior).
     """
     result = ""
     for part in runtime_args.split(";"):

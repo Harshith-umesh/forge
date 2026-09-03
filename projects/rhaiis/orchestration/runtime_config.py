@@ -116,14 +116,11 @@ def _translate_args(args: dict, engine: str) -> dict:
 
 
 def _resolve_boolean_flag_conflicts(args: dict) -> dict:
-    """Drop the earlier-set side of conflicting "no-<flag>" / "<flag>" pairs.
+    """If both "no-<flag>" and "<flag>" are set, drop the earlier one.
 
-    Config overrides (e.g. rhaiis.engines.vllm.args.enable-prefix-caching)
-    set a specific key without clearing a conflicting sibling default
-    (e.g. no-enable-prefix-caching), so both can end up in the merged args.
-    These share one vLLM/argparse CLI destination (BooleanOptionalAction),
-    where whichever flag is passed last wins. Emitting only the
-    later-inserted key avoids deploying both contradictory flags.
+    A config override can add one without clearing the other's default.
+    Keeping only the later-set key matches argparse's last-flag-wins
+    behavior for these paired CLI flags.
     """
     keys_in_order = list(args.keys())
     losers = set()
