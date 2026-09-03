@@ -91,6 +91,10 @@ class RhaiisPlugin(PostProcessingPlugin):
                 "guidellm_version": labels.get("guidellm_version", ""),
                 "mlflow_run_id": labels.get("mlflow_run_id", ""),
                 "mlflow_experiment_id": labels.get("mlflow_experiment_id", ""),
+                "turns": labels.get("turns", ""),
+                "prefix_tokens": labels.get("prefix_tokens", ""),
+                "prefix_count": labels.get("prefix_count", ""),
+                "request_type": labels.get("request_type", ""),
             }
 
         return export_dashboard_kpis_to_csv(

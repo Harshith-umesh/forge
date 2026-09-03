@@ -256,6 +256,10 @@ def _extract_dashboard_metrics(node: TestBaseNode) -> tuple[dict[str, Any], dict
         "guidellm_version": metadata.get("guidellm_version", ""),
         "prompt_toks": int(float(tokens["prompt_tokens"])) if "prompt_tokens" in tokens else "",
         "output_toks": int(float(tokens["output_tokens"])) if "output_tokens" in tokens else "",
+        "turns": int(float(tokens["turns"])) if "turns" in tokens else "",
+        "prefix_tokens": int(float(tokens["prefix_tokens"])) if "prefix_tokens" in tokens else "",
+        "prefix_count": int(float(tokens["prefix_count"])) if "prefix_count" in tokens else "",
+        "request_type": args.get("request_type", "") if isinstance(args, dict) else "",
         "guidellm_start_time_ms": int(min(starts) * 1000) if starts else "",
         "guidellm_end_time_ms": int(max(ends) * 1000) if ends else "",
     }
@@ -364,6 +368,10 @@ def compute_dashboard_kpis(model: UnifiedRunModel, *, prefix: str) -> list[dict[
             "guidellm_version": str(record.metrics.get("guidellm_version", "")),
             "prompt_toks": str(record.metrics.get("prompt_toks", "")),
             "output_toks": str(record.metrics.get("output_toks", "")),
+            "turns": str(record.metrics.get("turns", "")),
+            "prefix_tokens": str(record.metrics.get("prefix_tokens", "")),
+            "prefix_count": str(record.metrics.get("prefix_count", "")),
+            "request_type": str(record.metrics.get("request_type", "")),
             "guidellm_start_time_ms": str(record.metrics.get("guidellm_start_time_ms", "")),
             "guidellm_end_time_ms": str(record.metrics.get("guidellm_end_time_ms", "")),
         }
