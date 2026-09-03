@@ -20,19 +20,21 @@ def _prefix_caching_from_runtime_args(runtime_args: str) -> str:
 
     runtime_args is a semicolon-separated "key: value" echo of the deployed
     engine args (e.g. from rhaiis.engines.vllm.args), such as
-    "...; no-enable-prefix-caching: True; ...". Returns "" when neither flag
-    is present (i.e. not explicitly set).
+    "...; no-enable-prefix-caching: True; ...". These are a boolean
+    optional pair, so a "false" value flips the meaning (e.g.
+    no-enable-prefix-caching: false means prefix caching is NOT disabled).
+    Returns "" when neither flag is present (i.e. not explicitly set).
     """
     args = {}
     for part in runtime_args.split(";"):
         key, sep, value = part.strip().partition(":")
         if sep:
-            args[key.strip()] = value.strip()
+            args[key.strip()] = value.strip().lower()
 
-    if args.get("no-enable-prefix-caching", "").lower() == "true":
-        return "no"
-    if args.get("enable-prefix-caching", "").lower() == "true":
-        return "yes"
+    if "no-enable-prefix-caching" in args:
+        return "no" if args["no-enable-prefix-caching"] == "true" else "yes"
+    if "enable-prefix-caching" in args:
+        return "yes" if args["enable-prefix-caching"] == "true" else "no"
     return ""
 
 
