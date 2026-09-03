@@ -15,6 +15,27 @@ from .kpis import RhaiisKpiHandler
 from .parser import RhaiisParser
 
 
+def _prefix_caching_from_runtime_args(runtime_args: str) -> str:
+    """Derive yes/no prefix-caching status from the vLLM runtime_args string.
+
+    runtime_args is a semicolon-separated "key: value" echo of the deployed
+    engine args (e.g. from rhaiis.engines.vllm.args), such as
+    "...; no-enable-prefix-caching: True; ...". Returns "" when neither flag
+    is present (i.e. not explicitly set).
+    """
+    args = {}
+    for part in runtime_args.split(";"):
+        key, sep, value = part.strip().partition(":")
+        if sep:
+            args[key.strip()] = value.strip()
+
+    if args.get("no-enable-prefix-caching", "").lower() == "true":
+        return "no"
+    if args.get("enable-prefix-caching", "").lower() == "true":
+        return "yes"
+    return ""
+
+
 class RhaiisPlugin(PostProcessingPlugin):
     def __init__(self) -> None:
         self.parser = RhaiisParser()
@@ -95,6 +116,9 @@ class RhaiisPlugin(PostProcessingPlugin):
                 "prefix_tokens": labels.get("prefix_tokens", ""),
                 "prefix_count": labels.get("prefix_count", ""),
                 "request_type": labels.get("request_type", ""),
+                "prefix_caching": _prefix_caching_from_runtime_args(
+                    labels.get("runtime_args", "")
+                ),
             }
 
         return export_dashboard_kpis_to_csv(
