@@ -115,6 +115,31 @@ def _translate_args(args: dict, engine: str) -> dict:
     return translated
 
 
+def _resolve_boolean_flag_conflicts(args: dict) -> dict:
+    """Drop the earlier-set side of conflicting "no-<flag>" / "<flag>" pairs.
+
+    Config overrides (e.g. rhaiis.engines.vllm.args.enable-prefix-caching)
+    set a specific key without clearing a conflicting sibling default
+    (e.g. no-enable-prefix-caching), so both can end up in the merged args.
+    These share one vLLM/argparse CLI destination (BooleanOptionalAction),
+    where whichever flag is passed last wins. Emitting only the
+    later-inserted key avoids deploying both contradictory flags.
+    """
+    keys_in_order = list(args.keys())
+    losers = set()
+    for key in keys_in_order:
+        if not key.startswith("no-"):
+            continue
+        positive_key = key[len("no-") :]
+        if positive_key not in args:
+            continue
+        earlier_key = (
+            key if keys_in_order.index(key) < keys_in_order.index(positive_key) else positive_key
+        )
+        losers.add(earlier_key)
+    return {key: value for key, value in args.items() if key not in losers}
+
+
 def merge_engine_args(
     overrides: dict,
     model: dict,
@@ -144,7 +169,7 @@ def merge_engine_args(
 
     base.update(wl)
     base.update(overrides)
-    return base
+    return _resolve_boolean_flag_conflicts(base)
 
 
 def merge_env_vars(accelerator: str, model: dict) -> dict:
