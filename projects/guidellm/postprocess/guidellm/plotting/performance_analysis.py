@@ -25,15 +25,15 @@ logger = logging.getLogger(__name__)
 
 # Plot configuration constants
 PLOT_CONFIG = {
-    "width": 1700,
-    "height": 500,
+    "width": 1200,
+    "height": 650,
     "font": {"size": 12},
     "title_font_size": 16,
 }
 
 PLOT_CONFIG_LARGE = {
-    "width": 1700,
-    "height": 600,
+    "width": 1200,
+    "height": 650,
     "font": {"size": 12},
     "title_font_size": 16,
 }
