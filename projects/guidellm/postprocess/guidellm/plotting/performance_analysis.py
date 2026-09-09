@@ -620,10 +620,10 @@ def create_ttft_analysis_plot(df: pd.DataFrame, title_context: str = ""):
 
         ttft_data = df["ttft_median_ms"]
         non_zero_count = (ttft_data > 0).sum()
-        logger.info(
+        logger.debug(
             f"   TTFT data: {len(ttft_data)} total points, {non_zero_count} non-zero values"
         )
-        logger.info(f"   TTFT range: {ttft_data.min():.1f} - {ttft_data.max():.1f} ms")
+        logger.debug(f"   TTFT range: {ttft_data.min():.1f} - {ttft_data.max():.1f} ms")
 
         if ttft_data.max() == 0:
             logger.warning("⚠️  All TTFT values are zero - plot may appear empty")
@@ -672,7 +672,7 @@ def create_ttft_analysis_plot(df: pd.DataFrame, title_context: str = ""):
 def create_token_throughput_percentiles_plot(df: pd.DataFrame, title_context: str = ""):
     """Create token throughput percentiles plot."""
     try:
-        logger.info("📈 Creating token throughput percentiles distribution plot...")
+        logger.debug("📈 Creating token throughput percentiles distribution plot...")
         import plotly.express as px
         import plotly.graph_objects as go
 
@@ -717,7 +717,7 @@ def create_token_throughput_percentiles_plot(df: pd.DataFrame, title_context: st
 
         # Get unique configurations and colors - maintain custom sort order
         configurations = df["test_configuration"].drop_duplicates().tolist()
-        logger.info(
+        logger.debug(
             f"   Plotting {len(configurations)} configurations with percentile distributions..."
         )
         available_colors = px.colors.qualitative.Set1
@@ -734,7 +734,7 @@ def create_token_throughput_percentiles_plot(df: pd.DataFrame, title_context: st
             ("P75", "output_tokens_per_second_p75", {"width": 3, "dash": "dash"}, 0.9),
             ("P90", "output_tokens_per_second_p90", {"width": 2, "dash": "dashdot"}, 0.8),
         ]
-        logger.info(f"   Adding {len(percentiles)} percentile lines per configuration...")
+        logger.debug(f"   Adding {len(percentiles)} percentile lines per configuration...")
 
         for config in configurations:
             config_df = df[df["test_configuration"] == config].sort_values("intended_concurrency")
@@ -761,7 +761,7 @@ def create_token_throughput_percentiles_plot(df: pd.DataFrame, title_context: st
         )
         fig.update_yaxes(rangemode="tozero")
 
-        logger.info("✅ Token throughput percentiles plot created successfully")
+        logger.debug("✅ Token throughput percentiles plot created successfully")
         return fig
 
     except Exception as e:
@@ -816,7 +816,7 @@ def generate_token_throughput_vs_concurrency(
     report_number: int | None = None,
 ) -> str | None:
     """Generate token throughput vs concurrency analysis and save to file."""
-    logger.info("\n🚀 Generating token throughput vs concurrency analysis...")
+    logger.debug("\n🚀 Generating token throughput vs concurrency analysis...")
     df = create_dataframe_from_records(records)
     if df.empty:
         return None
@@ -1048,7 +1048,7 @@ def _generate_shared_performance_report(
                             )
                             html_rel_path = f"{report_dir_name}/{group_name}/{Path(html_path).name}"
                             group_plots.append((plot_name, png_rel_path, html_rel_path))
-                            logger.info(
+                            logger.debug(
                                 f"   ✅ {plot_name} saved - PNG: {png_rel_path}, HTML: {html_rel_path}"
                             )
                             if not png_path:
