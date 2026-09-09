@@ -125,18 +125,32 @@ def _create_plot_with_optional_png_spoiler(
             {html_content}
         </div>"""
 
-    # Add simple link to PNG version if it exists
+    # Add links to PNG and HTML versions if they exist
+    links = []
+
     if png_path is not None:
         full_png_path = Path(output_dir) / png_path
         if full_png_path.exists():
-            result += f"""
-        <div style="margin-top: 15px; text-align: center;">
-            <a href="{png_path}" target="_blank" style="color: #007acc; text-decoration: underline; font-size: 14px;">📸 Image version</a>
-        </div>"""
+            links.append(
+                f'<a href="{png_path}" target="_blank" style="color: #007acc; text-decoration: underline; font-size: 14px;">📸 Image version</a>'
+            )
         else:
             logger.debug(f"PNG file not found for {plot_name} at {full_png_path}")
     else:
         logger.debug(f"PNG generation was skipped for {plot_name} (HTML-only mode)")
+
+    if html_path is not None:
+        full_html_path = Path(output_dir) / html_path
+        if full_html_path.exists():
+            links.append(
+                f'<a href="{html_path}" target="_blank" style="color: #007acc; text-decoration: underline; font-size: 14px;">🌐 HTML version</a>'
+            )
+
+    if links:
+        result += f"""
+        <div style="margin-top: 15px; text-align: center;">
+            {" | ".join(links)}
+        </div>"""
 
     return result
 
