@@ -68,7 +68,7 @@ def _read_html_content(html_path: str | Path) -> str:
         HTML content string
     """
     try:
-        logger.info(f"🔍 Reading HTML content from: {html_path}")
+        logger.debug(f"🔍 Reading HTML content from: {html_path}")
 
         # Check if file exists
         if not Path(html_path).exists():
@@ -78,7 +78,7 @@ def _read_html_content(html_path: str | Path) -> str:
         with open(html_path, encoding="utf-8") as html_file:
             content = html_file.read()
             content_size_kb = len(content.encode("utf-8")) / 1024
-            logger.info(f"   📄 Read {content_size_kb:.1f} KB from HTML file")
+            logger.debug(f"   📄 Read {content_size_kb:.1f} KB from HTML file")
 
             # Import re for regex operations
             import re
@@ -88,12 +88,12 @@ def _read_html_content(html_path: str | Path) -> str:
             if body_match:
                 body_content = body_match.group(1)
                 body_size_kb = len(body_content.encode("utf-8")) / 1024
-                logger.info(f"   ✅ Extracted body content: {body_size_kb:.1f} KB")
+                logger.debug(f"   ✅ Extracted body content: {body_size_kb:.1f} KB")
                 return body_content
             else:
                 # If no body tags found, use full content
-                logger.warning("   ⚠️  No body tags found, using full content")
-                logger.info(f"   📄 Using full HTML content: {content_size_kb:.1f} KB")
+                logger.debug("   ⚠️  No body tags found, using full content")
+                logger.debug(f"   📄 Using full HTML content: {content_size_kb:.1f} KB")
                 return content
     except Exception as e:
         logger.warning(f"❌ Failed to read HTML content from {html_path}: {e}")
@@ -160,20 +160,20 @@ def embed_plot_for_report(
     Returns:
         HTML string with embedded plot content
     """
-    logger.info(f"🔗 Embedding plot: {plot_name}")
-    logger.info(f"   📁 Output dir: {output_dir}")
-    logger.info(f"   🌐 HTML path: {html_path}")
-    logger.info(f"   🖼️  PNG path: {png_path}")
+    logger.debug(f"🔗 Embedding plot: {plot_name}")
+    logger.debug(f"   📁 Output dir: {output_dir}")
+    logger.debug(f"   🌐 HTML path: {html_path}")
+    logger.debug(f"   🖼️  PNG path: {png_path}")
 
     # Resolve full HTML path
     full_html_path = Path(output_dir) / html_path
-    logger.info(f"   📄 Full HTML path: {full_html_path}")
+    logger.debug(f"   📄 Full HTML path: {full_html_path}")
 
     # Read HTML content for direct embedding
     plot_html_content = _read_html_content(full_html_path)
 
     if not plot_html_content.strip():
-        logger.warning(f"   ⚠️  Empty HTML content for {plot_name}")
+        logger.debug(f"   ⚠️  Empty HTML content for {plot_name}")
         return f"<p>⚠️ Could not load interactive plot for {plot_name}</p>"
 
     # Create plot with optional PNG spoiler
@@ -182,7 +182,7 @@ def embed_plot_for_report(
     )
 
     result_size_kb = len(result.encode("utf-8")) / 1024
-    logger.info(f"   ✅ Successfully embedded {plot_name} ({result_size_kb:.1f} KB)")
+    logger.debug(f"   ✅ Successfully embedded {plot_name} ({result_size_kb:.1f} KB)")
     return result
 
 
