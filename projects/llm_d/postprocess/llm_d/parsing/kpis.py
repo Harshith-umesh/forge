@@ -33,7 +33,6 @@ class GuideLLMKpiHandler:
             "product_version": "metrics.product_version",
             "cluster": "metrics.cluster",
             "deployment_profile": "metrics.deployment_profile",
-            "model_name": "metrics.model_name",
             "guidellm_loadshape": "metrics.benchmark_key",
         }
 
