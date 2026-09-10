@@ -239,8 +239,7 @@ def _format_analyse_kpis_step(step_data: dict, get_file_link: callable | None) -
         lines.append(_create_file_link(html_file, "🌐", get_file_link))
 
     # Show analysis output file
-    output_file = step_data.get("output_file")
-    if output_file:
+    if output_file := step_data.get("output_file"):
         lines.append(_create_file_link(output_file, "📊", get_file_link))
 
     step_status = step_data.get("status")
