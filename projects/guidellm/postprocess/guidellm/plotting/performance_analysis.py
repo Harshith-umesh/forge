@@ -938,7 +938,9 @@ def _generate_shared_performance_report(
                 if loadshape not in groups:
                     groups[loadshape] = []
                 groups[loadshape].append(record)
-            logger.info(f"\n🔍 Found {len(groups)} loadshape(s): {', '.join(groups.keys())}")
+            logger.info(
+                f"\n🔍 Found {len(groups)} loadshape(s): {', '.join(sorted(groups.keys()))}"
+            )
         else:
             # Comparison grouping logic (simplified from original)
             comparison_keys = (
@@ -974,8 +976,8 @@ def _generate_shared_performance_report(
         all_plots_data = []
         group_mapping = {}  # Track what each group counter represents
 
-        # Process each group
-        for group_idx, (group_key, group_records) in enumerate(groups.items()):
+        # Process each group (sorted by key for consistent ordering)
+        for group_idx, (group_key, group_records) in enumerate(sorted(groups.items())):
             if report_type == "comprehensive":
                 group_name = f"group_{group_idx:03d}"
                 group_desc = str(group_key)
