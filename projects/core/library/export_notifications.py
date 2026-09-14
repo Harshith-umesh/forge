@@ -593,7 +593,7 @@ def _build_enhanced_notification(
     return "\n".join(notification_parts), notification_success
 
 
-def _get_censoring_report_section(artifact_dir: Path) -> list[str] | None:
+def _get_censoring_report_section(artifact_dir: Path | None) -> list[str] | None:
     """
     Parse censoring_report.yaml if it exists and return notification section.
 
@@ -1493,31 +1493,30 @@ def _format_censoring_report_info_for_step(step_dir: Path, get_file_link: Any) -
         safe_censored_files = report_data.get("safe_censored_files", 0)
         censored_files = report_data.get("censored_files", 0)  # Unexpected censoring
 
-        censoring_lines.append("* 🔒 Censoring Report")
         # Create link to censoring report file
         if get_file_link:
             try:
                 report_link = get_file_link(censoring_report_path)
-                first_line = f"[📊 {total_files} files scanned]({report_link})"
+                censoring_lines.append(f"* 🔒 [Censoring Report]({report_link})")
             except Exception as e:
                 logger.warning(
                     f"Failed to create link for censoring report {censoring_report_path}: {e}"
                 )
-                first_line = f"📊 {total_files} files scanned"
+                censoring_lines.append("* 🔒 Censoring Report")
         else:
-            first_line = f"📊 {total_files} files scanned"
+            censoring_lines.append("* 🔒 Censoring Report")
 
-        censoring_lines.append(f"  * {first_line}")
+        censoring_lines.append(f"    * 📊 {total_files} files scanned")
 
         # Show breakdown of file types
         if clean_files > 0:
-            censoring_lines.append(f"  * ✅ Clean files: {clean_files}")
+            censoring_lines.append(f"    * ✅ Clean files: {clean_files}")
 
         if safe_censored_files > 0:
-            censoring_lines.append(f"  * 🔐 Safe replacements: {safe_censored_files}")
+            censoring_lines.append(f"    * 🔐 Safe replacements: {safe_censored_files}")
 
         if censored_files > 0:
-            censoring_lines.append(f"  * ⚠️ Unexpected censoring: {censored_files}")
+            censoring_lines.append(f"    * ⚠️ Unexpected censoring: {censored_files}")
 
             # Show details for unexpected censoring if available
             censored_by_reason = report_data.get("censored_by_reason", {})
