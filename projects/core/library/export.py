@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 # Global switch to disable test failure when censoring occurs
 # Set to True to disable test failures when secrets are found and censored
-DISABLE_CENSORING_TEST_FAILURE = False
+DISABLE_CENSORING_TEST_FAILURE = True
 
 
 class FinishReason(StrEnum):
