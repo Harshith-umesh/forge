@@ -61,12 +61,9 @@ def format_postprocess_status_notification(
         # Create step name as link to log file if available
         log_file = step_data.get("log_file")
         if log_file and get_file_link:
-            try:
-                log_url = get_file_link(log_file)
-                step_name_display = f"[**{step_name}**]({log_url})"
-            except Exception:
-                # Fallback to plain text if link generation fails
-                step_name_display = f"**{step_name}**"
+            step_name_display = get_file_link(
+                Path(status.base_directory) / log_file, text=f"**{step_name}**"
+            )
         else:
             step_name_display = f"**{step_name}**"
 
@@ -118,8 +115,8 @@ def _create_file_link(file_path: str, emoji: str, get_file_link: callable | None
 
         output_path = Path(file_path)
         filename = output_path.name
-        file_url = get_file_link(file_path)
-        return f"  - {emoji} [{filename}]({file_url})"
+        file_link = get_file_link(file_path)
+        return f"  - {emoji} {file_link}"
     except Exception:
         filename = file_path.split("/")[-1]
         return f"  - {emoji} {filename}"
@@ -160,32 +157,16 @@ def _format_artifacts_to_ai_data_step(step_data: dict, get_file_link: callable |
     # AI data directory link
     ai_data_dir = step_data.get("ai_data_dir")
     if ai_data_dir:
-        try:
-            # Extract relative path from the full path
-            ai_data_dir_relative = ai_data_dir.split("/")[-1]  # Get just "ai_eval"
-            dir_url = get_file_link(ai_data_dir_relative)
-            lines.append(f"  - 📁 [AI Eval Directory]({dir_url})")
-        except Exception:
-            lines.append(f"  - 📁 AI Eval Directory: {ai_data_dir}")
+        # Extract relative path from the full path
+        ai_data_dir_relative = ai_data_dir.split("/")[-1]  # Get just "ai_eval"
+        dir_link = get_file_link(ai_data_dir_relative, text="AI Eval Directory")
+        lines.append(f"  - 📁 {dir_link}")
 
     # Output file link
     output_file = step_data.get("output_file")
     if output_file:
-        try:
-            import os
-
-            output_file_relative = os.path.relpath(
-                output_file,
-                ai_data_dir or "",
-            )
-            if ai_data_dir and "ai_eval" in ai_data_dir:
-                output_file_relative = f"ai_eval/{output_file_relative}"
-            file_url = get_file_link(output_file_relative)
-            filename = output_file.split("/")[-1]
-            lines.append(f"  - 📄 [{filename}]({file_url})")
-        except Exception:
-            filename = output_file.split("/")[-1]
-            lines.append(f"  - 📄 {filename}")
+        file_link = get_file_link(output_file)
+        lines.append(f"  - 📄 {file_link}")
 
     return lines
 
@@ -304,25 +285,10 @@ def _format_step_file_links(
     # Flatten the structure - just list all files without grouping by type
     for file_type, files in file_groups.items():
         for file_path in files:
-            try:
-                # Combine output_dir with file_path if available
-                if output_dir:
-                    # Use pathlib to properly join paths and avoid double slashes
-                    from pathlib import Path
-
-                    full_path = str(Path(output_dir) / file_path)
-                else:
-                    full_path = file_path
-
-                file_url = get_file_link(full_path)
-                file_name = _get_display_name(file_path)
-                emoji = "📊" if file_type == "visualization" else "📄"
-                lines.append(f"  - {emoji} [{file_name}]({file_url})")
-            except Exception:
-                # Fallback to plain text if link generation fails
-                file_name = _get_display_name(file_path)
-                emoji = "📊" if file_type == "visualization" else "📄"
-                lines.append(f"  - {emoji} {file_name}")
+            full_path = Path(output_dir) / file_path
+            file_link = get_file_link(full_path, text=_get_display_name(file_path))
+            emoji = "📊" if file_type == "visualization" else "📄"
+            lines.append(f"  - {emoji} {file_link}")
 
     return lines
 

@@ -27,9 +27,10 @@ from projects.core.library.export_notifications import (
     BackendResult,
     CaliperArtifactsExport,
     ExportStatus,
+    JobShutdown,
     TestPhase,
     _check_job_shutdown_status,
-    _create_mlflow_file_url_for_step,
+    _create_mlflow_url,
     send_notification,
 )
 
@@ -173,7 +174,10 @@ def _process_caliper_postprocess_status(
                     step_subdir = step_dir.name
 
                 def get_file_link(file_path: str, step_subdir=step_subdir) -> str:
-                    return _create_mlflow_file_url_for_step(mlflow_run_url, step_subdir, file_path)
+                    # Combine step_subdir and file_path into a single relative path
+                    relative_path = Path(step_subdir) / file_path
+                    result = _create_mlflow_url(mlflow_run_url, relative_path)
+                    return result if result is not None else f"{mlflow_run_url}/{relative_path}"
 
             # Generate notification text from the structured result
             notification_text = format_postprocess_status_notification(result, get_file_link)
@@ -327,7 +331,7 @@ def caliper_export_entrypoint(
                             success=True,
                             run_id="dry-run-mock-id",
                             experiment_url="http://DRY_RUN_MLFLOW_FAKE_URL/#/experiments/123",
-                            run_url="http://DRY_RUN_MLFLOW_FAKE_URL/#/experiments/123/runs/dry-run-mock-id/artifacts?workspace=forge-dry-run",
+                            run_url="http://DRY_RUN_MLFLOW_FAKE_URL/?workspace=forge-dry-run#/experiments/123/runs/dry-run-mock-id/artifacts",
                             tracking_uri="http://DRY_RUN_MLFLOW_FAKE_URL",
                         )
                     },
@@ -337,12 +341,25 @@ def caliper_export_entrypoint(
                     message="Test execution completed with failures",
                 ),
             )
+
+            # Check for job shutdown/abort status and add to mock status
+            shutdown_status = _check_job_shutdown_status()
+            if shutdown_status:
+                status.job_shutdown = JobShutdown.from_dict(shutdown_status)
+                logger.info(f"Added job shutdown status to dry run mock status: {shutdown_status}")
         else:
             status = run_caliper_orchestration_export(
                 artifact_dir=artifact_dir,
                 disable_censoring=disable_censoring,
                 disable_file_export=disable_file_export,
             )
+
+            # Check for job shutdown/abort status and add to main export status
+            shutdown_status = _check_job_shutdown_status()
+            if shutdown_status:
+                status.job_shutdown = JobShutdown.from_dict(shutdown_status)
+                logger.info(f"Added job shutdown status to main export status: {shutdown_status}")
+
             logger.info("Export status:\n" + yaml.dump(status.to_dict(), indent=4))
 
             # Update fjob status with export results (only if file export is not disabled)
@@ -356,11 +373,19 @@ def caliper_export_entrypoint(
         export_failed = True
         # Create failure status for notification
         status = ExportStatus(success=False, final_status=f"failed: {e}")
+        # Check for job shutdown/abort status and add to failure status
+        shutdown_status = _check_job_shutdown_status()
+        if shutdown_status:
+            status.job_shutdown = JobShutdown.from_dict(shutdown_status)
     except Exception as e:
         logger.exception(f"Export failed with unexpected error: {e}")
         export_failed = True
         # Create failure status for notification
         status = ExportStatus(success=False, final_status=f"failed: {e}")
+        # Check for job shutdown/abort status and add to failure status
+        shutdown_status = _check_job_shutdown_status()
+        if shutdown_status:
+            status.job_shutdown = JobShutdown.from_dict(shutdown_status)
 
     finally:
         # Send completion notifications regardless of success/failure
