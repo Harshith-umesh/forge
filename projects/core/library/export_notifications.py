@@ -478,7 +478,7 @@ def _extract_finish_reason_from_status(status: ExportStatus) -> str:
 
 
 def _build_enhanced_notification(
-    artifact_dir: Path,
+    artifact_dir: Path | None,
     project: str,
     finish_reason: str,
     status: ExportStatus,
@@ -506,7 +506,11 @@ def _build_enhanced_notification(
 
     logger.info(f"DEBUG: Final status emoji: {status_emoji}")
 
-    base_status = f"{status_emoji} **Execution of `{fjob_project}` {fjob_args_str}** {status_emoji}"
+    # Add total duration to base status
+    total_duration = _read_total_duration(artifact_dir)
+    duration_suffix = f" `{total_duration}`" if total_duration else ""
+
+    base_status = f"{status_emoji} **Execution of `{fjob_project}` {fjob_args_str}** {duration_suffix} {status_emoji}"
     notification_parts = [base_status]
 
     # Add job abort message right below overall status if applicable
@@ -747,12 +751,16 @@ def _get_step_status_section(artifact_dir: Path | None, mlflow_run_url: str | No
         log_counts = _count_log_messages(step_dir)
         log_summary = _format_log_summary(log_counts)
 
+        # Read step duration
+        duration_str = _read_step_duration(step_dir)
+        duration_suffix = f" `{duration_str}`" if duration_str else ""
+
         # Create step title - linked if MLflow URL available, plain-text otherwise
         if mlflow_run_url:
             mlflow_log_url = _create_mlflow_url(mlflow_run_url, step_name)
-            step_title = f"#### {exit_status_emoji} [{step_name}]({mlflow_log_url}){log_summary}"
+            step_title = f"#### {exit_status_emoji} [{step_name}]({mlflow_log_url}){duration_suffix}{log_summary}"
         else:
-            step_title = f"#### {exit_status_emoji} {step_name}{log_summary}"
+            step_title = f"#### {exit_status_emoji} {step_name}{duration_suffix}{log_summary}"
 
         step_status.append(step_title)
 
@@ -1391,6 +1399,55 @@ def _read_step_duration(step_dir: Path) -> str:
     except Exception as timing_error:
         logger.warning(f"Failed to read timing file {timing_file}: {timing_error}")
         return ""
+
+
+def _read_total_duration(artifact_dir: Path | None) -> str:
+    """Read and sum test durations from all step directories."""
+
+    # Return empty duration if artifact_dir is None or unavailable
+    if artifact_dir is None or not artifact_dir.exists():
+        return ""
+
+    total_seconds = 0
+    step_count = 0
+
+    # Scan all step directories for timing files
+    for step_dir in artifact_dir.iterdir():
+        if not step_dir.is_dir():
+            continue
+
+        timing_file = step_dir / CI_METADATA_DIRNAME / "test_duration.yaml"
+        if not timing_file.exists():
+            continue
+
+        try:
+            with open(timing_file, encoding="utf-8") as f:
+                timing_data = yaml.safe_load(f)
+
+            # Get raw duration in seconds for summing
+            duration_seconds = timing_data.get("duration", {}).get("seconds")
+            if duration_seconds is not None:
+                total_seconds += duration_seconds
+                step_count += 1
+
+        except Exception as timing_error:
+            logger.warning(f"Failed to read timing file {timing_file}: {timing_error}")
+            continue
+
+    if step_count == 0:
+        return ""
+
+    # Format total duration (similar to how individual step durations are formatted)
+    hours = int(total_seconds // 3600)
+    minutes = int((total_seconds % 3600) // 60)
+    seconds = int(total_seconds % 60)
+
+    if hours > 0:
+        return f"{hours}h {minutes}m {seconds}s"
+    elif minutes > 0:
+        return f"{minutes}m {seconds}s"
+    else:
+        return f"{seconds}s"
 
 
 def _process_step_status(artifact_dir: Path, mlflow_run_url: str) -> list[str]:
