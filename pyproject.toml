@@ -72,7 +72,7 @@ agentic_review = [
     "langchain-core",
 ]
 benchconf = [
-    "benchconf @ git+https://github.com/openshift-psap/benchconf@main",
+    "benchconf @ git+https://github.com/openshift-psap/benchconf@fix/package-configs",
 ]
 
 [project.scripts]
