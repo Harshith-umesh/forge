@@ -26,7 +26,8 @@ KEYWORD_PATTERNS = [
     r"api[_-]?token\s*[:=]\s*\S+",
     r"refresh[_-]?token\s*[:=]\s*\S+",
     # Bearer tokens (compiled with IGNORECASE, so one pattern covers both cases)
-    r"Bearer\s+[A-Za-z0-9+/=]+",
+    # Require minimum 20 characters and avoid matching descriptive text like "bearer token file"
+    r"Bearer\s+[A-Za-z0-9+/=]{20,}",
     # Specific service API keys
     r"sk-[a-zA-Z0-9]{32,}",  # OpenAI API keys
     r"ghp_[a-zA-Z0-9]{36}",  # GitHub personal access tokens
