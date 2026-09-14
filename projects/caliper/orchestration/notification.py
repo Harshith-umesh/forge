@@ -21,7 +21,7 @@ def format_postprocess_status_notification(
     Args:
         status: Typed PostprocessStatus object
         get_file_link: Optional callback function that takes a file path and returns a URL.
-                      Signature: get_file_link(file_path: str) -> str
+                      Signature: get_file_link(file_path: Path | str) -> str
 
     Returns:
         Formatted notification text to include in GitHub notification
@@ -35,8 +35,12 @@ def format_postprocess_status_notification(
     # Check overall status (keep unchanged regardless of abort status)
     status_emoji = "✅" if status.is_success() else "❌"
     base_directory = Path(status.base_directory)
-    if base_directory.name == "status_files":
-        base_directory = base_directory.parent
+
+    def postprocess_get_file_link(file_path: Path | str, text: str = None) -> str:
+        if not get_file_link:
+            return text
+
+        return get_file_link(base_directory / file_path, text)
 
     lines.append(f"**Post-processing Status** {status_emoji} `{base_directory}`")
 
@@ -60,10 +64,8 @@ def format_postprocess_status_notification(
 
         # Create step name as link to log file if available
         log_file = step_data.get("log_file")
-        if log_file and get_file_link:
-            step_name_display = get_file_link(
-                Path(status.base_directory) / log_file, text=f"**{step_name}**"
-            )
+        if log_file:
+            step_name_display = postprocess_get_file_link(log_file, text=f"**{step_name}**")
         else:
             step_name_display = f"**{step_name}**"
 
@@ -78,7 +80,9 @@ def format_postprocess_status_notification(
             lines.append(f"  * `{reason}`")
 
         # Use object-oriented step formatter to handle step-specific details
-        step_details = _format_step_details_with_formatters(step_name, step_data, get_file_link)
+        step_details = _format_step_details_with_formatters(
+            step_name, step_data, postprocess_get_file_link
+        )
         lines.extend(step_details)
 
     return "\n".join(lines) if lines else ""
@@ -115,7 +119,8 @@ def _create_file_link(file_path: str, emoji: str, get_file_link: callable | None
 
         output_path = Path(file_path)
         filename = output_path.name
-        file_link = get_file_link(file_path)
+        # Pass Path object to get_file_link
+        file_link = get_file_link(output_path)
         return f"  - {emoji} {file_link}"
     except Exception:
         filename = file_path.split("/")[-1]
@@ -159,13 +164,13 @@ def _format_artifacts_to_ai_data_step(step_data: dict, get_file_link: callable |
     if ai_data_dir:
         # Extract relative path from the full path
         ai_data_dir_relative = ai_data_dir.split("/")[-1]  # Get just "ai_eval"
-        dir_link = get_file_link(ai_data_dir_relative, text="AI Eval Directory")
+        dir_link = get_file_link(Path(ai_data_dir_relative), text="AI Eval Directory")
         lines.append(f"  - 📁 {dir_link}")
 
     # Output file link
     output_file = step_data.get("output_file")
     if output_file:
-        file_link = get_file_link(output_file)
+        file_link = get_file_link(Path(output_file))
         lines.append(f"  - 📄 {file_link}")
 
     return lines

@@ -36,6 +36,10 @@ from projects.core.library.export_notifications import (
 
 logger = logging.getLogger(__name__)
 
+# Global switch to disable test failure when censoring occurs
+# Set to True to disable test failures when secrets are found and censored
+DISABLE_CENSORING_TEST_FAILURE = False
+
 
 class FinishReason(StrEnum):
     SUCCESS = "success"
@@ -173,7 +177,11 @@ def _process_caliper_postprocess_status(
                     # Fallback to step_dir.name for backward compatibility
                     step_subdir = step_dir.name
 
-                def get_file_link(file_path: str, step_subdir=step_subdir) -> str:
+                def get_file_link(file_path: str | Path, step_subdir=step_subdir) -> str:
+                    # Convert to string if Path object was passed
+                    if isinstance(file_path, Path):
+                        file_path = str(file_path)
+
                     # Combine step_subdir and file_path into a single relative path
                     relative_path = Path(step_subdir) / file_path
                     result = _create_mlflow_url(mlflow_run_url, relative_path)
@@ -331,7 +339,7 @@ def caliper_export_entrypoint(
                             success=True,
                             run_id="dry-run-mock-id",
                             experiment_url="http://DRY_RUN_MLFLOW_FAKE_URL/#/experiments/123",
-                            run_url="http://DRY_RUN_MLFLOW_FAKE_URL/?workspace=forge-dry-run#/experiments/123/runs/dry-run-mock-id/artifacts",
+                            run_url="http://DRY_RUN_MLFLOW_FAKE_URL/#/experiments/123/runs/dry-run-mock-id/artifacts?workspace=forge-dry-run",
                             tracking_uri="http://DRY_RUN_MLFLOW_FAKE_URL",
                         )
                     },
@@ -417,9 +425,14 @@ def caliper_export_entrypoint(
     if export_failed or notification_failed:
         return 1, "failed"
 
-    # Check if censoring occurred and return exit code 1 if so
+    # Check if censoring occurred and return exit code 1 if so (unless disabled)
     if status and status.censoring_occurred:
-        return 1, "censoring_occurred"
+        if DISABLE_CENSORING_TEST_FAILURE:
+            logger.info(
+                "Censoring occurred but test failure disabled via DISABLE_CENSORING_TEST_FAILURE"
+            )
+        else:
+            return 1, "censoring_occurred"
 
     return 0
 

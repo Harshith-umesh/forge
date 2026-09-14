@@ -460,23 +460,13 @@ def _get_project_and_args(project: str) -> tuple[str, str]:
 
 def _extract_finish_reason_from_status(status: ExportStatus) -> str:
     """Extract finish reason from status."""
-    logger.info(f"DEBUG: Export status object: {status}")
-
-    logger.info(
-        f"DEBUG: Status analysis - success={status.success}, censoring_occurred={status.censoring_occurred}, job_shutdown={status.job_shutdown}"
-    )
-
     if status.job_shutdown and status.job_shutdown.is_aborted:
-        logger.info("DEBUG: Finish reason: aborted")
         return "aborted"
     elif not status.success:
-        logger.info(f"DEBUG: Finish reason: failed (success={status.success})")
         return "failed"
     elif status.censoring_occurred:
-        logger.info("DEBUG: Finish reason: completed with censoring")
         return "completed with censoring"
     else:
-        logger.info("DEBUG: Finish reason: completed")
         return "completed"
 
 
@@ -499,18 +489,12 @@ def _build_enhanced_notification(
     # Determine status emoji with abort taking precedence
     if status.job_shutdown and status.job_shutdown.is_aborted:
         status_emoji = "🛑"
-        logger.info(f"Setting emoji to stop sign due to job abort: {status_emoji}")
     elif not success:
         status_emoji = "❌"
-        logger.info(f"Setting emoji to failed due to success={success}: {status_emoji}")
     elif censoring_occurred:
         status_emoji = "⚠️"
-        logger.info(f"Setting emoji to warning due to censoring: {status_emoji}")
     else:
         status_emoji = "✅"
-        logger.info(f"Setting emoji to success: {status_emoji}")
-
-    logger.info(f"DEBUG: Final status emoji: {status_emoji}")
 
     # Add total duration to base status
     total_duration = _read_total_duration(artifact_dir)
@@ -837,19 +821,13 @@ def _get_postprocess_status_links(
     artifact_dir: Path | None, mlflow_run_url: str | None
 ) -> list[str]:
     """Get postprocess status links."""
-    logger.info(
-        f"DEBUG: Postprocess status - artifact_dir={artifact_dir}, mlflow_run_url={mlflow_run_url}"
-    )
-
     if not artifact_dir or not artifact_dir.exists():
-        logger.info("DEBUG: Postprocess status - artifact_dir missing or doesn't exist")
         return []
 
     step_log_links = []
 
     # Look for postprocess results in step directories
     step_dirs = sorted(artifact_dir.glob("*"))
-    logger.info(f"DEBUG: Postprocess status - found {len(step_dirs)} directories in {artifact_dir}")
 
     for step_dir in step_dirs:
         if not step_dir.is_dir() or step_dir.name.startswith("."):
@@ -964,9 +942,14 @@ def _create_unified_get_file_link(mlflow_run_url: str | None) -> callable:
         get_file_link function that takes absolute Path and returns URL
     """
 
-    def get_file_link(file_path: Path, text: str = None) -> str:
+    def get_file_link(file_path: Path | str, text: str = None) -> str:
         if not file_path:
             return "NO_FILE_RECEIVED"
+
+        # Convert to Path object if it's a string, but warn that Path objects are preferred
+        if isinstance(file_path, str):
+            logger.warning(f"get_file_link received string instead of Path object: {file_path}")
+            file_path = Path(file_path)
 
         return _create_mlflow_file_link(text or file_path.name, mlflow_run_url, file_path)
 
@@ -998,7 +981,9 @@ def _create_mlflow_file_link(text: str, mlflow_run_url: str, file_path: Path) ->
 
     try:
         # Convert absolute path to relative path for MLflow URL
-        artifacts_base_dir = env.BASE_ARTIFACT_DIR
+        artifacts_base_dir = Path(
+            os.environ.get("BASE_ARTIFACT_DIR") or env.BASE_ARTIFACT_DIR
+        ).parent
         try:
             relative_path = file_path.relative_to(artifacts_base_dir)
         except ValueError:
@@ -1640,9 +1625,9 @@ def _format_caliper_metadata_info_for_step(
             # Format path with link to metadata file
             if get_file_link:
                 metadata_file_link = get_file_link(metadata_file)
-                path_info = f"* 📊 Test directory: [`{display_path}`]({metadata_file_link})"
+                path_info = f"  * 📊 Test directory: [`{display_path}`]({metadata_file_link})"
             else:
-                path_info = f"* 📊 Test directory: `{display_path}`"
+                path_info = f"  * 📊 Test directory: `{display_path}`"
             metadata_lines.append(path_info)
 
             # Look for completion information
@@ -1681,7 +1666,7 @@ def _format_caliper_metadata_info_for_step(
                 metadata_file.parent.relative_to(base_dir) if base_dir else metadata_file.parent
             )
             metadata_lines.append(
-                f"* 📊 Test directory: `{relative_path}` - Error reading metadata: {e}"
+                f"  * 📊 Test directory: `{relative_path}` - Error reading metadata: {e}"
             )
 
     return metadata_lines
