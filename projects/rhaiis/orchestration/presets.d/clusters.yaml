@@ -11,6 +11,6 @@ zeus:
   benchmarks.guidellm.fs_group: 0
 
 old-zeus:
-  rhaiis.cluster_tag: "old-zeus"
+  rhaiis.cluster_tag: "zeus1"
   rhaiis.deploy.image_pull_secrets: ["npalaska-image-pull"]
   benchmarks.guidellm.fs_group: 0
