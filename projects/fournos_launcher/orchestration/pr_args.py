@@ -94,7 +94,7 @@ def handle_cluster_directive(line: str) -> dict[str, str]:
     if not cluster_name:
         raise ValueError(f"Invalid /cluster directive: cluster name cannot be empty in '{line}'")
 
-    return {"cluster.name": cluster_name}
+    return {"cluster.name": cluster_name, "fournos.job.clusterless": False}
 
 
 def handle_exclusive_directive(line: str) -> dict[str, str]:

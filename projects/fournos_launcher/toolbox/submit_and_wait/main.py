@@ -136,9 +136,6 @@ def validate_inputs(args, ctx):
     if not args.cluster_name and not args.clusterless:
         raise ValueError("cluster_name is required unless clusterless mode is enabled")
 
-    if args.clusterless and args.exclusive:
-        raise ValueError("Clusterless mode and exclusive mode cannot both be enabled")
-
     if not args.project:
         raise ValueError("project is required")
 

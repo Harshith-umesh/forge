@@ -265,13 +265,6 @@ def submit_job():
                 "/cluster (cluster.name) must be set - cannot submit job without target cluster (unless /clusterless is used)"
             )
 
-        # Validate clusterless and exclusive modes are not both enabled
-        exclusive_mode = config.project.get_config("fournos.job.exclusive")
-        if clusterless_mode and exclusive_mode:
-            raise ValueError(
-                "Clusterless mode and exclusive mode cannot both be enabled - use /clusterless (sets exclusive=false) or /exclusive false"
-            )
-
         # Get GPU hardware configuration
         gpu_count = config.project.get_config("fournos.job.hardware.gpu_count")
         gpu_type = config.project.get_config("fournos.job.hardware.gpu_type")

@@ -18,7 +18,7 @@ spec:
   {%- else -%}
   cluster: {{ args.cluster_name }}
   {%- endif %}
-  exclusive: {{ args.exclusive }}
+  exclusive: {% if args.clusterless -%}false{% else %}{{ args.exclusive }}{%- endif %}
   pipeline: {{ args.pipeline_name }}
   {% if args.gpu_count and args.gpu_type -%}
   hardware:
