@@ -80,7 +80,7 @@ def test_notification_formatting_success():
     print(f"Generated notification text:\n{notification_text}\n")
 
     # Verify overall structure
-    assert "**Post-processing Status** ✅" in notification_text
+    assert "✅ **Post-processing Status**" in notification_text
     assert (
         "- ✅ [**parse**](https://example.com/artifacts/logs/001_parse.log): `success`"
         in notification_text
@@ -148,7 +148,7 @@ def test_notification_formatting_regression():
     notification_text = format_postprocess_status_notification(status, mock_get_file_link)
 
     # Verify overall failure status
-    assert "**Post-processing Status** ❌" in notification_text
+    assert "❌ **Post-processing Status**" in notification_text
 
     # Verify parse success
     assert "- ✅ **parse**: `success`" in notification_text
@@ -189,7 +189,7 @@ def test_notification_formatting_failure():
     notification_text = format_postprocess_status_notification(status)
 
     # Verify overall failure status
-    assert "**Post-processing Status** ❌" in notification_text
+    assert "❌ **Post-processing Status**" in notification_text
 
     # Verify failed step
     assert "- ❌ **parse**: `failed`" in notification_text
@@ -219,7 +219,7 @@ def test_notification_without_file_links():
     notification_text = format_postprocess_status_notification(status)
 
     # Verify basic formatting without links
-    assert "**Post-processing Status** ✅" in notification_text
+    assert "✅ **Post-processing Status**" in notification_text
     assert "- ✅ **parse**: `success`" in notification_text
     # Should not contain any links
     assert "https://" not in notification_text

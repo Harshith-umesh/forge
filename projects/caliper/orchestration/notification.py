@@ -42,7 +42,7 @@ def format_postprocess_status_notification(
 
         return get_file_link(base_directory / file_path, text)
 
-    lines.append(f"**Post-processing Status** {status_emoji} `{base_directory}`")
+    lines.append(f"{status_emoji} **Post-processing Status** `{base_directory}`")
 
     # Convert steps from list[dict] format to sorted list of (step_name, step_data) tuples
     step_tuples = []
