@@ -1145,64 +1145,6 @@ def _process_notification_files(step_dir: Path) -> list[str]:
     return notifications_from_files
 
 
-def _extract_test_metadata_info(artifact_dir: Path, mlflow_run_url: str | None = None) -> list[str]:
-    """Extract test execution information from the test metadata files.
-
-    Args:
-        artifact_dir: Directory to search for __test_labels__.yaml files
-        mlflow_run_url: Optional MLflow run URL for creating links
-
-    Returns:
-        List of formatted strings with test information (directory, labels, success, message)
-    """
-    test_info_lines = []
-
-    # Search for the test medata files recursively
-    test_metadata_files = _search_caliper_metadata_files(artifact_dir)
-
-    if not test_metadata_files:
-        return []
-
-    for test_metadata_file in test_metadata_files:
-        try:
-            with open(test_metadata_file, encoding="utf-8") as f:
-                test_metadata = yaml.safe_load(f) or {}
-
-            # Extract directory relative to artifact_dir - use just the immediate directory name
-            relative_dir = test_metadata_file.parent.relative_to(artifact_dir)
-            dir_name = relative_dir.name if relative_dir != Path(".") else "root"
-
-            # Extract completion info
-            completion = test_metadata.get("completion", {})
-            success = completion.get("success")
-            message = completion.get("message")
-
-            if message:
-                message = f": `{message}`"
-            else:
-                message = ""
-
-            # Format status
-            if success:
-                status_emoji = "✅"
-            elif success is False:
-                status_emoji = "❌"
-            else:
-                status_emoji = "❓"
-
-            # Create link to __test_labels__.yaml file if MLflow URL is available
-            dir_link = _create_mlflow_file_link(
-                f"**{dir_name}**", mlflow_run_url, test_metadata_file
-            )
-
-            test_info_lines.append(f"* {status_emoji} {dir_link}{message}")
-
-        except Exception as e:
-            test_info_lines.append(f"**{test_metadata_file.name}**: Error reading file - {e}")
-
-    return test_info_lines
-
-
 def _extract_postprocess_status_info(artifact_dir: Path) -> list[str]:
     """Extract post-processing status information from POSTPROCESS_STATUS_FILENAME files.
 
@@ -1263,14 +1205,6 @@ def _extract_postprocess_status_info(artifact_dir: Path) -> list[str]:
 def _process_step_details(step_dir: Path, mlflow_run_url: str | None = None) -> list[str]:
     """Process test labels, caliper metadata, and postprocess status for a single step directory."""
     step_details = []
-
-    # Extract test labels for this specific step
-    try:
-        test_metadata_info = _extract_test_metadata_info(step_dir, mlflow_run_url)
-        if test_metadata_info:
-            step_details.extend(test_metadata_info)
-    except Exception as e:
-        logger.warning(f"Failed to extract test labels for step {step_dir.name}: {e}")
 
     get_file_link = _create_get_file_link(mlflow_run_url)
 
@@ -1702,14 +1636,6 @@ def _format_caliper_metadata_info_for_step(get_file_link: Any, step_dir: Path) -
             metadata_file_link = get_file_link(metadata_file, text=f"`{display_path}`")
             path_info = f"* 📊 **Test directory**: {metadata_file_link}"
             metadata_lines.append(path_info)
-
-            # Look for completion information
-            if metadata.completion:
-                status_emoji = "✅" if metadata.completion.success else "❌"
-                message_part = (
-                    f" `{metadata.completion.message}`" if metadata.completion.message else ""
-                )
-                metadata_lines.append(f"    * {status_emoji}{message_part}")
 
             # Format labels
             if labels:
