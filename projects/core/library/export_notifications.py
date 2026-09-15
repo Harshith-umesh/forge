@@ -436,40 +436,48 @@ def send_notification(
     return notification_success
 
 
-def _get_project_and_args(project: str, artifact_dir: Path | None) -> tuple[str, str]:
-    """Extract project name and args from fournos job or config."""
+def _get_project_and_args(project: str, artifact_dir: Path | None) -> tuple[str, str, str]:
+    """Extract project name, args, and job info from fournos job or config."""
     fjob_project = project
     fjob_args_str = ""
+    job_info_line = ""
 
     try:
         metadata_dir = ci_lib.get_ci_metadata_dir(base_ci_dir=artifact_dir, any_level=True)
         if not metadata_dir:
-            return fjob_project, fjob_args_str
+            return fjob_project, fjob_args_str, job_info_line
 
         fournos_fjob_path = metadata_dir / "fournos_fjob.yaml"
         if not fournos_fjob_path.exists():
-            return fjob_project, fjob_args_str
+            return fjob_project, fjob_args_str, job_info_line
 
         with open(fournos_fjob_path, encoding="utf-8") as f:
             fjob_data = yaml.safe_load(f)
 
-        display_name = fjob_data.get("spec", {}).get("displayName", "")
-        if not display_name:
-            return fjob_project, fjob_args_str
+        # Get project name and args from executionEngine.forge configuration
+        spec = fjob_data.get("spec", {})
+        execution_engine = spec.get("executionEngine", {})
+        forge_config = execution_engine.get("forge", {})
+        fjob_project = forge_config.get("project", project)
 
-        parts = display_name.split()
-        if not parts:
-            return fjob_project, fjob_args_str
+        # Get forge args from the executionEngine.forge.args
+        forge_args = forge_config.get("args", [])
+        if forge_args:
+            fjob_args_str = " ".join(forge_args)
 
-        fjob_project = parts[0]
-        fjob_args_str = " ".join(parts[1:]) if len(parts) > 1 else ""
+        # Get name and displayName for the second line
+        fjob_name = fjob_data.get("metadata", {}).get("name", "name not found")
+        display_name = spec.get("displayName", "displayName not set")
+
+        job_info_line = f"> `{fjob_name}` -- _{display_name}_"
+
+        logger.info(
+            f"Extracted fjob info - project: {fjob_project}, args: {fjob_args_str}, job_info: {job_info_line}"
+        )
     except Exception as e:
         logger.warning(f"Failed to read fournos job for project/args: {e}")
 
-    if fjob_args_str:
-        fjob_args_str = f" | `{fjob_args_str}`"
-
-    return fjob_project, fjob_args_str
+    return fjob_project, fjob_args_str, job_info_line
 
 
 def _extract_finish_reason_from_status(
@@ -496,7 +504,7 @@ def _build_enhanced_notification(
     step_status: StepStatus | None = None,
 ) -> tuple[str, bool]:
     """Build enhanced notification with fournos job config and artifact links."""
-    fjob_project, fjob_args_str = _get_project_and_args(project, artifact_dir)
+    fjob_project, fjob_args_str, job_info_line = _get_project_and_args(project, artifact_dir)
 
     success = status.success
     censoring_occurred = status.censoring_occurred
@@ -534,18 +542,26 @@ def _build_enhanced_notification(
         status_what = "completed"
     else:
         status_emoji = "✅"
-        status_reason = "success"
-        status_what = "completed"
+        status_reason = None
+        status_what = "completed with success"
 
     # Add total duration to base status
     total_duration = _read_total_duration(artifact_dir)
     duration_suffix = f" `{total_duration}`" if total_duration else ""
 
+    # Format the execution line with project and args separated
     if fjob_args_str:
-        fjob_args_str = f" {fjob_args_str}"
+        execution_text = f"Execution of `{fjob_project}` | `{fjob_args_str}`"
+    else:
+        execution_text = f"Execution of `{fjob_project}`"
 
-    base_status = f"{status_emoji} **Execution of `{fjob_project}`{fjob_args_str}** {status_what} (`{status_reason}`) after {duration_suffix} {status_emoji}"
+    status_reason_str = f" (`{status_reason}`)" if status_reason else ""
+    base_status = f"{status_emoji} {execution_text} {status_what}{status_reason_str} after {duration_suffix} {status_emoji}"
     notification_parts = [base_status]
+
+    # Add job info line (name and displayName) if available
+    if job_info_line:
+        notification_parts.append(job_info_line)
 
     # Add job abort message right below overall status if applicable
     shutdown_status = status.job_shutdown
@@ -1634,13 +1650,30 @@ def _format_caliper_metadata_info_for_step(get_file_link: Any, step_dir: Path) -
 
             # Format path with link to metadata file
             metadata_file_link = get_file_link(metadata_file, text=f"`{display_path}`")
-            path_info = f"* 📊 **Test directory**: {metadata_file_link}"
+
+            # Add completion status emoji to the test directory line
+            completion_emoji = "📊"
+            if metadata.completion:
+                if metadata.completion.success:
+                    pass  # no change
+                elif metadata.completion.success is False:
+                    completion_emoji = "❌"
+                else:
+                    completion_emoji = "❓"
+
+            path_info = (
+                f"* {completion_emoji} **Test directory**: {metadata_file_link}{completion_emoji}"
+            )
             metadata_lines.append(path_info)
+
+            # Add completion message as a separate line
+            if metadata.completion and metadata.completion.message:
+                metadata_lines.append(f"  * `{metadata.completion.message}`")
 
             # Format labels
             if labels:
                 label_items = [f"`{k}={v}`" for k, v in labels.items()]
-                metadata_lines.append(f"    * {', '.join(label_items)}")
+                metadata_lines.append(f"  * {', '.join(label_items)}")
 
             # Format KPI labels
             if kpi_labels:
