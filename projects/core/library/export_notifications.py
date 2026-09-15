@@ -321,11 +321,22 @@ def send_notification(
     """
     # Extract notification parameters from status object
     project = config.project.get_config("project.name")
-    finish_reason = _extract_finish_reason_from_status(status)
+
+    # Check individual step exit statuses from exit_status.yaml files once
+    step_status = None
+    if artifact_dir:
+        try:
+            step_status = _get_overall_step_status(artifact_dir)
+            if step_status == StepStatus.FAILURE:
+                logger.info("Step failure detected from exit_status.yaml files")
+        except Exception as e:
+            logger.warning(f"Failed to check step exit statuses for notification: {e}")
+
+    finish_reason = _extract_finish_reason_from_status(status, step_status)
 
     # Build enhanced notification with fournos job info and artifact links
     notification_status, notification_success = _build_enhanced_notification(
-        artifact_dir, project, finish_reason, status
+        artifact_dir, project, finish_reason, status, step_status
     )
 
     # Apply censoring to notification content before sending
@@ -461,11 +472,15 @@ def _get_project_and_args(project: str, artifact_dir: Path | None) -> tuple[str,
     return fjob_project, fjob_args_str
 
 
-def _extract_finish_reason_from_status(status: ExportStatus) -> str:
-    """Extract finish reason from status."""
+def _extract_finish_reason_from_status(
+    status: ExportStatus, step_status: StepStatus | None = None
+) -> str:
+    """Extract finish reason from status, including step exit status checking."""
     if status.job_shutdown and status.job_shutdown.is_aborted:
         return "aborted"
     elif not status.success:
+        return "export failed"
+    elif step_status == StepStatus.FAILURE:
         return "failed"
     elif status.censoring_occurred:
         return "completed with censoring"
@@ -478,6 +493,7 @@ def _build_enhanced_notification(
     project: str,
     finish_reason: str,
     status: ExportStatus,
+    step_status: StepStatus | None = None,
 ) -> tuple[str, bool]:
     """Build enhanced notification with fournos job config and artifact links."""
     fjob_project, fjob_args_str = _get_project_and_args(project, artifact_dir)
@@ -485,19 +501,41 @@ def _build_enhanced_notification(
     success = status.success
     censoring_occurred = status.censoring_occurred
 
-    logger.info(
-        f"Building notification - success={success}, censoring_occurred={censoring_occurred}, finish_reason='{finish_reason}'"
-    )
+    # Override success if step failures detected
+    step_failure_detected = step_status == StepStatus.FAILURE
+    if step_failure_detected:
+        success = False  # Override success if any step failed
+        logger.info(
+            "Step failure detected from exit_status.yaml files - overriding success to False"
+        )
 
+    logger.info(
+        f"Building notification - success={success}, censoring_occurred={censoring_occurred}, finish_reason='{finish_reason}', step_failure_detected={step_failure_detected}"
+    )
+    status_emoji = "�"
+    status_reason = "unknown"
+    status_what = "status unknown"
     # Determine status emoji with abort taking precedence
     if status.job_shutdown and status.job_shutdown.is_aborted:
-        status_emoji = "🛑"
+        status_emoji = "⛔"
+        status_reason = "user abort"
+        status_what = "was aborted"
+    elif step_failure_detected:
+        status_emoji = "❌"  # Step failures take precedence over export success
+        status_reason = "pipeline step failure"
+        status_what = "failed"
     elif not success:
         status_emoji = "❌"
+        status_reason = "export failure"
+        status_what = "completed"
     elif censoring_occurred:
         status_emoji = "⚠️"
+        status_reason = "censoring detected"
+        status_what = "completed"
     else:
         status_emoji = "✅"
+        status_reason = "success"
+        status_what = "completed"
 
     # Add total duration to base status
     total_duration = _read_total_duration(artifact_dir)
@@ -506,7 +544,7 @@ def _build_enhanced_notification(
     if fjob_args_str:
         fjob_args_str = f" {fjob_args_str}"
 
-    base_status = f"{status_emoji} **Execution of `{fjob_project}`{fjob_args_str}** {duration_suffix} {status_emoji}"
+    base_status = f"{status_emoji} **Execution of `{fjob_project}`{fjob_args_str}** {status_what} (`{status_reason}`) after {duration_suffix} {status_emoji}"
     notification_parts = [base_status]
 
     # Add job abort message right below overall status if applicable
@@ -514,7 +552,7 @@ def _build_enhanced_notification(
     if shutdown_status and shutdown_status.is_aborted:
         notification_parts += ["", "---"]
         shutdown_value = shutdown_status.shutdown_value or "Stop"
-        notification_parts.append(f"🛑 **JOB ABORTED** - `spec.shutdown={shutdown_value}`")
+        notification_parts.append(f"⛔ **JOB ABORTED** - `spec.shutdown={shutdown_value}`")
 
     execution_engine_config = _get_execution_engine_config(artifact_dir)
     if execution_engine_config:
@@ -1387,6 +1425,49 @@ def _get_overall_status_from_steps(artifact_dir: Path) -> str:
     except Exception as e:
         logger.exception(f"Failed to check step statuses: {e}")
         return "🔴"  # Error checking = red
+
+
+def _get_overall_step_status(artifact_dir: Path) -> StepStatus:
+    """Check all step exit statuses and return overall status as StepStatus enum."""
+
+    try:
+        current_step_name = Path(env.BASE_ARTIFACT_DIR).name
+
+        step_statuses = []
+
+        for step_dir in sorted(artifact_dir.iterdir()):
+            if not step_dir.is_dir():
+                continue
+            if step_dir.name.startswith("."):
+                continue
+
+            # Only check directories that have run.log (actual steps)
+            run_log = step_dir / "run.log"
+            if not run_log.exists():
+                continue
+
+            _emoji, status = _read_step_exit_status(step_dir, current_step_name)
+            step_statuses.append(status)
+
+            # Check for postprocess warnings in this step (always check, regardless of exit status)
+            postprocess_status = _check_postprocess_warnings(step_dir)
+            step_statuses.append(postprocess_status)
+
+        # Priority: failure > ongoing > warning > unknown > success
+        if StepStatus.FAILURE in step_statuses:
+            return StepStatus.FAILURE
+        elif StepStatus.WARNING in step_statuses:
+            return StepStatus.WARNING
+        elif StepStatus.UNKNOWN in step_statuses:
+            return StepStatus.UNKNOWN
+        elif StepStatus.ONGOING in step_statuses:
+            return StepStatus.ONGOING
+        else:
+            return StepStatus.SUCCESS
+
+    except Exception as e:
+        logger.exception(f"Failed to check step statuses: {e}")
+        return StepStatus.FAILURE  # Error checking = failure
 
 
 def _read_step_duration(step_dir: Path) -> str:
