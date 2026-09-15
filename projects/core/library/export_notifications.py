@@ -1661,9 +1661,7 @@ def _format_caliper_metadata_info_for_step(get_file_link: Any, step_dir: Path) -
                 else:
                     completion_emoji = "❓"
 
-            path_info = (
-                f"* {completion_emoji} **Test directory**: {metadata_file_link}{completion_emoji}"
-            )
+            path_info = f"* {completion_emoji} **Test directory**: {metadata_file_link}"
             metadata_lines.append(path_info)
 
             # Add completion message as a separate line
