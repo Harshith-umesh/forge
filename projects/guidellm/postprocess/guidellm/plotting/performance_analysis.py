@@ -59,42 +59,43 @@ def _image_to_base64(image_path: str | Path) -> str:
 
 
 def _read_html_content(html_path: str | Path) -> str:
-    """Read HTML file content for embedding.
+    """Read HTML file content for report inclusion.
+
+    Now that we use CDN for all files, we can directly read the body content
+    which contains just the plot without the library (since library comes from CDN).
 
     Args:
         html_path: Path to the HTML file
 
     Returns:
-        HTML content string
+        Body content ready for embedding in reports
     """
     try:
-        logger.debug(f"🔍 Reading HTML content from: {html_path}")
+        html_path = Path(html_path)
+        logger.debug(f"🔍 Reading CDN-optimized content from: {html_path}")
 
-        # Check if file exists
-        if not Path(html_path).exists():
+        if not html_path.exists():
             logger.warning(f"❌ HTML file not found: {html_path}")
             return ""
 
         with open(html_path, encoding="utf-8") as html_file:
             content = html_file.read()
             content_size_kb = len(content.encode("utf-8")) / 1024
-            logger.debug(f"   📄 Read {content_size_kb:.1f} KB from HTML file")
+            logger.debug(f"   📄 Read {content_size_kb:.1f} KB from CDN-optimized HTML file")
 
-            # Import re for regex operations
+            # Extract body content (no library since it uses CDN)
             import re
 
-            # Extract body content to avoid HTML document conflicts but keep all scripts
             body_match = re.search(r"<body[^>]*>(.*?)</body>", content, re.DOTALL | re.IGNORECASE)
             if body_match:
                 body_content = body_match.group(1)
                 body_size_kb = len(body_content.encode("utf-8")) / 1024
-                logger.debug(f"   ✅ Extracted body content: {body_size_kb:.1f} KB")
+                logger.debug(f"   ✅ Extracted body content: {body_size_kb:.1f} KB (CDN-optimized)")
                 return body_content
             else:
-                # If no body tags found, use full content
                 logger.debug("   ⚠️  No body tags found, using full content")
-                logger.debug(f"   📄 Using full HTML content: {content_size_kb:.1f} KB")
                 return content
+
     except Exception as e:
         logger.warning(f"❌ Failed to read HTML content from {html_path}: {e}")
         return ""

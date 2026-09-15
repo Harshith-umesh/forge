@@ -99,8 +99,11 @@ def save_figure(
                 width=None,  # Remove any fixed width
                 height=None,  # Remove any fixed height
             )
-            fig.write_html(output_file)
-            logger.debug(f"{final_filename} HTML saved successfully")
+
+            # Use CDN for both standalone files and reports - simple and works
+            fig.write_html(output_file, include_plotlyjs="cdn")
+            logger.debug(f"{final_filename} HTML saved successfully (CDN optimized)")
+
             return str(output_file)
 
     except Exception as e:
