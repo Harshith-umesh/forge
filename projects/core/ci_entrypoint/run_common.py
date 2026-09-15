@@ -29,9 +29,7 @@ logger = logging.getLogger(__name__)
 
 FORGE_HOME = Path(__file__).resolve().parent.parent.parent.parent
 
-EXTRA_PACKAGES = [
-    "benchconf @ git+https://github.com/openshift-psap/benchconf@main",
-]
+EXTRA_PACKAGES = []
 
 # Global reference to child process for signal forwarding
 _child_process = None
