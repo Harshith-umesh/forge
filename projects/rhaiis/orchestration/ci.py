@@ -171,7 +171,7 @@ def post_cleanup(ctx):
 def preflight(ctx) -> int:
     """Preflight check phase - Validate that the cluster if ready for testing."""
 
-    logger.warning("Nothing so far for the preflight check")
+    logger.info("Nothing so far for the preflight check")
 
     return 0
 

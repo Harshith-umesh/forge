@@ -321,11 +321,22 @@ def send_notification(
     """
     # Extract notification parameters from status object
     project = config.project.get_config("project.name")
-    finish_reason = _extract_finish_reason_from_status(status)
+
+    # Check individual step exit statuses from exit_status.yaml files once
+    step_status = None
+    if artifact_dir:
+        try:
+            step_status = _get_overall_step_status(artifact_dir)
+            if step_status == StepStatus.FAILURE:
+                logger.info("Step failure detected from exit_status.yaml files")
+        except Exception as e:
+            logger.warning(f"Failed to check step exit statuses for notification: {e}")
+
+    finish_reason = _extract_finish_reason_from_status(status, step_status)
 
     # Build enhanced notification with fournos job info and artifact links
     notification_status, notification_success = _build_enhanced_notification(
-        artifact_dir, project, finish_reason, status
+        artifact_dir, project, finish_reason, status, step_status
     )
 
     # Apply censoring to notification content before sending
@@ -425,44 +436,59 @@ def send_notification(
     return notification_success
 
 
-def _get_project_and_args(project: str) -> tuple[str, str]:
-    """Extract project name and args from fournos job or config."""
+def _get_project_and_args(project: str, artifact_dir: Path | None) -> tuple[str, str, str]:
+    """Extract project name, args, and job info from fournos job or config."""
     fjob_project = project
     fjob_args_str = ""
+    job_info_line = ""
 
     try:
-        metadata_dir = ci_lib.get_ci_metadata_dir()
+        metadata_dir = ci_lib.get_ci_metadata_dir(base_ci_dir=artifact_dir, any_level=True)
+        if not metadata_dir:
+            return fjob_project, fjob_args_str, job_info_line
+
         fournos_fjob_path = metadata_dir / "fournos_fjob.yaml"
         if not fournos_fjob_path.exists():
-            return fjob_project, fjob_args_str
+            return fjob_project, fjob_args_str, job_info_line
 
         with open(fournos_fjob_path, encoding="utf-8") as f:
             fjob_data = yaml.safe_load(f)
 
-        display_name = fjob_data.get("spec", {}).get("displayName", "")
-        if not display_name:
-            return fjob_project, fjob_args_str
+        # Get project name and args from executionEngine.forge configuration
+        spec = fjob_data.get("spec", {})
+        execution_engine = spec.get("executionEngine", {})
+        forge_config = execution_engine.get("forge", {})
+        fjob_project = forge_config.get("project", project)
 
-        parts = display_name.split()
-        if not parts:
-            return fjob_project, fjob_args_str
+        # Get forge args from the executionEngine.forge.args
+        forge_args = forge_config.get("args", [])
+        if forge_args:
+            fjob_args_str = " ".join(forge_args)
 
-        fjob_project = parts[0]
-        fjob_args_str = " ".join(parts[1:]) if len(parts) > 1 else ""
+        # Get name and displayName for the second line
+        fjob_name = fjob_data.get("metadata", {}).get("name", "name not found")
+        display_name = spec.get("displayName", "displayName not set")
+
+        job_info_line = f"> `{fjob_name}` -- _{display_name}_"
+
+        logger.info(
+            f"Extracted fjob info - project: {fjob_project}, args: {fjob_args_str}, job_info: {job_info_line}"
+        )
     except Exception as e:
         logger.warning(f"Failed to read fournos job for project/args: {e}")
 
-    if fjob_args_str:
-        fjob_args_str = f" | `{fjob_args_str}`"
-
-    return fjob_project, fjob_args_str
+    return fjob_project, fjob_args_str, job_info_line
 
 
-def _extract_finish_reason_from_status(status: ExportStatus) -> str:
-    """Extract finish reason from status."""
+def _extract_finish_reason_from_status(
+    status: ExportStatus, step_status: StepStatus | None = None
+) -> str:
+    """Extract finish reason from status, including step exit status checking."""
     if status.job_shutdown and status.job_shutdown.is_aborted:
         return "aborted"
     elif not status.success:
+        return "export failed"
+    elif step_status == StepStatus.FAILURE:
         return "failed"
     elif status.censoring_occurred:
         return "completed with censoring"
@@ -475,45 +501,76 @@ def _build_enhanced_notification(
     project: str,
     finish_reason: str,
     status: ExportStatus,
+    step_status: StepStatus | None = None,
 ) -> tuple[str, bool]:
     """Build enhanced notification with fournos job config and artifact links."""
-    fjob_project, fjob_args_str = _get_project_and_args(project)
+    fjob_project, fjob_args_str, job_info_line = _get_project_and_args(project, artifact_dir)
 
     success = status.success
     censoring_occurred = status.censoring_occurred
 
-    logger.info(
-        f"Building notification - success={success}, censoring_occurred={censoring_occurred}, finish_reason='{finish_reason}'"
-    )
+    # Override success if step failures detected
+    step_failure_detected = step_status == StepStatus.FAILURE
+    if step_failure_detected:
+        success = False  # Override success if any step failed
+        logger.info(
+            "Step failure detected from exit_status.yaml files - overriding success to False"
+        )
 
+    logger.info(
+        f"Building notification - success={success}, censoring_occurred={censoring_occurred}, finish_reason='{finish_reason}', step_failure_detected={step_failure_detected}"
+    )
+    status_emoji = "�"
+    status_reason = "unknown"
+    status_what = "status unknown"
     # Determine status emoji with abort taking precedence
     if status.job_shutdown and status.job_shutdown.is_aborted:
-        status_emoji = "🛑"
+        status_emoji = "⛔"
+        status_reason = "user abort"
+        status_what = "was aborted"
+    elif step_failure_detected:
+        status_emoji = "❌"  # Step failures take precedence over export success
+        status_reason = "pipeline step failure"
+        status_what = "failed"
     elif not success:
         status_emoji = "❌"
+        status_reason = "export failure"
+        status_what = "completed"
     elif censoring_occurred:
         status_emoji = "⚠️"
+        status_reason = "censoring detected"
+        status_what = "completed"
     else:
         status_emoji = "✅"
+        status_reason = None
+        status_what = "completed with success"
 
     # Add total duration to base status
     total_duration = _read_total_duration(artifact_dir)
     duration_suffix = f" `{total_duration}`" if total_duration else ""
 
+    # Format the execution line with project and args separated
     if fjob_args_str:
-        fjob_args_str = f" {fjob_args_str}"
+        execution_text = f"Execution of `{fjob_project}` | `{fjob_args_str}`"
+    else:
+        execution_text = f"Execution of `{fjob_project}`"
 
-    base_status = f"{status_emoji} **Execution of `{fjob_project}`{fjob_args_str}** {duration_suffix} {status_emoji}"
+    status_reason_str = f" (`{status_reason}`)" if status_reason else ""
+    base_status = f"{status_emoji} {execution_text} {status_what}{status_reason_str} after {duration_suffix} {status_emoji}"
     notification_parts = [base_status]
+
+    # Add job info line (name and displayName) if available
+    if job_info_line:
+        notification_parts.append(job_info_line)
 
     # Add job abort message right below overall status if applicable
     shutdown_status = status.job_shutdown
     if shutdown_status and shutdown_status.is_aborted:
         notification_parts += ["", "---"]
         shutdown_value = shutdown_status.shutdown_value or "Stop"
-        notification_parts.append(f"🛑 **JOB ABORTED** - `spec.shutdown={shutdown_value}`")
+        notification_parts.append(f"⛔ **JOB ABORTED** - `spec.shutdown={shutdown_value}`")
 
-    execution_engine_config = _get_execution_engine_config()
+    execution_engine_config = _get_execution_engine_config(artifact_dir)
     if execution_engine_config:
         notification_parts += ["", "---"]
         notification_parts.append("**Execution Engine Configuration**")
@@ -661,10 +718,10 @@ def _get_censoring_report_section(artifact_dir: Path | None) -> list[str] | None
         return [f"⚠️ **Censoring report parsing failed:** {e}"]
 
 
-def _get_execution_engine_config() -> str | None:
+def _get_execution_engine_config(artifact_dir: Path) -> str | None:
     """Read and format execution engine configuration."""
     try:
-        metadata_dir = ci_lib.get_ci_metadata_dir()
+        metadata_dir = ci_lib.get_ci_metadata_dir(artifact_dir, any_level=True)
         fournos_fjob_path = metadata_dir / "fournos_fjob.yaml"
         if not fournos_fjob_path.exists():
             return f"* FournosJob not found at `{fournos_fjob_path}`"
@@ -1104,64 +1161,6 @@ def _process_notification_files(step_dir: Path) -> list[str]:
     return notifications_from_files
 
 
-def _extract_test_metadata_info(artifact_dir: Path, mlflow_run_url: str | None = None) -> list[str]:
-    """Extract test execution information from the test metadata files.
-
-    Args:
-        artifact_dir: Directory to search for __test_labels__.yaml files
-        mlflow_run_url: Optional MLflow run URL for creating links
-
-    Returns:
-        List of formatted strings with test information (directory, labels, success, message)
-    """
-    test_info_lines = []
-
-    # Search for the test medata files recursively
-    test_metadata_files = _search_caliper_metadata_files(artifact_dir)
-
-    if not test_metadata_files:
-        return []
-
-    for test_metadata_file in test_metadata_files:
-        try:
-            with open(test_metadata_file, encoding="utf-8") as f:
-                test_metadata = yaml.safe_load(f) or {}
-
-            # Extract directory relative to artifact_dir - use just the immediate directory name
-            relative_dir = test_metadata_file.parent.relative_to(artifact_dir)
-            dir_name = relative_dir.name if relative_dir != Path(".") else "root"
-
-            # Extract completion info
-            completion = test_metadata.get("completion", {})
-            success = completion.get("success")
-            message = completion.get("message")
-
-            if message:
-                message = f": `{message}`"
-            else:
-                message = ""
-
-            # Format status
-            if success:
-                status_emoji = "✅"
-            elif success is False:
-                status_emoji = "❌"
-            else:
-                status_emoji = "❓"
-
-            # Create link to __test_labels__.yaml file if MLflow URL is available
-            dir_link = _create_mlflow_file_link(
-                f"**{dir_name}**", mlflow_run_url, test_metadata_file
-            )
-
-            test_info_lines.append(f"* {status_emoji} {dir_link}{message}")
-
-        except Exception as e:
-            test_info_lines.append(f"**{test_metadata_file.name}**: Error reading file - {e}")
-
-    return test_info_lines
-
-
 def _extract_postprocess_status_info(artifact_dir: Path) -> list[str]:
     """Extract post-processing status information from POSTPROCESS_STATUS_FILENAME files.
 
@@ -1223,14 +1222,6 @@ def _process_step_details(step_dir: Path, mlflow_run_url: str | None = None) -> 
     """Process test labels, caliper metadata, and postprocess status for a single step directory."""
     step_details = []
 
-    # Extract test labels for this specific step
-    try:
-        test_metadata_info = _extract_test_metadata_info(step_dir, mlflow_run_url)
-        if test_metadata_info:
-            step_details.extend(test_metadata_info)
-    except Exception as e:
-        logger.warning(f"Failed to extract test labels for step {step_dir.name}: {e}")
-
     get_file_link = _create_get_file_link(mlflow_run_url)
 
     # Extract caliper metadata for this specific step
@@ -1257,10 +1248,10 @@ def _process_step_details(step_dir: Path, mlflow_run_url: str | None = None) -> 
     return step_details
 
 
-def _check_job_shutdown_status() -> dict[str, Any] | None:
+def _check_job_shutdown_status(artifact_dir: Path) -> dict[str, Any] | None:
     """Check if the job has been aborted via spec.shutdown field."""
     try:
-        metadata_dir = ci_lib.get_ci_metadata_dir()
+        metadata_dir = ci_lib.get_ci_metadata_dir(artifact_dir, any_level=True)
         fournos_fjob_path = metadata_dir / "fournos_fjob.yaml"
         if not fournos_fjob_path.exists():
             return None
@@ -1384,6 +1375,49 @@ def _get_overall_status_from_steps(artifact_dir: Path) -> str:
     except Exception as e:
         logger.exception(f"Failed to check step statuses: {e}")
         return "🔴"  # Error checking = red
+
+
+def _get_overall_step_status(artifact_dir: Path) -> StepStatus:
+    """Check all step exit statuses and return overall status as StepStatus enum."""
+
+    try:
+        current_step_name = Path(env.BASE_ARTIFACT_DIR).name
+
+        step_statuses = []
+
+        for step_dir in sorted(artifact_dir.iterdir()):
+            if not step_dir.is_dir():
+                continue
+            if step_dir.name.startswith("."):
+                continue
+
+            # Only check directories that have run.log (actual steps)
+            run_log = step_dir / "run.log"
+            if not run_log.exists():
+                continue
+
+            _emoji, status = _read_step_exit_status(step_dir, current_step_name)
+            step_statuses.append(status)
+
+            # Check for postprocess warnings in this step (always check, regardless of exit status)
+            postprocess_status = _check_postprocess_warnings(step_dir)
+            step_statuses.append(postprocess_status)
+
+        # Priority: failure > ongoing > warning > unknown > success
+        if StepStatus.FAILURE in step_statuses:
+            return StepStatus.FAILURE
+        elif StepStatus.WARNING in step_statuses:
+            return StepStatus.WARNING
+        elif StepStatus.UNKNOWN in step_statuses:
+            return StepStatus.UNKNOWN
+        elif StepStatus.ONGOING in step_statuses:
+            return StepStatus.ONGOING
+        else:
+            return StepStatus.SUCCESS
+
+    except Exception as e:
+        logger.exception(f"Failed to check step statuses: {e}")
+        return StepStatus.FAILURE  # Error checking = failure
 
 
 def _read_step_duration(step_dir: Path) -> str:
@@ -1616,21 +1650,30 @@ def _format_caliper_metadata_info_for_step(get_file_link: Any, step_dir: Path) -
 
             # Format path with link to metadata file
             metadata_file_link = get_file_link(metadata_file, text=f"`{display_path}`")
-            path_info = f"* 📊 **Test directory**: {metadata_file_link}"
+
+            # Add completion status emoji to the test directory line
+            completion_emoji = "📊"
+            if metadata.completion:
+                if metadata.completion.success:
+                    pass  # no change
+                elif metadata.completion.success is False:
+                    completion_emoji = "❌"
+                else:
+                    completion_emoji = "❓"
+
+            path_info = (
+                f"* {completion_emoji} **Test directory**: {metadata_file_link}{completion_emoji}"
+            )
             metadata_lines.append(path_info)
 
-            # Look for completion information
-            if metadata.completion:
-                status_emoji = "✅" if metadata.completion.success else "❌"
-                message_part = (
-                    f" `{metadata.completion.message}`" if metadata.completion.message else ""
-                )
-                metadata_lines.append(f"    * {status_emoji}{message_part}")
+            # Add completion message as a separate line
+            if metadata.completion and metadata.completion.message:
+                metadata_lines.append(f"  * `{metadata.completion.message}`")
 
             # Format labels
             if labels:
                 label_items = [f"`{k}={v}`" for k, v in labels.items()]
-                metadata_lines.append(f"    * {', '.join(label_items)}")
+                metadata_lines.append(f"  * {', '.join(label_items)}")
 
             # Format KPI labels
             if kpi_labels:

@@ -8,7 +8,6 @@ and tooling setup for consistent behavior across all projects.
 
 import functools
 import logging
-import pathlib
 import sys
 import traceback
 
@@ -21,8 +20,12 @@ from projects.core.library import env
 logger = logging.getLogger(__name__)
 
 
+def get_ci_metadata_dir_location():
+    return env.BASE_ARTIFACT_DIR / "000__ci_metadata"
+
+
 # CI metadata directory path
-def get_ci_metadata_dir(base_ci_dir=None):
+def get_ci_metadata_dir(base_ci_dir, any_level=False):
     """Get the CI metadata directory path.
 
     Args:
@@ -34,15 +37,19 @@ def get_ci_metadata_dir(base_ci_dir=None):
     Raises:
         ValueError: If both base_ci_dir and env.BASE_ARTIFACT_DIR are None
     """
-    if base_ci_dir is not None:
-        return pathlib.Path(base_ci_dir) / "000__ci_metadata"
 
-    if env.BASE_ARTIFACT_DIR is not None:
-        return env.BASE_ARTIFACT_DIR / "000__ci_metadata"
+    meta_dir = base_ci_dir / "000__ci_metadata"
+    if meta_dir.exists():
+        return meta_dir
 
-    raise ValueError(
-        "Cannot determine CI metadata directory: both base_ci_dir parameter and env.BASE_ARTIFACT_DIR are None"
-    )
+    if not any_level:
+        raise ValueError(f"Cannot determine CI metadata directory in {base_ci_dir}")
+
+    rglob = list(base_ci_dir.rglob("000__ci_metadata"))
+    if not rglob:
+        raise ValueError(f"Cannot find CI metadata directory at any level of {base_ci_dir}")
+
+    return rglob[0]
 
 
 class HelpfulGroup(click.Group):
@@ -185,7 +192,7 @@ def safe_ci_entrypoint(command_func):
 
         # Save exit status to YAML file
         try:
-            metadata_dir = get_ci_metadata_dir()
+            metadata_dir = get_ci_metadata_dir_location()
             metadata_dir.mkdir(parents=True, exist_ok=True)
 
             exit_status_file = metadata_dir / "exit_status.yaml"
@@ -225,7 +232,7 @@ def add_notification_file(
     Returns:
         Path to the created notification file, or None if creation failed
     """
-    metadata_dir = get_ci_metadata_dir(base_ci_dir)
+    metadata_dir = get_ci_metadata_dir_location()
     notifications_dir = metadata_dir / "notifications"
     notifications_dir.mkdir(parents=True, exist_ok=True)
 

@@ -133,7 +133,7 @@ def _process_caliper_postprocess_status(
                 continue
 
             # Check for job shutdown/abort status
-            shutdown_status = _check_job_shutdown_status()
+            shutdown_status = _check_job_shutdown_status(step_dir)
             if shutdown_status:
                 # Add shutdown information to status data
                 status_data["job_shutdown"] = shutdown_status
@@ -351,7 +351,7 @@ def caliper_export_entrypoint(
             )
 
             # Check for job shutdown/abort status and add to mock status
-            shutdown_status = _check_job_shutdown_status()
+            shutdown_status = _check_job_shutdown_status(artifact_dir)
             if shutdown_status:
                 status.job_shutdown = JobShutdown.from_dict(shutdown_status)
                 logger.info(f"Added job shutdown status to dry run mock status: {shutdown_status}")
@@ -363,7 +363,7 @@ def caliper_export_entrypoint(
             )
 
             # Check for job shutdown/abort status and add to main export status
-            shutdown_status = _check_job_shutdown_status()
+            shutdown_status = _check_job_shutdown_status(artifact_dir)
             if shutdown_status:
                 status.job_shutdown = JobShutdown.from_dict(shutdown_status)
                 logger.info(f"Added job shutdown status to main export status: {shutdown_status}")
@@ -382,7 +382,7 @@ def caliper_export_entrypoint(
         # Create failure status for notification
         status = ExportStatus(success=False, final_status=f"failed: {e}")
         # Check for job shutdown/abort status and add to failure status
-        shutdown_status = _check_job_shutdown_status()
+        shutdown_status = _check_job_shutdown_status(artifact_dir)
         if shutdown_status:
             status.job_shutdown = JobShutdown.from_dict(shutdown_status)
     except Exception as e:
@@ -391,7 +391,7 @@ def caliper_export_entrypoint(
         # Create failure status for notification
         status = ExportStatus(success=False, final_status=f"failed: {e}")
         # Check for job shutdown/abort status and add to failure status
-        shutdown_status = _check_job_shutdown_status()
+        shutdown_status = _check_job_shutdown_status(artifact_dir)
         if shutdown_status:
             status.job_shutdown = JobShutdown.from_dict(shutdown_status)
 
