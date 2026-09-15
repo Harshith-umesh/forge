@@ -831,16 +831,13 @@ def run_guidellm_benchmark(*, endpoint_url: str) -> None:
     try:
         benchmark_key = runtime_config.get_benchmark_keys()[0]
 
-        # Install custom benchconf version if configured
-        custom = config.project.get_config("benchconf.custom_version", {}, print=False)
-        if custom.get("enabled"):
-            benchconf_lib.set_version(custom["repo"], custom["version"])
-
-        # Resolve benchconf config path if the benchmark references one
+        # Resolve benchconf config if enabled and the benchmark references one
         config_path = None
         benchconf_ref = benchmark.get("benchconf")
         if benchconf_ref and benchconf_lib._is_enabled():
+            benchconf_lib.maybe_install_custom_version()
             config_path = benchconf_lib.resolve_config_path(benchconf_ref)
+            benchconf_lib.save_version()
 
         guidellm_args = build_guidellm_args(benchmark)
         if not any(arg.startswith(("--tokenizer=", "--processor=")) for arg in guidellm_args):

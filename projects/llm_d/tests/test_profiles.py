@@ -153,6 +153,8 @@ def test_guidellm_benchmark_uses_original_model_name_as_processor(
         test_phase.benchconf_lib, "resolve_config_path", lambda ref: mock_config_path
     )
     monkeypatch.setattr(test_phase.benchconf_lib, "_is_enabled", lambda: True)
+    monkeypatch.setattr(test_phase.benchconf_lib, "maybe_install_custom_version", lambda: None)
+    monkeypatch.setattr(test_phase.benchconf_lib, "save_version", lambda: None)
     test_phase.run_guidellm_benchmark(endpoint_url="https://example.test/llm-d")
 
     assert captured["timeout"] == 3600

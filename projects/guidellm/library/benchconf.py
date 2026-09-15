@@ -10,32 +10,58 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from projects.core.library import config
+from projects.core.library.config import requires
 
 logger = logging.getLogger(__name__)
 
 
-def _is_enabled() -> bool:
+@requires(is_enabled="benchconf.enabled")
+def _is_enabled(_cfg) -> bool:
     """Return whether benchconf resolution is enabled in the project config."""
-    return config.project.get_config("benchconf.enabled", True, print=False)
+    return _cfg.is_enabled
 
 
-def set_version(repo: str, version: str) -> None:
-    """Install a specific version of the benchconf package at runtime.
+@requires(custom_version="benchconf.custom_version")
+def maybe_install_custom_version(_cfg) -> None:
+    """Install a custom benchconf version if configured.
 
-    Useful during development to pin a branch or commit without rebuilding
-    the container image.
-
-    Args:
-        repo: Git repository URL (e.g. ``git+https://github.com/openshift-psap/benchconf``).
-        version: Git ref to install (branch, tag, or commit SHA).
+    Reads ``benchconf.custom_version`` from the project config and, when
+    enabled, pip-installs the specified repo/version at runtime.
     """
+    custom = _cfg.custom_version
+    if not custom.get("enabled"):
+        return
+
     import subprocess
     import sys
 
-    spec = f"benchconf @ {repo}@{version}"
+    spec = f"benchconf @ {custom['repo']}@{custom['version']}"
     logger.info("Installing benchconf: %s", spec)
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", spec])
+
+
+def save_version() -> None:
+    """Save the installed benchconf version and commit to CI metadata."""
+    import json
+    from importlib.metadata import distribution
+
+    from projects.core.ci_entrypoint.prepare_ci import CI_METADATA_DIRNAME
+    from projects.core.library import env
+
+    dist = distribution("benchconf")
+    info: dict[str, str | None] = {"version": dist.metadata["Version"]}
+
+    direct_url_file = dist._path / "direct_url.json"
+    if direct_url_file.exists():
+        direct_url = json.loads(direct_url_file.read_text())
+        vcs_info = direct_url.get("vcs_info", {})
+        info["commit"] = vcs_info.get("commit_id")
+        info["url"] = direct_url.get("url")
+
+    dest = env.ARTIFACT_DIR / CI_METADATA_DIRNAME / "benchconf.version.json"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(json.dumps(info, indent=2))
+    logger.info("Saved benchconf version to %s: %s", dest, info)
 
 
 def resolve_config_path(benchconf_ref: str) -> Path:
@@ -56,7 +82,7 @@ def resolve_config_path(benchconf_ref: str) -> Path:
             "Install with: pip install 'benchconf @ git+https://github.com/openshift-psap/benchconf'"
         ) from exc
 
-    parts = benchconf_ref.split("/", 1)
+    parts = benchconf_ref.split("/")
     if len(parts) != 2:
         raise ValueError(
             f"Invalid benchconf reference '{benchconf_ref}'. "

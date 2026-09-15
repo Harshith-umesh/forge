@@ -168,17 +168,13 @@ def create_guidellm_resources_task(args, ctx):
     src_dir.mkdir(parents=True, exist_ok=True)
 
     # Copy and validate the config file into the artifact src/ directory
-    config_path = args.config_path
-    if config_path is not None:
-        import shutil
-
-        import yaml as _yaml
-
+    ctx.config_path = args.config_path
+    if ctx.config_path is not None:
         dest = src_dir / "guidellm-config.yaml"
-        shutil.copy2(config_path, dest)
+        shutil.copy2(ctx.config_path, dest)
         # Validate the YAML is well-formed
-        _yaml.safe_load(dest.read_text())
-        config_path = dest
+        yaml.safe_load(dest.read_text())
+        ctx.config_path = dest
 
     # Create the job based on mode
     if args.use_pvc:
@@ -194,7 +190,7 @@ def create_guidellm_resources_task(args, ctx):
                 timeout_seconds=args.timeout,
                 hf_token_secret=args.hf_token_secret,
                 fs_group=args.fs_group,
-                config_path=config_path,
+                config_path=ctx.config_path,
             ),
         )
 
@@ -238,7 +234,7 @@ def create_guidellm_resources_task(args, ctx):
                 timeout_seconds=args.timeout,
                 hf_token_secret=args.hf_token_secret,
                 fs_group=args.fs_group,
-                config_path=config_path,
+                config_path=ctx.config_path,
             ),
         )
         ctx.wait_deadline = time.monotonic() + args.timeout + JOB_COMPLETION_GRACE_SECONDS
