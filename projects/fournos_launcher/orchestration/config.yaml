@@ -20,6 +20,7 @@ fournos:
       name: psap-forge-ci
       key: kubeconfig
   job:
+    ttl: 12h # Valid format: ^(?:(?:\d+d)?(?:\d+h)?(?:\d+m)?)+$ (e.g., "12h", "1d6h", "30m")
     owner: "FORGE/fournos-launcher" # updated to the PR owner if available
     display_name: null # will be set to the job project/args if null
     pipeline_name: forge-test-only

@@ -306,6 +306,7 @@ def submit_job():
             "clusterless": config.project.get_config("fournos.job.clusterless"),
             "gpu_count": gpu_count,
             "gpu_type": gpu_type,
+            "ttl": config.project.get_config("fournos.job.ttl"),
         }
 
         if parallel_job_configs:

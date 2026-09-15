@@ -8,6 +8,9 @@ metadata:
     ci-run: {{ args.ci_label }}
   {%- endif %}
 spec:
+  {% if args.ttl -%}
+  ttl: {{ args.ttl }}
+  {% endif %}
   owner: {{ args.owner }}
   displayName: {{ args.display_name }}
   {% if args.clusterless -%}
