@@ -163,9 +163,23 @@ def extract_kpi_labels_from_config() -> dict[str, str]:
         if v is None:
             del kpi_labels[k]
 
-    product_version = config.project.get_config("cpt.kpi.labels.product_version")
-    if product_version:
-        kpi_labels["product_version"] = product_version
+    # Ensure critical labels are present (fail fast if missing)
+    model_name = runtime_config.get_model_name()
+    if not model_name:
+        raise ValueError("model_name is required but not configured in runtime config")
+    kpi_labels["model_name"] = model_name
+
+    # Validate that essential labels are configured
+    essential_label_configs = [
+        ("platform", "cpt.kpi.labels.platform"),
+    ]
+
+    for label_name, config_path in essential_label_configs:
+        if label_name not in kpi_labels:  # Not already set by cpt.kpi.labels
+            value = config.project.get_config(config_path)
+            if not value:
+                raise ValueError(f"{label_name} is required but not configured at {config_path}")
+            kpi_labels[label_name] = value
 
     return kpi_labels
 

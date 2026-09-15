@@ -460,25 +460,18 @@ def _get_project_and_args(project: str) -> tuple[str, str]:
 
 def _extract_finish_reason_from_status(status: ExportStatus) -> str:
     """Extract finish reason from status."""
-    logger.info(f"DEBUG: Export status object: {status}")
-
-    logger.info(
-        f"DEBUG: Status analysis - success={status.success}, censoring_occurred={status.censoring_occurred}"
-    )
-
-    if not status.success:
-        logger.info(f"DEBUG: Finish reason: failed (success={status.success})")
+    if status.job_shutdown and status.job_shutdown.is_aborted:
+        return "aborted"
+    elif not status.success:
         return "failed"
     elif status.censoring_occurred:
-        logger.info("DEBUG: Finish reason: completed with censoring")
         return "completed with censoring"
     else:
-        logger.info("DEBUG: Finish reason: completed")
         return "completed"
 
 
 def _build_enhanced_notification(
-    artifact_dir: Path,
+    artifact_dir: Path | None,
     project: str,
     finish_reason: str,
     status: ExportStatus,
@@ -493,20 +486,24 @@ def _build_enhanced_notification(
         f"Building notification - success={success}, censoring_occurred={censoring_occurred}, finish_reason='{finish_reason}'"
     )
 
-    status_emoji = "✅" if success else "❌"
-    logger.info(f"Initial emoji based on success: {status_emoji}")
-
-    if censoring_occurred:
-        status_emoji = "⚠️"
-        logger.info(f"Changed emoji to warning due to censoring: {status_emoji}")
-
-    if finish_reason == "failed":
+    # Determine status emoji with abort taking precedence
+    if status.job_shutdown and status.job_shutdown.is_aborted:
+        status_emoji = "🛑"
+    elif not success:
         status_emoji = "❌"
-        logger.info(f"Changed emoji to failed due to finish_reason: {status_emoji}")
+    elif censoring_occurred:
+        status_emoji = "⚠️"
+    else:
+        status_emoji = "✅"
 
-    logger.info(f"DEBUG: Final status emoji: {status_emoji}")
+    # Add total duration to base status
+    total_duration = _read_total_duration(artifact_dir)
+    duration_suffix = f" `{total_duration}`" if total_duration else ""
 
-    base_status = f"{status_emoji} **Execution of `{fjob_project}` {fjob_args_str}** {status_emoji}"
+    if fjob_args_str:
+        fjob_args_str = f" {fjob_args_str}"
+
+    base_status = f"{status_emoji} **Execution of `{fjob_project}`{fjob_args_str}** {duration_suffix} {status_emoji}"
     notification_parts = [base_status]
 
     # Add job abort message right below overall status if applicable
@@ -593,7 +590,7 @@ def _build_enhanced_notification(
     return "\n".join(notification_parts), notification_success
 
 
-def _get_censoring_report_section(artifact_dir: Path) -> list[str] | None:
+def _get_censoring_report_section(artifact_dir: Path | None) -> list[str] | None:
     """
     Parse censoring_report.yaml if it exists and return notification section.
 
@@ -747,12 +744,14 @@ def _get_step_status_section(artifact_dir: Path | None, mlflow_run_url: str | No
         log_counts = _count_log_messages(step_dir)
         log_summary = _format_log_summary(log_counts)
 
+        # Read step duration
+        duration_str = _read_step_duration(step_dir)
+        duration_suffix = f" `{duration_str}`" if duration_str else ""
+
         # Create step title - linked if MLflow URL available, plain-text otherwise
-        if mlflow_run_url:
-            mlflow_log_url = _create_mlflow_url(mlflow_run_url, step_name)
-            step_title = f"#### {exit_status_emoji} [{step_name}]({mlflow_log_url}){log_summary}"
-        else:
-            step_title = f"#### {exit_status_emoji} {step_name}{log_summary}"
+
+        mlflow_log_link = _create_mlflow_file_link(step_name, mlflow_run_url, step_dir / "run.log")
+        step_title = f"#### {exit_status_emoji} {mlflow_log_link}{duration_suffix}{log_summary}"
 
         step_status.append(step_title)
 
@@ -822,19 +821,13 @@ def _get_postprocess_status_links(
     artifact_dir: Path | None, mlflow_run_url: str | None
 ) -> list[str]:
     """Get postprocess status links."""
-    logger.info(
-        f"DEBUG: Postprocess status - artifact_dir={artifact_dir}, mlflow_run_url={mlflow_run_url}"
-    )
-
     if not artifact_dir or not artifact_dir.exists():
-        logger.info("DEBUG: Postprocess status - artifact_dir missing or doesn't exist")
         return []
 
     step_log_links = []
 
     # Look for postprocess results in step directories
     step_dirs = sorted(artifact_dir.glob("*"))
-    logger.info(f"DEBUG: Postprocess status - found {len(step_dirs)} directories in {artifact_dir}")
 
     for step_dir in step_dirs:
         if not step_dir.is_dir() or step_dir.name.startswith("."):
@@ -884,16 +877,8 @@ def _get_postprocess_status_links(
                     f"Postprocess status - {postprocess_status_file} parsed result successfully"
                 )
 
-                # Create file link function for this step
-                def get_file_link(file_path: Path, step_subdir: str = step_name) -> str:
-                    if mlflow_run_url:
-                        # Create MLflow artifact URL
-                        return _create_mlflow_file_url_for_step(
-                            mlflow_run_url, step_subdir, str(file_path)
-                        )
-                    else:
-                        # Fallback: just return the file path as text
-                        return str(file_path)
+                # Use shared unified get_file_link function
+                get_file_link = _create_unified_get_file_link(mlflow_run_url)
 
                 # Generate notification text from the structured result
                 logger.info(
@@ -947,46 +932,149 @@ def _extract_artifact_links(status: ExportStatus) -> tuple[list[str], str | None
     return artifact_links, mlflow_run_url
 
 
-def _create_mlflow_file_url_for_step(
-    mlflow_run_url: str, step_dir_name: str, file_path: str
-) -> str:
-    """Create MLflow URL for a specific file within a step directory.
+def _create_unified_get_file_link(mlflow_run_url: str | None) -> callable:
+    """Create a unified get_file_link function that always expects absolute paths.
+
+    Args:
+        mlflow_run_url: Base MLflow run URL, or None for fallback mode
+
+    Returns:
+        get_file_link function that takes absolute Path and returns URL
+    """
+
+    def get_file_link(file_path: Path | str, text: str = None) -> str:
+        if not file_path:
+            return "NO_FILE_RECEIVED"
+
+        # Convert to Path object if it's a string, but warn that Path objects are preferred
+        if isinstance(file_path, str):
+            logger.warning(f"get_file_link received string instead of Path object: {file_path}")
+            file_path = Path(file_path)
+
+        return _create_mlflow_file_link(text or file_path.name, mlflow_run_url, file_path)
+
+    return get_file_link
+
+
+def _create_mlflow_file_link(text: str, mlflow_run_url: str, file_path: Path) -> str:
+    """Create MLflow link for a specific file.
+
+    Args:
+        text: Text to display in the link
+        mlflow_run_url: Base MLflow run URL
+        file_path: Absolute path to file
+
+    Returns:
+        Markdown link format `[text](url)` if successful, `text (**error description**)` if not
+    """
+    if not mlflow_run_url:
+        return text
+
+    # Check file existence - still create link but with warning if file doesn't exist locally
+    file_exists_locally = file_path.exists()
+    if not file_exists_locally:
+        logger.warning(f"File not found locally but creating MLflow link anyway: {file_path}")
+        # We'll still create the link since the file might exist in MLflow
+
+    if not file_path.is_absolute():
+        return f"{text} (**path not absolute**)"
+
+    try:
+        # Convert absolute path to relative path for MLflow URL
+        artifacts_base_dir = Path(
+            os.environ.get("BASE_ARTIFACT_DIR") or env.BASE_ARTIFACT_DIR
+        ).parent
+        try:
+            relative_path = file_path.relative_to(artifacts_base_dir)
+        except ValueError:
+            # File not under artifacts base, use the full path
+            relative_path = file_path
+
+        # Create the MLflow URL
+        url = _create_mlflow_url(mlflow_run_url, relative_path)
+        if url is None:
+            return f"{text} (**URL creation failed**)"
+
+        # Add indicator if file doesn't exist locally but we're still linking to MLflow
+        if not file_exists_locally:
+            return f"[{text}]({url}) ⚠️"
+        else:
+            return f"[{text}]({url})"
+    except Exception as e:
+        logger.error(f"Failed to create MLflow link for {file_path}: {e}")
+        return f"{text} (**link creation failed**)"
+
+
+def _create_mlflow_url(mlflow_run_url: str, file_path: Path) -> str | None:
+    """Create MLflow URL for artifacts.
 
     Args:
         mlflow_run_url: Base MLflow run URL
-        step_dir_name: Name of the step directory
-        file_path: Relative path to file from step directory
+        file_path: Relative path within artifacts (e.g., Path("01__test/run.log") or Path("data.csv"))
 
     Returns:
-        Full MLflow URL to the file
-
-    Raises:
-        ValueError: If URL format is unexpected
+        Full MLflow URL to the artifact, or None/fallback URL if format is unexpected
     """
-    if "/artifacts" not in mlflow_run_url:
-        raise ValueError(f"Unexpected MLflow URL format: {mlflow_run_url}")
+    from urllib.parse import urlparse
 
-    # Clean file path
-    file_clean = file_path.lstrip("/")
+    if not mlflow_run_url:
+        return f"BASE_URL_MISSING/{file_path}"
 
-    if "#" in mlflow_run_url:
-        base_domain, hash_fragment = mlflow_run_url.split("#", 1)
-        if "/artifacts" not in hash_fragment:
-            raise ValueError("Artifacts not found in hash fragment")
+    try:
+        if "/artifacts" not in mlflow_run_url:
+            logger.error(f"Unexpected MLflow URL format: {mlflow_run_url}")
+            return None
 
-        hash_base, artifacts_part = hash_fragment.split("/artifacts", 1)
-        # Extract workspace parameter if present, ignoring existing path
-        workspace_param = ""
-        if "?workspace=" in artifacts_part:
-            workspace_param = artifacts_part[artifacts_part.find("?") :]
-        return f"{base_domain}#{hash_base}/artifacts/{step_dir_name}/{file_clean}{workspace_param}"
-    else:
-        base_url, artifacts_part = mlflow_run_url.split("/artifacts", 1)
-        # Extract workspace parameter if present, ignoring existing path
-        workspace_param = ""
-        if "?workspace=" in artifacts_part:
-            workspace_param = artifacts_part[artifacts_part.find("?") :]
-        return f"{base_url}/artifacts/{step_dir_name}/{file_clean}{workspace_param}"
+        # Convert file_path to string with forward slashes
+        file_path_str = str(file_path).replace("\\", "/")
+
+        # Parse the URL properly
+        from urllib.parse import parse_qs
+
+        parsed = urlparse(mlflow_run_url)
+
+        # Handle case where there's no hash fragment - normalize to hash-based format
+        if not parsed.fragment:
+            raise ValueError(f"Hash fragment missing in the MLFLow URL {mlflow_run_url} ...")
+
+        # Parse the fragment to extract any query parameters within it
+        fragment = parsed.fragment
+        fragment_path = fragment
+        workspace_param = None
+
+        # Check if there are query parameters in the fragment (like ?workspace=forge-sandbox)
+        if "?" in fragment:
+            fragment_path, fragment_query = fragment.split("?", 1)
+            fragment_params = parse_qs(fragment_query)
+
+            # Extract workspace parameter if present
+            if "workspace" in fragment_params:
+                workspace_param = fragment_params["workspace"][0]
+
+        # Build base URL
+        base_url = f"{parsed.scheme}://{parsed.netloc}"
+
+        # Add path if present
+        if parsed.path and parsed.path != "/":
+            base_url += parsed.path
+
+        # Combine query parameters: main URL query + workspace from fragment
+        query_parts = []
+        if parsed.query:
+            query_parts.append(parsed.query)
+        if workspace_param:
+            query_parts.append(f"workspace={workspace_param}")
+
+        if query_parts:
+            base_url += f"?{'&'.join(query_parts)}"
+
+        # Clean fragment path (remove trailing slash)
+        fragment_path = fragment_path.rstrip("/")
+        return f"{base_url}#{fragment_path}/{file_path_str}"
+
+    except Exception as e:
+        logger.error(f"Failed to construct MLflow URL for {file_path}: {e}")
+        return None
 
 
 def _process_notification_files(step_dir: Path) -> list[str]:
@@ -1013,8 +1101,8 @@ def _process_notification_files(step_dir: Path) -> list[str]:
     return notifications_from_files
 
 
-def _extract_test_labels_info(artifact_dir: Path, mlflow_run_url: str | None = None) -> list[str]:
-    """Extract test execution information from __test_labels__.yaml files.
+def _extract_test_metadata_info(artifact_dir: Path, mlflow_run_url: str | None = None) -> list[str]:
+    """Extract test execution information from the test metadata files.
 
     Args:
         artifact_dir: Directory to search for __test_labels__.yaml files
@@ -1025,23 +1113,23 @@ def _extract_test_labels_info(artifact_dir: Path, mlflow_run_url: str | None = N
     """
     test_info_lines = []
 
-    # Search for __test_labels__.yaml files recursively
-    test_labels_files = list(artifact_dir.glob("**/__test_labels__.yaml"))
+    # Search for the test medata files recursively
+    test_metadata_files = _search_caliper_metadata_files(artifact_dir)
 
-    if not test_labels_files:
+    if not test_metadata_files:
         return []
 
-    for test_labels_file in test_labels_files:
+    for test_metadata_file in test_metadata_files:
         try:
-            with open(test_labels_file, encoding="utf-8") as f:
-                test_data = yaml.safe_load(f) or {}
+            with open(test_metadata_file, encoding="utf-8") as f:
+                test_metadata = yaml.safe_load(f) or {}
 
             # Extract directory relative to artifact_dir - use just the immediate directory name
-            relative_dir = test_labels_file.parent.relative_to(artifact_dir)
+            relative_dir = test_metadata_file.parent.relative_to(artifact_dir)
             dir_name = relative_dir.name if relative_dir != Path(".") else "root"
 
             # Extract completion info
-            completion = test_data.get("completion", {})
+            completion = test_metadata.get("completion", {})
             success = completion.get("success")
             message = completion.get("message")
 
@@ -1059,24 +1147,14 @@ def _extract_test_labels_info(artifact_dir: Path, mlflow_run_url: str | None = N
                 status_emoji = "❓"
 
             # Create link to __test_labels__.yaml file if MLflow URL is available
-            if mlflow_run_url:
-                try:
-                    # Get the step directory name (relative to parent)
-                    step_dir_name = str(relative_dir)
-                    test_labels_url = _create_mlflow_file_url_for_step(
-                        mlflow_run_url, step_dir_name, "__test_labels__.yaml"
-                    )
-                    dir_link = f"[**{dir_name}**]({test_labels_url})"
-                except Exception as e:
-                    logger.warning(f"Failed to create MLflow link for {test_labels_file}: {e}")
-                    dir_link = f"**{dir_name}**"
-            else:
-                dir_link = f"**{dir_name}**"
+            dir_link = _create_mlflow_file_link(
+                f"**{dir_name}**", mlflow_run_url, test_metadata_file
+            )
 
             test_info_lines.append(f"* {status_emoji} {dir_link}{message}")
 
         except Exception as e:
-            test_info_lines.append(f"**{test_labels_file.name}**: Error reading file - {e}")
+            test_info_lines.append(f"**{test_metadata_file.name}**: Error reading file - {e}")
 
     return test_info_lines
 
@@ -1142,29 +1220,14 @@ def _process_step_details(step_dir: Path, mlflow_run_url: str | None = None) -> 
 
     # Extract test labels for this specific step
     try:
-        test_labels_info = _extract_test_labels_info(step_dir, mlflow_run_url)
-        if test_labels_info:
-            step_details.extend(test_labels_info)
+        test_metadata_info = _extract_test_metadata_info(step_dir, mlflow_run_url)
+        if test_metadata_info:
+            step_details.extend(test_metadata_info)
     except Exception as e:
         logger.warning(f"Failed to extract test labels for step {step_dir.name}: {e}")
 
-    # Create file link function for this step (shared by multiple extractors)
-    def get_file_link(file_path: Path) -> str:
-        if mlflow_run_url:
-            # Create MLflow artifact URL - convert absolute path to relative to step directory
-            try:
-                relative_file_path = file_path.relative_to(step_dir)
-                return _create_mlflow_file_url_for_step(
-                    mlflow_run_url, step_dir.name, str(relative_file_path)
-                )
-            except ValueError:
-                # If file_path is not under step_dir, use the file name only
-                return _create_mlflow_file_url_for_step(
-                    mlflow_run_url, step_dir.name, file_path.name
-                )
-        else:
-            # Fallback: just return the file path as text
-            return str(file_path)
+    # Use shared unified get_file_link function
+    get_file_link = _create_unified_get_file_link(mlflow_run_url)
 
     # Extract caliper metadata for this specific step (before postprocess status)
     try:
@@ -1325,56 +1388,6 @@ def _get_overall_status_from_steps(artifact_dir: Path) -> str:
         return "🔴"  # Error checking = red
 
 
-def _create_mlflow_url(mlflow_run_url: str, step_dir_name: str) -> str | None:
-    """Create MLflow URL for step logs."""
-
-    if not mlflow_run_url:
-        return f"BASE_URL_MISSING/{step_dir_name}"
-
-    if "/artifacts" not in mlflow_run_url:
-        logger.warning(f"Unexpected MLflow URL format: {mlflow_run_url}")
-        return None
-
-    if "#" in mlflow_run_url:
-        base_domain, hash_fragment = mlflow_run_url.split("#", 1)
-        if "/artifacts" not in hash_fragment:
-            raise ValueError("Artifacts not found in hash fragment")
-
-        hash_base, params = hash_fragment.split("/artifacts", 1)
-        workspace_param = params if "?workspace=" in params else ""
-        return f"{base_domain}#{hash_base}/artifacts/{step_dir_name}/run.log{workspace_param}"
-    else:
-        base_url, params = mlflow_run_url.split("/artifacts", 1)
-        workspace_param = params if "?workspace=" in params else ""
-        return f"{base_url}/artifacts/{step_dir_name}/run.log{workspace_param}"
-
-
-def _create_mlflow_step_url(mlflow_run_url: str, step_dir_name: str) -> str | None:
-    """Create MLflow URL for step directory (for file access)."""
-    if "/artifacts" not in mlflow_run_url:
-        logger.warning(f"Unexpected MLflow URL format: {mlflow_run_url}")
-        return None
-
-    if "#" in mlflow_run_url:
-        base_domain, hash_fragment = mlflow_run_url.split("#", 1)
-        if "/artifacts" not in hash_fragment:
-            raise ValueError("Artifacts not found in hash fragment")
-
-        hash_base, artifacts_part = hash_fragment.split("/artifacts", 1)
-        # Extract workspace parameter if present, ignoring existing path
-        workspace_param = ""
-        if "?workspace=" in artifacts_part:
-            workspace_param = artifacts_part[artifacts_part.find("?") :]
-        return f"{base_domain}#{hash_base}/artifacts/{step_dir_name}{workspace_param}"
-    else:
-        base_url, artifacts_part = mlflow_run_url.split("/artifacts", 1)
-        # Extract workspace parameter if present, ignoring existing path
-        workspace_param = ""
-        if "?workspace=" in artifacts_part:
-            workspace_param = artifacts_part[artifacts_part.find("?") :]
-        return f"{base_url}/artifacts/{step_dir_name}{workspace_param}"
-
-
 def _read_step_duration(step_dir: Path) -> str:
     """Read step duration from timing file."""
 
@@ -1391,6 +1404,55 @@ def _read_step_duration(step_dir: Path) -> str:
     except Exception as timing_error:
         logger.warning(f"Failed to read timing file {timing_file}: {timing_error}")
         return ""
+
+
+def _read_total_duration(artifact_dir: Path | None) -> str:
+    """Read and sum test durations from all step directories."""
+
+    # Return empty duration if artifact_dir is None or unavailable
+    if artifact_dir is None or not artifact_dir.exists():
+        return ""
+
+    total_seconds = 0
+    step_count = 0
+
+    # Scan all step directories for timing files
+    for step_dir in artifact_dir.iterdir():
+        if not step_dir.is_dir():
+            continue
+
+        timing_file = step_dir / CI_METADATA_DIRNAME / "test_duration.yaml"
+        if not timing_file.exists():
+            continue
+
+        try:
+            with open(timing_file, encoding="utf-8") as f:
+                timing_data = yaml.safe_load(f)
+
+            # Get raw duration in seconds for summing
+            duration_seconds = timing_data.get("duration", {}).get("seconds")
+            if duration_seconds is not None:
+                total_seconds += duration_seconds
+                step_count += 1
+
+        except Exception as timing_error:
+            logger.warning(f"Failed to read timing file {timing_file}: {timing_error}")
+            continue
+
+    if step_count == 0:
+        return ""
+
+    # Format total duration (similar to how individual step durations are formatted)
+    hours = int(total_seconds // 3600)
+    minutes = int((total_seconds % 3600) // 60)
+    seconds = int(total_seconds % 60)
+
+    if hours > 0:
+        return f"{hours}h {minutes}m {seconds}s"
+    elif minutes > 0:
+        return f"{minutes}m {seconds}s"
+    else:
+        return f"{seconds}s"
 
 
 def _process_step_status(artifact_dir: Path, mlflow_run_url: str) -> list[str]:
@@ -1413,33 +1475,29 @@ def _process_step_status(artifact_dir: Path, mlflow_run_url: str) -> list[str]:
         if not run_log.exists():
             continue
 
-        mlflow_log_url = _create_mlflow_url(mlflow_run_url, step_dir.name)
-        if not mlflow_log_url:
-            mlflow_log_url = "NO_URL"
-
         step_name = step_dir.name.replace("__", " ").replace("_", " ").title()
+        mlflow_log_link = _create_mlflow_url(step_name, mlflow_run_url, run_log)
+
         duration_str = _read_step_duration(step_dir)
         exit_status_emoji, exit_status = _read_step_exit_status(step_dir, current_step_name)
 
         step_status.append("")
         if duration_str:
-            step_status.append(
-                f"#### {exit_status_emoji} [{step_name}]({mlflow_log_url}) `{duration_str}`"
-            )
+            step_status.append(f"#### {exit_status_emoji} {mlflow_log_link} `{duration_str}`")
         else:
-            step_status.append(f"#### {exit_status_emoji} [{step_name}]({mlflow_log_url})")
+            step_status.append(f"#### {exit_status_emoji} {mlflow_log_link}")
 
         step_status.extend(_process_notification_files(step_dir))
 
         step_details = _process_step_details(step_dir, mlflow_run_url)
 
         # Add test execution info for this step
-        if step_details["test_labels_info"]:
+        if step_details["test_metadata_info"]:
             # Add Test Execution Overview if we have any step info
             step_status.append("")
             step_status.append("**Test Execution Overview**")
 
-            step_status.extend([f"* {info}" for info in step_details["test_labels_info"]])
+            step_status.extend([f"* {info}" for info in step_details["test_metadata_info"]])
 
         # Add postprocess info for this step
         if step_details["postprocess_info"]:
@@ -1493,31 +1551,30 @@ def _format_censoring_report_info_for_step(step_dir: Path, get_file_link: Any) -
         safe_censored_files = report_data.get("safe_censored_files", 0)
         censored_files = report_data.get("censored_files", 0)  # Unexpected censoring
 
-        censoring_lines.append("* 🔒 Censoring Report")
         # Create link to censoring report file
         if get_file_link:
             try:
                 report_link = get_file_link(censoring_report_path)
-                first_line = f"[📊 {total_files} files scanned]({report_link})"
+                censoring_lines.append(f"* 🔒 [Censoring Report]({report_link})")
             except Exception as e:
                 logger.warning(
                     f"Failed to create link for censoring report {censoring_report_path}: {e}"
                 )
-                first_line = f"📊 {total_files} files scanned"
+                censoring_lines.append("* 🔒 Censoring Report")
         else:
-            first_line = f"📊 {total_files} files scanned"
+            censoring_lines.append("* 🔒 Censoring Report")
 
-        censoring_lines.append(f"  * {first_line}")
+        censoring_lines.append(f"    * 📊 {total_files} files scanned")
 
         # Show breakdown of file types
         if clean_files > 0:
-            censoring_lines.append(f"  * ✅ Clean files: {clean_files}")
+            censoring_lines.append(f"    * ✅ Clean files: {clean_files}")
 
         if safe_censored_files > 0:
-            censoring_lines.append(f"  * 🔐 Safe replacements: {safe_censored_files}")
+            censoring_lines.append(f"    * 🔐 Safe replacements: {safe_censored_files}")
 
         if censored_files > 0:
-            censoring_lines.append(f"  * ⚠️ Unexpected censoring: {censored_files}")
+            censoring_lines.append(f"    * ⚠️ Unexpected censoring: {censored_files}")
 
             # Show details for unexpected censoring if available
             censored_by_reason = report_data.get("censored_by_reason", {})
@@ -1568,9 +1625,9 @@ def _format_caliper_metadata_info_for_step(
             # Format path with link to metadata file
             if get_file_link:
                 metadata_file_link = get_file_link(metadata_file)
-                path_info = f"* 📊 Test directory: [`{display_path}`]({metadata_file_link})"
+                path_info = f"  * 📊 Test directory: [`{display_path}`]({metadata_file_link})"
             else:
-                path_info = f"* 📊 Test directory: `{display_path}`"
+                path_info = f"  * 📊 Test directory: `{display_path}`"
             metadata_lines.append(path_info)
 
             # Look for completion information
@@ -1609,7 +1666,7 @@ def _format_caliper_metadata_info_for_step(
                 metadata_file.parent.relative_to(base_dir) if base_dir else metadata_file.parent
             )
             metadata_lines.append(
-                f"* 📊 Test directory: `{relative_path}` - Error reading metadata: {e}"
+                f"  * 📊 Test directory: `{relative_path}` - Error reading metadata: {e}"
             )
 
     return metadata_lines

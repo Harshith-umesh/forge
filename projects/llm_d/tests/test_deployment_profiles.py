@@ -21,6 +21,7 @@ DEPLOYMENT_PRESETS = [
 CONFIG_OVERRIDES = {
     "runtime.kserve.dry_run": True,
     "caliper.postprocess.enabled": False,
+    "cpt.kpi.labels.product_version": "RHOAI-XXX",
     "agentic.enabled": False,
 }
 
