@@ -425,13 +425,16 @@ def send_notification(
     return notification_success
 
 
-def _get_project_and_args(project: str) -> tuple[str, str]:
+def _get_project_and_args(project: str, artifact_dir: Path | None) -> tuple[str, str]:
     """Extract project name and args from fournos job or config."""
     fjob_project = project
     fjob_args_str = ""
 
     try:
-        metadata_dir = ci_lib.get_ci_metadata_dir()
+        metadata_dir = ci_lib.get_ci_metadata_dir(base_ci_dir=artifact_dir, any_level=True)
+        if not metadata_dir:
+            return fjob_project, fjob_args_str
+
         fournos_fjob_path = metadata_dir / "fournos_fjob.yaml"
         if not fournos_fjob_path.exists():
             return fjob_project, fjob_args_str
@@ -477,7 +480,7 @@ def _build_enhanced_notification(
     status: ExportStatus,
 ) -> tuple[str, bool]:
     """Build enhanced notification with fournos job config and artifact links."""
-    fjob_project, fjob_args_str = _get_project_and_args(project)
+    fjob_project, fjob_args_str = _get_project_and_args(project, artifact_dir)
 
     success = status.success
     censoring_occurred = status.censoring_occurred
@@ -513,7 +516,7 @@ def _build_enhanced_notification(
         shutdown_value = shutdown_status.shutdown_value or "Stop"
         notification_parts.append(f"🛑 **JOB ABORTED** - `spec.shutdown={shutdown_value}`")
 
-    execution_engine_config = _get_execution_engine_config()
+    execution_engine_config = _get_execution_engine_config(artifact_dir)
     if execution_engine_config:
         notification_parts += ["", "---"]
         notification_parts.append("**Execution Engine Configuration**")
@@ -661,10 +664,10 @@ def _get_censoring_report_section(artifact_dir: Path | None) -> list[str] | None
         return [f"⚠️ **Censoring report parsing failed:** {e}"]
 
 
-def _get_execution_engine_config() -> str | None:
+def _get_execution_engine_config(artifact_dir: Path) -> str | None:
     """Read and format execution engine configuration."""
     try:
-        metadata_dir = ci_lib.get_ci_metadata_dir()
+        metadata_dir = ci_lib.get_ci_metadata_dir(artifact_dir, any_level=True)
         fournos_fjob_path = metadata_dir / "fournos_fjob.yaml"
         if not fournos_fjob_path.exists():
             return f"* FournosJob not found at `{fournos_fjob_path}`"
@@ -1257,10 +1260,10 @@ def _process_step_details(step_dir: Path, mlflow_run_url: str | None = None) -> 
     return step_details
 
 
-def _check_job_shutdown_status() -> dict[str, Any] | None:
+def _check_job_shutdown_status(artifact_dir: Path) -> dict[str, Any] | None:
     """Check if the job has been aborted via spec.shutdown field."""
     try:
-        metadata_dir = ci_lib.get_ci_metadata_dir()
+        metadata_dir = ci_lib.get_ci_metadata_dir(artifact_dir, any_level=True)
         fournos_fjob_path = metadata_dir / "fournos_fjob.yaml"
         if not fournos_fjob_path.exists():
             return None
