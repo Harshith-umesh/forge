@@ -174,6 +174,9 @@ def do_test():
         logger.info("")
         logger.info(f"Fake test configuration:\n{yaml_cfg}")
 
+        if config.project.get_config("skeleton.test.fail"):
+            raise RuntimeError("Configuration requested a failure")
+
         # Capture benchmark timing
         benchmark_start_time = get_iso_timestamp()
         try:
