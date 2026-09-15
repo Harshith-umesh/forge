@@ -94,7 +94,7 @@ def handle_cluster_directive(line: str) -> dict[str, str]:
     if not cluster_name:
         raise ValueError(f"Invalid /cluster directive: cluster name cannot be empty in '{line}'")
 
-    return {"cluster.name": cluster_name}
+    return {"cluster.name": cluster_name, "fournos.job.clusterless": False}
 
 
 def handle_exclusive_directive(line: str) -> dict[str, str]:
@@ -193,6 +193,29 @@ def handle_pipeline_directive(line: str) -> dict[str, str]:
         raise ValueError(f"Invalid /pipeline directive: pipeline name cannot be empty in '{line}'")
 
     return {"fournos.job.pipeline_name": pipeline_name}
+
+
+def handle_ttl_directive(line: str) -> dict[str, str]:
+    """
+    Handle /ttl directive for setting the Fjob TTL name.
+
+    Format: /ttl duration
+
+    Args:
+        line: The directive line
+
+    Returns:
+        Dictionary with ttl configuration
+
+    Raises:
+        ValueError: If ttl_value is empty
+    """
+    ttl_value = line.removeprefix("/ttl ").strip()
+
+    if not ttl_value:
+        raise ValueError(f"Invalid /ttl directive: ttl value cannot be empty in '{line}'")
+
+    return {"fournos.job.ttl": ttl_value}
 
 
 def handle_gpu_directive(line: str) -> dict[str, str]:
@@ -351,6 +374,7 @@ def get_fournos_directive_handlers() -> dict[str, callable]:
         "/clusterless": handle_clusterless_directive,
         "/fournos": handle_fournos_directive,
         "/pipeline": handle_pipeline_directive,
+        "/ttl": handle_ttl_directive,
         "/gpu": handle_gpu_directive,
         "/parallel": handle_parallel_directive,
         "/replot.url": handle_replot_url_directive,

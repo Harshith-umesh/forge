@@ -878,7 +878,7 @@ def _get_postprocess_status_links(
                 )
 
                 # Use shared unified get_file_link function
-                get_file_link = _create_unified_get_file_link(mlflow_run_url)
+                get_file_link = _create_get_file_link(mlflow_run_url)
 
                 # Generate notification text from the structured result
                 logger.info(
@@ -932,7 +932,7 @@ def _extract_artifact_links(status: ExportStatus) -> tuple[list[str], str | None
     return artifact_links, mlflow_run_url
 
 
-def _create_unified_get_file_link(mlflow_run_url: str | None) -> callable:
+def _create_get_file_link(mlflow_run_url: str | None) -> callable:
     """Create a unified get_file_link function that always expects absolute paths.
 
     Args:
@@ -1065,12 +1065,15 @@ def _create_mlflow_url(mlflow_run_url: str, file_path: Path) -> str | None:
         if workspace_param:
             query_parts.append(f"workspace={workspace_param}")
 
-        if query_parts:
-            base_url += f"?{'&'.join(query_parts)}"
-
         # Clean fragment path (remove trailing slash)
         fragment_path = fragment_path.rstrip("/")
-        return f"{base_url}#{fragment_path}/{file_path_str}"
+
+        url = f"{base_url}#{fragment_path}/{file_path_str}"
+
+        if query_parts:
+            url += f"?{'&'.join(query_parts)}"
+
+        return url
 
     except Exception as e:
         logger.error(f"Failed to construct MLflow URL for {file_path}: {e}")
@@ -1180,6 +1183,8 @@ def _extract_postprocess_status_info(artifact_dir: Path) -> list[str]:
 
             # Extract directory relative to artifact_dir
             relative_dir = postprocess_file.parent.relative_to(artifact_dir)
+            if relative_dir.name == "status_files":
+                relative_dir = relative_dir.parent
             dir_name = str(relative_dir) if relative_dir != Path(".") else "root"
 
             # Extract overall status
@@ -1226,33 +1231,26 @@ def _process_step_details(step_dir: Path, mlflow_run_url: str | None = None) -> 
     except Exception as e:
         logger.warning(f"Failed to extract test labels for step {step_dir.name}: {e}")
 
-    # Use shared unified get_file_link function
-    get_file_link = _create_unified_get_file_link(mlflow_run_url)
+    get_file_link = _create_get_file_link(mlflow_run_url)
 
-    # Extract caliper metadata for this specific step (before postprocess status)
+    # Extract caliper metadata for this specific step
     try:
-        metadata_files = _search_caliper_metadata_files(step_dir)
-        metadata_info = _format_caliper_metadata_info_for_step(
-            metadata_files, get_file_link, step_dir.parent if step_dir.parent else step_dir
-        )
-        if metadata_info:
-            step_details.extend(metadata_info)
+        metadata_info = _format_caliper_metadata_info_for_step(get_file_link, step_dir)
+        step_details.extend(metadata_info)
     except Exception as e:
         logger.warning(f"Failed to extract caliper metadata for step {step_dir.name}: {e}")
 
-    # Extract censoring report for this specific step (before postprocess status)
+    # Extract censoring report for this specific step
     try:
         censoring_info = _format_censoring_report_info_for_step(step_dir, get_file_link)
-        if censoring_info:
-            step_details.extend(censoring_info)
+        step_details.extend(censoring_info)
     except Exception as e:
         logger.warning(f"Failed to extract censoring report for step {step_dir.name}: {e}")
 
     # Extract postprocess status for this specific step
     try:
         postprocess_info = _extract_postprocess_status_info(step_dir)
-        if postprocess_info:
-            step_details.extend(postprocess_info)
+        step_details.extend(postprocess_info)
     except Exception as e:
         logger.warning(f"Failed to extract postprocess status for step {step_dir.name}: {e}")
 
@@ -1552,17 +1550,14 @@ def _format_censoring_report_info_for_step(step_dir: Path, get_file_link: Any) -
         censored_files = report_data.get("censored_files", 0)  # Unexpected censoring
 
         # Create link to censoring report file
-        if get_file_link:
-            try:
-                report_link = get_file_link(censoring_report_path)
-                censoring_lines.append(f"* 🔒 [Censoring Report]({report_link})")
-            except Exception as e:
-                logger.warning(
-                    f"Failed to create link for censoring report {censoring_report_path}: {e}"
-                )
-                censoring_lines.append("* 🔒 Censoring Report")
-        else:
-            censoring_lines.append("* 🔒 Censoring Report")
+        try:
+            censoring_report_link = get_file_link(censoring_report_path, text="Censoring Report")
+            censoring_lines.append(f"* 🔒 {censoring_report_link}")
+        except Exception as e:
+            logger.warning(
+                f"Failed to create link for censoring report {censoring_report_path}: {e}"
+            )
+            censoring_lines.append(f"* 🔒 Censoring Report **link generation failed** `{e}`")
 
         censoring_lines.append(f"    * 📊 {total_files} files scanned")
 
@@ -1592,13 +1587,10 @@ def _format_censoring_report_info_for_step(step_dir: Path, get_file_link: Any) -
         return [f"* 🔒 Censoring Report: Error reading report - `{e}`"]
 
 
-def _format_caliper_metadata_info_for_step(
-    metadata_files: list[Path], get_file_link: Any, base_dir: Path
-) -> list[str]:
+def _format_caliper_metadata_info_for_step(get_file_link: Any, step_dir: Path) -> list[str]:
     """Format caliper metadata information for integration within step details."""
-    if not metadata_files:
-        return []
 
+    metadata_files = _search_caliper_metadata_files(step_dir)
     metadata_lines = []
 
     for metadata_file in metadata_files:
@@ -1611,7 +1603,7 @@ def _format_caliper_metadata_info_for_step(
 
             # Get relative path from base directory
             try:
-                relative_path = metadata_file.parent.relative_to(base_dir)
+                relative_path = metadata_file.parent.relative_to(step_dir)
                 display_path = str(relative_path) if str(relative_path) != "." else "root"
             except ValueError:
                 # If relative_to fails, use the full path
@@ -1623,11 +1615,8 @@ def _format_caliper_metadata_info_for_step(
             timing = metadata.timing
 
             # Format path with link to metadata file
-            if get_file_link:
-                metadata_file_link = get_file_link(metadata_file)
-                path_info = f"  * 📊 Test directory: [`{display_path}`]({metadata_file_link})"
-            else:
-                path_info = f"  * 📊 Test directory: `{display_path}`"
+            metadata_file_link = get_file_link(metadata_file, text=f"`{display_path}`")
+            path_info = f"* 📊 **Test directory**: {metadata_file_link}"
             metadata_lines.append(path_info)
 
             # Look for completion information
@@ -1662,11 +1651,9 @@ def _format_caliper_metadata_info_for_step(
 
         except Exception as e:
             logger.warning(f"Failed to process caliper metadata file {metadata_file}: {e}")
-            relative_path = (
-                metadata_file.parent.relative_to(base_dir) if base_dir else metadata_file.parent
-            )
+            relative_path = metadata_file.parent.relative_to(step_dir)
             metadata_lines.append(
-                f"  * 📊 Test directory: `{relative_path}` - Error reading metadata: {e}"
+                f"* 📊 Test directory: `{relative_path}` - Error reading metadata: {e}"
             )
 
     return metadata_lines
