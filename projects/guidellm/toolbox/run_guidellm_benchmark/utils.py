@@ -162,6 +162,38 @@ def _is_guidellm_v07x(image: str) -> bool:
     return (int(m.group(1)), int(m.group(2))) >= (0, 7)
 
 
+_FILE_KIND_BY_EXT = {
+    ".json": "json_file",
+    ".jsonl": "json_file",
+    ".csv": "csv_file",
+    ".parquet": "parquet_file",
+    ".arrow": "arrow_file",
+    ".txt": "text_file",
+    ".hdf5": "hdf5_file",
+    ".h5": "hdf5_file",
+    ".db": "db_file",
+    ".tar": "tar_file",
+}
+
+
+def _convert_data_spec(data_spec: str) -> str:
+    """Convert a legacy v0.6.x ``--data`` value to v0.7.x ``kind=…`` format."""
+    if data_spec.startswith("kind="):
+        return data_spec
+
+    for ext, kind in _FILE_KIND_BY_EXT.items():
+        if data_spec.endswith(ext):
+            return f"kind={kind},path={data_spec}"
+
+    if "prompt_tokens" in data_spec or "output_tokens" in data_spec:
+        return f"kind=synthetic_text,{data_spec}"
+
+    if "/" in data_spec and "=" not in data_spec:
+        return f"kind=huggingface,source={data_spec}"
+
+    return f"kind=synthetic_text,{data_spec}"
+
+
 def _build_v07x_args(endpoint_url: str, old_args: list[str]) -> list[str]:
     """Transform v0.6.x CLI args to the v0.7.x ``guidellm run`` format.
 
@@ -213,7 +245,7 @@ def _build_v07x_args(endpoint_url: str, old_args: list[str]) -> list[str]:
     new_args.append(f"--backend={backend_spec}")
 
     if data_spec:
-        new_args.append(f"--data=kind=synthetic_text,{data_spec}")
+        new_args.append(f"--data={_convert_data_spec(data_spec)}")
 
     rate_key = _RATE_KEY_BY_PROFILE.get(rate_type, "rate")
     if rates_str:
@@ -224,12 +256,17 @@ def _build_v07x_args(endpoint_url: str, old_args: list[str]) -> list[str]:
                 profile_spec += f",rampup_duration={rampup}"
             new_args.append(f"--profile={profile_spec}")
         else:
+            parsed_rates: list[int | float] = []
+            for r in rate_values:
+                f = float(r)
+                parsed_rates.append(int(f) if f == int(f) else f)
             profile_dict: dict = {
                 "kind": rate_type,
-                rate_key: [int(r) for r in rate_values],
+                rate_key: parsed_rates,
             }
             if rampup:
-                profile_dict["rampup_duration"] = int(rampup)
+                f = float(rampup)
+                profile_dict["rampup_duration"] = int(f) if f == int(f) else f
             new_args.append(f"--profile={_json.dumps(profile_dict)}")
     else:
         new_args.append(f"--profile=kind={rate_type}")
