@@ -15,6 +15,9 @@ old-zeus:
   rhaiis.deploy.image_pull_secrets: ["npalaska-image-pull"]
   benchmarks.guidellm.fs_group: 0
 
+mi355x:
+  rhaiis.cluster_tag: "mi355x"
+
 b200:
   rhaiis.cluster_tag: "b200"
   rhaiis.gpu_types.nvidia: "b200"
