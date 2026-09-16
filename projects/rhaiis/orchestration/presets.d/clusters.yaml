@@ -35,3 +35,6 @@ cluster_hera:
 
 cluster_zeus:
   extends: [nvidia, zeus]
+
+cluster_old_zeus:
+  extends: [nvidia, old-zeus]
