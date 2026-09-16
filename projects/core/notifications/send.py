@@ -86,17 +86,6 @@ def _send_notification_to_jira(vault_def, message, dry_run):
     as an ADF comment.
     """
     try:
-        from projects.core.library import config
-
-        jira_config = config.project.get_config("notifications.jira", {})
-    except Exception:
-        jira_config = {}
-
-    if not jira_config:
-        logger.info("No Jira notification config found, skipping")
-        return True
-
-    try:
         from projects.core.notifications.jira import api as jira_api
 
         server_file = vault_def.content.get("jira-server")
@@ -116,12 +105,20 @@ def _send_notification_to_jira(vault_def, message, dry_run):
         server = server_file.file_path.read_text().strip()
         token = token_file.file_path.read_text().strip()
 
+        # should be retrieved from the configuration
+        pr_number = "1234"
+        pr_title = "dummy project"
+        project_key = "PSAPCI"
+        extra_tickets = []
+
         return jira_api.send_jira_notification(
             server=server,
             token=token,
-            project_key=jira_config["project_key"],
+            pr_number=pr_number,
+            pr_title=pr_title,
+            project_key=project_key,
             markdown_content=message,
-            extra_tickets=jira_config.get("extra_tickets"),
+            extra_tickets=extra_tickets,
             dry_run=dry_run,
         )
 
