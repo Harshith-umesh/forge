@@ -34,6 +34,7 @@ ci-test:
 
 ci-quick:
   tests.rhaiis.version: "vLLM-ci-quick"
+  caliper.postprocess.csv_dashboard.enabled: false
 
 
 
