@@ -341,7 +341,7 @@ def _generate_unique_failure_review_path(base_artifact_dir: Path, failure_dir_na
         Unique path for the FAILURE_REVIEW file in 000__ci_metadata/notifications/
     """
     # Create notifications directory
-    notifications_dir = ci_lib.get_ci_metadata_dir() / "notifications"
+    notifications_dir = ci_lib.get_ci_metadata_dir_location() / "notifications"
     notifications_dir.mkdir(parents=True, exist_ok=True)
 
     base_filename = f"090__FAILURE_REVIEW_{failure_dir_name}.txt"

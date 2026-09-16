@@ -216,7 +216,7 @@ def _get_notification_content(artifact_dir: pathlib.Path, get_link, get_bold) ->
     Returns:
         Formatted notification content string
     """
-    notifications_dir = ci_lib.get_ci_metadata_dir() / "notifications"
+    notifications_dir = ci_lib.get_ci_metadata_dir_location() / "notifications"
     failures_file = artifact_dir / "FAILURES.txt"
 
     # Guard: Check if notifications directory exists
@@ -397,7 +397,7 @@ def get_common_message(finish_reason: str, status: str, get_link, get_italics, g
         except Exception as e:
             logger.warning("Failed to read NOTIFICATION-github.md: %s", e)
 
-    if (var_over := ci_lib.get_ci_metadata_dir() / "pr_config.txt").exists():
+    if (var_over := ci_lib.get_ci_metadata_dir_location() / "pr_config.txt").exists():
         with open(var_over) as f:
             message += f"""
 {get_bold("Test configuration")}:
@@ -405,7 +405,7 @@ def get_common_message(finish_reason: str, status: str, get_link, get_italics, g
 {f.read().strip()}
 ```
 """
-    elif (var_over := ci_lib.get_ci_metadata_dir() / "variable_overrides.yaml").exists():
+    elif (var_over := ci_lib.get_ci_metadata_dir_location() / "variable_overrides.yaml").exists():
         with open(var_over) as f:
             message += f"""
 {get_bold("Test configuration")}:

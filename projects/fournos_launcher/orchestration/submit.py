@@ -110,7 +110,7 @@ def send_github_notification(
 
         # Read test configuration from pr_config.txt
         pr_config_content = "Configuration not available"
-        metadata_dir = ci_lib.get_ci_metadata_dir()
+        metadata_dir = ci_lib.get_ci_metadata_dir_location()
         pr_config_file = metadata_dir / "pr_config.txt"
         if pr_config_file.exists():
             try:
