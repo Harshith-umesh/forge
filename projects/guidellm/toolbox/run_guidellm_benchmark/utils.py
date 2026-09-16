@@ -97,7 +97,6 @@ def expand_guidellm_runs(guidellm_args: list[str]) -> list[GuideLLMRun]:
         run_args: list[str] = []
         for arg in guidellm_args:
             if arg.startswith("--rate="):
-                run_args.append(f"--rate={rate}")
                 continue
             run_args.append(_substitute_rate_expressions(arg, rate))
 
@@ -126,9 +125,6 @@ def build_guidellm_args(benchmark: dict[str, object]) -> list[str]:
 
     if "rate" in benchmark and "rate" not in benchmark_args:
         guidellm_args.append(f"--rate={benchmark['rate']}")
-
-    if not any(arg.startswith("--outputs=") for arg in guidellm_args):
-        guidellm_args.append(f"--outputs={benchmark.get('outputs', 'json')}")
 
     return guidellm_args
 
