@@ -21,7 +21,10 @@ logger = logging.getLogger(__name__)
 
 
 def get_ci_metadata_dir_location():
-    return env.BASE_ARTIFACT_DIR / "000__ci_metadata"
+    metadata_dir = env.BASE_ARTIFACT_DIR / "000__ci_metadata"
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+
+    return metadata_dir
 
 
 # CI metadata directory path

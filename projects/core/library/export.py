@@ -96,7 +96,7 @@ def _update_fjob_export_status(status: ExportStatus):
 
             # Save a copy of the updated fjob to metadata directory
             try:
-                metadata_dir = ci_lib.get_ci_metadata_dir()
+                metadata_dir = ci_lib.get_ci_metadata_dir_location()
                 fournos_fjob_path = metadata_dir / "fournos_fjob.yaml"
                 fournos_fjob_path.parent.mkdir(parents=True, exist_ok=True)
 
