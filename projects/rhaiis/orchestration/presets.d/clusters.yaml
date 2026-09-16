@@ -14,3 +14,7 @@ old-zeus:
   rhaiis.cluster_tag: "zeus1"
   rhaiis.deploy.image_pull_secrets: ["npalaska-image-pull"]
   benchmarks.guidellm.fs_group: 0
+
+b200:
+  rhaiis.cluster_tag: "b200"
+  rhaiis.gpu_types.nvidia: "b200"
