@@ -26,7 +26,9 @@ gitops/
 └── overlays/             # Environment-specific configurations
     ├── development/
     │   └── kustomization.yaml
-    └── production/
+    ├── production/
+    │   └── kustomization.yaml
+    └── intlab-production/
         └── kustomization.yaml
 ```
 
@@ -96,6 +98,20 @@ spec:
 - Manual approval recommended for critical changes
 - Extended revision history
 
+### Intlab production (`psap-automation` namespace)
+
+The Intlab cluster does not run the OpenShift internal image registry. Use
+`overlays/intlab-production`, which keeps the shared Forge manifests but points
+all Fournos resolver Jobs at `quay.io/rh_perfscale/forge:latest`. The
+management cluster must continue using `overlays/production`, whose resolver
+annotation points at its internal `forge-core` ImageStream.
+
+Apply the Intlab-specific Application definition only in the Intlab cluster:
+
+```bash
+oc apply -f gitops/applications/forge-intlab-production.yaml
+```
+
 ## Deployment
 
 ### Option 1: Deploy Applications Directly
@@ -110,6 +126,9 @@ oc apply -k gitops/overlays/development/
 
 # Production  
 oc apply -k gitops/overlays/production/
+
+# Intlab production
+oc apply -k gitops/overlays/intlab-production/
 ```
 
 ### Option 3: Manual Application Creation
