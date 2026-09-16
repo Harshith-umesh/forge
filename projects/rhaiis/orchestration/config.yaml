@@ -23,14 +23,14 @@ benchmarks:
 tests:
   rhaiis:
     model_key: qwen3-0_6b
-    workload_key: ci-quick
+    workload_key: profile1
     workload_keys: []
     run_benchmark: true
-    warmup: false
+    warmup: true
     version: ""
     compare_version: ""
     slack_user: ""
-    slack_notify_always: true
+    slack_notify_always: false
 
 caliper:
   postprocess:
