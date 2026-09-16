@@ -330,7 +330,6 @@ def _send_completion_message(
         success = send_notification(
             message=notification_status,
             github=True,
-            jira=True,
             dry_run=dry_run,
             notification_vault=notification_vault,
         )

@@ -37,8 +37,6 @@ dependencies = [
     "jsonpath_ng",
     "pydantic>=2.0",
     "yq",
-    "marklassian",
-    "atlassian-python-api",
 ]
 
 [project.optional-dependencies]
