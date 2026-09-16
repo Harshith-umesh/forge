@@ -68,20 +68,6 @@ caliper = [
 prometheus_metrics = [
     "pyyaml>=6.0",
 ]
-matrix_benchmarking = [
-    "pandas",
-    "dash",
-    "plotly",
-    "kaleido==0.2.1",
-    "fire",
-    "pyyaml",
-    "BeautifulSoup4==4.11.*",
-    "prometheus_api_client",
-    "pydantic",
-    "opensearch-py",
-    "boto3",
-    "pandas",
-]
 agentic_review = [
     "httpx",
     "langchain-openai",
@@ -118,10 +104,6 @@ exclude = '''
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-exclude = [
-    "projects/matrix_benchmarking",
-    "projects/llm_d_legacy",
-]
 
 [tool.ruff.lint]
 select = [
