@@ -72,7 +72,7 @@ matrix_benchmarking = [
     "pandas",
     "dash",
     "plotly",
-    "kaleido>=1.0.0",
+    "kaleido==0.2.1",
     "fire",
     "pyyaml",
     "BeautifulSoup4==4.11.*",
