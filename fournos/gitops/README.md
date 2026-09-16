@@ -115,6 +115,11 @@ oc apply -f gitops/applications/forge-intlab-production.yaml
 ## Deployment
 
 ### Option 1: Deploy Applications Directly
+
+This applies the default application set, including the management
+`forge-production` definition. Do not use it for Intlab; use the
+Intlab-specific Application definition below instead.
+
 ```bash
 oc apply -k gitops/applications/
 ```
