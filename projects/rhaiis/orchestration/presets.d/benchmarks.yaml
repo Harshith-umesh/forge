@@ -2,6 +2,7 @@ __multiple: true
 
 benchmark:
   tests.rhaiis.run_benchmark: true
+  tests.rhaiis.warmup: true
   tests.rhaiis.slack_notify_always: true
   rhaiis.profiler.enabled: true
   caliper.postprocess.csv_dashboard.enabled: true
