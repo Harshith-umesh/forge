@@ -245,9 +245,7 @@ def _build_v07x_args(endpoint_url: str, old_args: list[str]) -> list[str]:
     return new_args
 
 
-def _build_v07x_multi_run_script(
-    *, endpoint_url: str, runs: list[GuideLLMRun]
-) -> str:
+def _build_v07x_multi_run_script(*, endpoint_url: str, runs: list[GuideLLMRun]) -> str:
     """Shell script for multiple GuideLLM 0.7.x runs (rate-expression expansion)."""
     lines = ["set -euo pipefail", "mkdir -p /results"]
     for run in runs:
@@ -360,13 +358,9 @@ def render_guidellm_job_from_parts(
 
     container["command"] = ["/bin/sh", "-lc"]
     if v07:
-        container["args"] = [
-            _build_v07x_multi_run_script(endpoint_url=endpoint_url, runs=runs)
-        ]
+        container["args"] = [_build_v07x_multi_run_script(endpoint_url=endpoint_url, runs=runs)]
     else:
-        container["args"] = [
-            _build_multi_run_script(endpoint_url=endpoint_url, runs=runs)
-        ]
+        container["args"] = [_build_multi_run_script(endpoint_url=endpoint_url, runs=runs)]
     return manifest
 
 
