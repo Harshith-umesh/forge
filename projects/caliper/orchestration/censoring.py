@@ -62,67 +62,29 @@ def discover_vault_secrets(
                         )
                     continue
 
-                # If censor_text is available, use it directly instead of reading file
-                if content_def.censor_text:
-                    content_path = vault_manager.get_vault_content_path(vault_name, content_name)
-                    if not (content_path and content_path.exists()):
-                        logger.warning(
-                            f"Invalid vault found: {vault_name} {content_name} (missing)"
-                        )
-                        continue
+                content_path = vault_manager.get_vault_content_path(vault_name, content_name)
+                if not (content_path and content_path.exists()):
+                    logger.warning(f"Invalid vault found: {vault_name} {content_name} (missing)")
+                    continue
 
-                    try:
-                        # Read actual vault content
-                        content_text = content_path.read_text(
-                            encoding="utf-8", errors="ignore"
-                        ).strip()
-                        if not content_text:
-                            logger.warning(
-                                f"Invalid vault found: {vault_name} {content_name} (empty)"
-                            )
-                        else:
-                            vault_secrets.add(content_text)
-                            secret_mapping[content_text] = f"{vault_name}/{content_name}"
+                try:
+                    # Read actual vault content
+                    content_text = content_path.read_text(encoding="utf-8", errors="ignore").strip()
+                    if not content_text:
+                        logger.warning(f"Invalid vault found: {vault_name} {content_name} (empty)")
+                    else:
+                        vault_secrets.add(content_text)
+                        secret_mapping[content_text] = f"{vault_name}/{content_name}"
+                        if content_def.censor_text:
                             censor_text_mapping[content_text] = content_def.censor_text
-                            secrets_discovered += 1
-                            if verbose:
-                                logger.info(
-                                    f"Discovered secret from vault {vault_name}/{content_name} with censor_text"
-                                )
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to read vault content {vault_name}/{content_name}: {e}"
-                        )
-                else:
-                    # No censor_text, read file content for traditional censoring
-                    content_path = vault_manager.get_vault_content_path(vault_name, content_name)
-                    if not (content_path and content_path.exists()):
-                        logger.warning(
-                            f"Invalid vault found: {vault_name} {content_name} (missing)"
-                        )
-                        continue
+                        secrets_discovered += 1
 
-                    try:
-                        # Read vault content (assume it's text)
-                        content_text = content_path.read_text(
-                            encoding="utf-8", errors="ignore"
-                        ).strip()
-                        if not content_text:
-                            logger.warning(
-                                f"Invalid vault found: {vault_name} {content_name} (empty)"
+                        if verbose:
+                            logger.info(
+                                f"Discovered secret from vault {vault_name}/{content_name}{' with censor_text' if content_def.censor_text else ''}"
                             )
-                        else:
-                            vault_secrets.add(content_text)
-                            secret_mapping[content_text] = f"{vault_name}/{content_name}"
-                            secrets_discovered += 1
-                            if verbose:
-                                logger.info(
-                                    f"Discovered secret from vault {vault_name}/{content_name}"
-                                )
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to read vault content {vault_name}/{content_name}: {e}"
-                        )
+                except Exception as e:
+                    logger.warning(f"Failed to read vault content {vault_name}/{content_name}: {e}")
 
         if verbose:
             logger.info(f"Discovered {secrets_discovered} vault secrets for censoring")
