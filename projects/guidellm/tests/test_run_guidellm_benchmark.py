@@ -24,14 +24,12 @@ def test_expand_guidellm_runs_converts_rates_to_individual_runs() -> None:
     assert runs[0].args == [
         "--backend-type=openai_http",
         "--rate-type=concurrent",
-        "--rate=32",
         "--data=prompt_tokens=128,prefix_count=64",
         "--max-requests=320",
     ]
     assert runs[1].args == [
         "--backend-type=openai_http",
         "--rate-type=concurrent",
-        "--rate=64",
         "--data=prompt_tokens=128,prefix_count=128",
         "--max-requests=640",
     ]
@@ -51,13 +49,11 @@ def test_expand_guidellm_runs_expands_plain_rate_reference() -> None:
     assert runs[0].args == [
         "--backend-type=openai_http",
         "--rate-type=concurrent",
-        "--rate=32",
         "--max-requests=32",
     ]
     assert runs[1].args == [
         "--backend-type=openai_http",
         "--rate-type=concurrent",
-        "--rate=64",
         "--max-requests=64",
     ]
 
@@ -167,7 +163,6 @@ def test_render_guidellm_job_from_parts_keeps_plain_rates_as_single_guidellm_run
 
 def test_build_guidellm_args_renders_list_values() -> None:
     benchmark = {
-        "outputs": "json",
         "args": {
             "backend_type": "openai_http",
             "rate_type": "concurrent",
@@ -181,7 +176,6 @@ def test_build_guidellm_args_renders_list_values() -> None:
         "--rate-type=concurrent",
         "--rate=300,200,100,50,1",
         "--max-seconds=600",
-        "--outputs=json",
     ]
 
 
