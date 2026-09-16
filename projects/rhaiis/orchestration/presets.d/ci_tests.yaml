@@ -26,7 +26,7 @@ sglang-ci-quick:
   tests.rhaiis.model_key: qwen3-0_6b
   tests.rhaiis.workload_key: ci-quick
   tests.rhaiis.workload_keys: ["ci-quick"]
-  tests.rhaiis.version: "SGLang-ci-quick"
+  tests.rhaiis.version: "sglang-ci-quick-deleteme"
   tests.rhaiis.warmup: false
   rhaiis.profiler.enabled: false
   rhaiis.agent_analysis.enabled: false
