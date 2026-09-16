@@ -14,3 +14,11 @@ content:
   topsail-bot.slack-token:
     description: |
       Token to send slack notification from the TOPSAIL-bot
+
+  jira-server:
+    description: |
+      Jira server URL (e.g. https://issues.redhat.com)
+
+  jira-token:
+    description: |
+      Jira Personal Access Token for authentication
