@@ -31,7 +31,7 @@ from projects.core.library.export_notifications import (
     TestPhase,
     _check_job_shutdown_status,
     _create_mlflow_url,
-    send_completion_notification,
+    send_completion_notifications,
 )
 
 logger = logging.getLogger(__name__)
@@ -399,7 +399,7 @@ def caliper_export_entrypoint(
         # Send completion notifications regardless of success/failure
         if status and not disable_notification:
             try:
-                notification_success = send_completion_notification(
+                notification_success = send_completion_notifications(
                     artifact_dir,
                     status,
                     notification_provider=notification_provider,
@@ -534,7 +534,7 @@ def _update_artifacts(
 
     for fpath in [
         artifact_dir_path / "run.log",
-        artifact_dir_path / "NOTIFICATION-github.md",
+        artifact_dir_path / "COMPLETION-NOTIFICATION.md",
         artifact_dir_path / "000__ci_metadata" / "fournos_fjob.yaml",
     ]:
         if fpath.is_file():

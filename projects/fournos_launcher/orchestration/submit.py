@@ -189,7 +189,7 @@ def send_github_notification(
 
         # Write simplified notification to file for notification system pickup
         try:
-            notification_file = artifact_dir / "NOTIFICATION-github.md"
+            notification_file = artifact_dir / "COMPLETION-NOTIFICATION.md"
             with open(notification_file, "w", encoding="utf-8") as f:
                 f.write(notification_status)
             logger.info(f"Created notification content for {job_type} job")
@@ -199,8 +199,22 @@ def send_github_notification(
 
         # Send notification through notification system
         try:
-            send_notification(message=notification_status, github=True, dry_run=False)
-            logger.info(f"Sent GitHub notification for {job_type} job")
+            notification_vault = None
+            try:
+                notification_vault = config.project.get_config("caliper.export.notifications.vault")
+            except Exception:
+                pass
+
+            ok = send_notification(
+                message=notification_status,
+                github=True,
+                dry_run=False,
+                notification_vault=notification_vault,
+            )
+            if ok:
+                logger.info(f"Sent GitHub notification for {job_type} job")
+            else:
+                logger.warning(f"GitHub notification for {job_type} job returned failure")
         except Exception as send_error:
             logger.warning(f"Failed to send notification: {send_error}")
 

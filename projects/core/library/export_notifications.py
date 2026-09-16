@@ -23,9 +23,11 @@ from projects.core.library import ci as ci_lib
 from projects.core.library import config, env
 from projects.core.library.step_status import StepStatus
 from projects.core.notifications.provider import NotificationContext
-from projects.core.notifications.send import send_notification as _send_github_notification
+from projects.core.notifications.send import send_notification
 
 logger = logging.getLogger(__name__)
+
+COMPLETION_NOTIFICATION_FILENAME = "COMPLETION-NOTIFICATION.md"
 
 
 def _calculate_duration(start_time: str, end_time: str) -> str:
@@ -302,13 +304,115 @@ def _censor_notification_text(text: str, verbose: bool = False) -> str:
         raise
 
 
-def send_completion_notification(
+def _send_completion_message(
+    notification_status: str,
+    dry_run: bool,
+) -> bool:
+    """Send the completion notification to GitHub and Jira via send_notification.
+
+    Args:
+        notification_status: Censored markdown notification content
+        dry_run: If True, log but don't send
+
+    Returns:
+        bool: True if all notifications succeeded
+    """
+    try:
+        notification_vault = None
+        try:
+            notification_config = config.project.get_config("caliper.export.notifications", {})
+            notification_vault = notification_config.get("vault")
+            if notification_vault:
+                logger.info(f"Using notification vault from config: {notification_vault}")
+        except Exception as e:
+            logger.warning(f"Failed to get notification vault from config: {e}")
+
+        success = send_notification(
+            message=notification_status,
+            github=True,
+            jira=True,
+            dry_run=dry_run,
+            notification_vault=notification_vault,
+        )
+        if success:
+            logger.info("Successfully sent completion notifications")
+        else:
+            logger.error("Completion notification sending failed")
+
+        return success
+
+    except Exception as e:
+        logger.error(f"Failed to send completion notifications: {e}")
+        return False
+
+
+def _send_slack_provider_notification(
+    notification_provider,
+    status: ExportStatus,
+    finish_reason: str,
+    project: str,
+    dry_run: bool,
+) -> bool:
+    """Send notification via the per-project Slack notification provider.
+
+    Args:
+        notification_provider: SlackNotificationProvider instance
+        status: Export status dataclass (will be censored before sending)
+        finish_reason: Reason string for the notification context
+        project: Project name
+        dry_run: If True, log but don't send
+
+    Returns:
+        bool: True if notification succeeded
+    """
+    if not notification_provider:
+        logger.info("No slack notification provider, nothing to send.")
+        return True
+
+    if dry_run:
+        logger.info(
+            f"DRY RUN: Would send per-project Slack notification with {notification_provider}"
+        )
+        return True
+
+    try:
+        artifact_dir = env.ARTIFACT_DIR
+
+        try:
+            censored_status = yaml.safe_load(
+                _censor_notification_text(yaml.dump(status.to_dict()), verbose=False)
+            )
+        except Exception as e:
+            logger.error(f"Slack notification censoring failed, aborting Slack notification: {e}")
+            return False
+
+        context = NotificationContext(
+            status=censored_status,
+            finish_reason=str(finish_reason),
+            project_name=project or "unknown",
+            pr_number=os.environ.get("PULL_NUMBER"),
+            job_type=os.environ.get("JOB_TYPE"),
+            artifact_dir=artifact_dir,
+        )
+        ok = notification_provider.notify(context)
+        if ok:
+            logger.info("Successfully sent per-project Slack notification")
+        else:
+            logger.warning("Per-project Slack notification failed")
+
+        return ok
+
+    except Exception as e:
+        logger.warning(f"Failed to send per-project Slack notification: {e}")
+        return False
+
+
+def send_completion_notifications(
     artifact_dir: Path,
     status: ExportStatus,
     notification_provider=None,
     dry_run: bool = False,
-    jira: bool = True,
-) -> bool:
+):
     """Send job completion notifications based on caliper export status.
 
     Args:
@@ -316,15 +420,12 @@ def send_completion_notification(
         status: Caliper export status dataclass
         notification_provider: Optional per-project SlackNotificationProvider instance
         dry_run: If True, only build and log notification content without sending
-        jira: If True, send Jira notification (if configured)
 
     Returns:
         bool: True if notifications were sent successfully, False otherwise
     """
-    # Extract notification parameters from status object
-    project = config.project.get_config("project.name")
 
-    # Check individual step exit statuses from exit_status.yaml files once
+    project = config.project.get_config("project.name")
 
     try:
         step_status = _get_overall_step_status(artifact_dir)
@@ -336,101 +437,53 @@ def send_completion_notification(
 
     finish_reason = _extract_finish_reason_from_status(status, step_status)
 
-    # Build enhanced notification with fournos job info and artifact links
+    success = True
+    success &= _send_detailed_completion_notification(
+        artifact_dir,
+        status,
+        finish_reason,
+        project,
+        step_status,
+        dry_run,
+    )
+
+    success &= _send_slack_provider_notification(
+        notification_provider, status, finish_reason, project, dry_run
+    )
+
+    return success
+
+
+def _send_detailed_completion_notification(
+    artifact_dir: Path,
+    status: ExportStatus,
+    finish_reason: str,
+    project: str,
+    step_status,
+    dry_run: bool = False,
+) -> bool:
+
     notification_status, notification_success = _build_enhanced_notification(
         artifact_dir, project, finish_reason, status, step_status
     )
 
-    # Apply censoring to notification content before sending
     try:
         notification_status = _censor_notification_text(notification_status, verbose=dry_run)
     except Exception as e:
         logger.error(f"Notification censoring failed, aborting notification delivery: {e}")
         return False
 
-    # Send actual notifications
     if dry_run:
         logger.info("DRY RUN: Would send notification")
         logger.info(f"DRY RUN: Notification content:\n{notification_status}")
     else:
         logger.info("Sending notification ...")
 
-    # Write notification to file for GitHub pickup (always generate, even in dry-run)
-    notification_file = env.ARTIFACT_DIR / "COMPLETION-NOTIFICATION.md"
+    notification_file = env.ARTIFACT_DIR / COMPLETION_NOTIFICATION_FILENAME
     notification_file.write_text(notification_status + "\n")
+    logger.info(f"Wrote export notification file {notification_file}")
 
-    if dry_run:
-        logger.info(f"DRY RUN: Generated notification file {notification_file}")
-    else:
-        logger.info(f"Wrote export notification file {notification_file}")
-
-    # Actually send notification through GitHub API
-    try:
-        # Get notification vault from configuration
-        notification_vault = None
-        try:
-            notification_config = config.project.get_config("caliper.export.notifications", {})
-            notification_vault = notification_config.get("vault")
-            if notification_vault:
-                logger.info(f"Using notification vault from config: {notification_vault}")
-        except Exception as e:
-            logger.warning(f"Failed to get notification vault from config: {e}")
-
-        success = _send_github_notification(
-            message=notification_status,
-            github=True,
-            slack=False,
-            jira=jira,
-            dry_run=dry_run,
-            notification_vault=notification_vault,
-        )
-        if success:
-            logger.info("Successfully sent GitHub and Jira notifications")
-        else:
-            logger.error("Notification sending failed")
-            notification_success = False
-    except Exception as e:
-        logger.error(f"Failed to send notifications: {e}")
-        notification_success = False
-
-    # Per-project Slack notification via provider
-    if notification_provider:
-        if not dry_run:
-            try:
-                artifact_dir = Path(env.ARTIFACT_DIR) if env.ARTIFACT_DIR else None
-                # Censor status fields before creating NotificationContext
-                try:
-                    censored_status = yaml.safe_load(
-                        _censor_notification_text(yaml.dump(status.to_dict()), verbose=dry_run)
-                    )
-                except Exception as e:
-                    logger.error(
-                        f"Slack notification censoring failed, aborting Slack notification: {e}"
-                    )
-                    notification_success = False
-                else:
-                    # Only proceed with Slack notification if censoring succeeded
-                    context = NotificationContext(
-                        status=censored_status,
-                        finish_reason=str(finish_reason),
-                        project_name=project or "unknown",
-                        pr_number=os.environ.get("PULL_NUMBER"),
-                        job_type=os.environ.get("JOB_TYPE"),
-                        artifact_dir=artifact_dir,
-                    )
-                    ok = notification_provider.notify(context)
-                    if ok:
-                        logger.info("Successfully sent per-project Slack notification")
-                    else:
-                        logger.warning("Per-project Slack notification failed")
-                        notification_success = False
-            except Exception as e:
-                logger.warning(f"Failed to send per-project Slack notification: {e}")
-                notification_success = False
-        else:
-            logger.info("DRY RUN: Would send per-project Slack notification")
-
-    return notification_success
+    return notification_success and _send_completion_message(notification_status, dry_run)
 
 
 def _get_project_and_args(project: str, artifact_dir: Path | None) -> tuple[str, str, str]:
