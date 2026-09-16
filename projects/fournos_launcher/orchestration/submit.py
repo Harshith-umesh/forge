@@ -199,11 +199,7 @@ def send_github_notification(
 
         # Send notification through notification system
         try:
-            notification_vault = None
-            try:
-                notification_vault = config.project.get_config("caliper.export.notifications.vault")
-            except Exception:
-                pass
+            notification_vault = config.project.get_config("notifications.vault.name")
 
             ok = send_notification(
                 message=notification_status,
@@ -253,10 +249,12 @@ def get_ci_base_link(is_raw_file=False, is_dir=False):
 
         link_path = f"pr-logs/pull/{github_org}_{github_repo}/{pull_number}/{job}/{build_id}"
 
+    test_path = f"{test_name}/artifacts"
+
     return (
-        "https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/"
+        "https://gcs.ci.openshift.org/gcs/test-platform-results-public/"
         + link_path
-        + f"/artifacts/{test_name}",
+        + f"/artifacts/{test_name}/{test_path}",
         "",
     )
 
