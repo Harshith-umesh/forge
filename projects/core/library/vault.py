@@ -423,6 +423,64 @@ def is_strict_validation_enabled() -> bool:
     return _strict_validation_enabled
 
 
+def init_from_directory(base_dir: Path) -> list[str]:
+    """Auto-discover vaults from a base directory.
+
+    Scans base_dir for subdirectories matching vault definition names
+    (from vaults/*.yaml) and sets the corresponding env_key environment
+    variables so that the vault system can locate the secret files.
+
+    Does not override environment variables that are already set.
+
+    Args:
+        base_dir: Directory containing vault subdirectories
+
+    Returns:
+        List of discovered vault names
+    """
+    vaults_def_dir = env.FORGE_HOME / "vaults"
+    if not vaults_def_dir.exists():
+        logger.warning(f"Vault definitions directory does not exist: {vaults_def_dir}")
+        return []
+
+    if not base_dir.is_dir():
+        logger.error(f"FORGE_VAULT_DIRECTORY is not a directory: {base_dir}")
+        return []
+
+    discovered = []
+    for subdir in sorted(base_dir.iterdir()):
+        if not subdir.is_dir():
+            continue
+
+        vault_def_file = vaults_def_dir / f"{subdir.name}.yaml"
+        if not vault_def_file.exists():
+            logger.debug(f"No vault definition for directory: {subdir.name}")
+            continue
+
+        try:
+            with open(vault_def_file) as f:
+                vault_def = yaml.safe_load(f)
+        except Exception as e:
+            logger.error(f"Failed to load vault definition {vault_def_file}: {e}")
+            continue
+
+        env_key = vault_def.get("env_key")
+        if not env_key:
+            logger.error(f"Missing env_key in vault definition: {vault_def_file}")
+            continue
+
+        if env_key in os.environ:
+            logger.debug(f"Vault '{subdir.name}': {env_key} already set, not overriding")
+        else:
+            os.environ[env_key] = str(subdir)
+            logger.info(f"Vault '{subdir.name}': set {env_key}={subdir}")
+
+        discovered.append(subdir.name)
+
+    logger.info(f"Auto-discovered {len(discovered)} vaults from {base_dir}: {discovered}")
+    return discovered
+
+
 def init(
     vaults: list[str] = None,
     mandatory_vaults: list[str] = None,
@@ -447,6 +505,11 @@ def init(
     if _vault_manager is not None:
         logger.warning("VaultManager already initialized", stack_info=True)
         return
+
+    if not env.running_inside_fournos():
+        base_dir = os.environ.get("FORGE_VAULT_DIRECTORY")
+        if base_dir:
+            init_from_directory(Path(base_dir))
 
     _vault_manager = VaultManager()
 
