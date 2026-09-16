@@ -29,5 +29,6 @@ sglang-ci-quick:
   tests.rhaiis.version: "sglang-ci-quick-deleteme"
   tests.rhaiis.warmup: false
   rhaiis.profiler.enabled: false
+  caliper.postprocess.csv_dashboard.enabled: false
   rhaiis.agent_analysis.enabled: false
   tests.rhaiis.slack_notify_always: true
