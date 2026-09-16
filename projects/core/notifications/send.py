@@ -76,14 +76,21 @@ def get_secrets(notification_vault=None):
 
 
 def send_notification(
-    message, github=True, slack=False, dry_run=False, pr_number=None, notification_vault=None
+    message,
+    github=True,
+    slack=False,
+    jira=False,
+    dry_run=False,
+    pr_number=None,
+    notification_vault=None,
 ):
-    """Send a generic notification message to GitHub and/or Slack.
+    """Send a generic notification message to GitHub, Slack, and/or Jira.
 
     Args:
         message: The notification message content
         github: Whether to send to GitHub (default True)
         slack: Whether to send to Slack (default False)
+        jira: Whether to send to Jira (default False, requires notifications.jira config)
         dry_run: Whether to only log the message without sending (default False)
         pr_number: Optional PR number, auto-detected if None
         notification_vault: Optional vault name to get notification secrets from
@@ -115,6 +122,10 @@ def send_notification(
             logger.error(
                 "Cannot send Slack notification: no secrets available (vault or environment variables)"
             )
+        if jira:
+            logger.error(
+                "Cannot send Jira notification: no secrets available (vault or environment variables)"
+            )
         return False
 
     failed = False
@@ -134,7 +145,67 @@ def send_notification(
     ):
         failed = True
 
+    if jira and not _send_notification_to_jira(
+        secret_dir,
+        message,
+        pr_number,
+        notification_vault,
+        dry_run,
+    ):
+        failed = True
+
     return not failed
+
+
+def _send_notification_to_jira(secret_dir, message, pr_number, notification_vault, dry_run):
+    """Send a notification to Jira if configured in the project config.
+
+    Reads notifications.jira config to determine project_key and extra_tickets.
+    Creates or finds a ticket matching the PR number, then posts the message
+    as an ADF comment.
+    """
+    try:
+        from projects.core.library import config
+
+        jira_config = config.project.get_config("notifications.jira", {})
+    except Exception:
+        jira_config = {}
+
+    if not jira_config:
+        logger.info("No Jira notification config found, skipping")
+        return True
+
+    try:
+        from projects.core.notifications.jira import api as jira_api
+
+        jira_vault = jira_config.get("vault", notification_vault)
+        if jira_vault:
+            jira_secret_dir, _ = get_secrets(jira_vault)
+            if jira_secret_dir:
+                secret_dir = jira_secret_dir
+
+        pr_title = jira_config.get("pr_title", "")
+        if not pr_title and pr_number:
+            try:
+                org, repo = get_org_repo()
+                _, pr_data = github_api.fetch_pr_data(org, repo, pr_number)
+                pr_title = pr_data.get("title", "") if pr_data else ""
+            except Exception as e:
+                logger.warning(f"Failed to fetch PR title from GitHub for Jira: {e}")
+
+        return jira_api.send_jira_notification(
+            secret_dir=secret_dir,
+            project_key=jira_config["project_key"],
+            pr_number=pr_number or "NO_PR",
+            pr_title=pr_title,
+            markdown_content=message,
+            extra_tickets=jira_config.get("extra_tickets"),
+            dry_run=dry_run,
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to send Jira notification: {e}")
+        return False
 
 
 ###

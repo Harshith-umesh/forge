@@ -31,7 +31,7 @@ from projects.core.library.export_notifications import (
     TestPhase,
     _check_job_shutdown_status,
     _create_mlflow_url,
-    send_notification,
+    send_completion_notification,
 )
 
 logger = logging.getLogger(__name__)
@@ -399,7 +399,7 @@ def caliper_export_entrypoint(
         # Send completion notifications regardless of success/failure
         if status and not disable_notification:
             try:
-                notification_success = send_notification(
+                notification_success = send_completion_notification(
                     artifact_dir,
                     status,
                     notification_provider=notification_provider,

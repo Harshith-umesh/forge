@@ -23,7 +23,7 @@ from projects.core.library import ci as ci_lib
 from projects.core.library import config, env
 from projects.core.library.step_status import StepStatus
 from projects.core.notifications.provider import NotificationContext
-from projects.core.notifications.send import send_notification as send_github_notification
+from projects.core.notifications.send import send_notification as _send_github_notification
 
 logger = logging.getLogger(__name__)
 
@@ -302,11 +302,12 @@ def _censor_notification_text(text: str, verbose: bool = False) -> str:
         raise
 
 
-def send_notification(
-    artifact_dir: Path | None,
+def send_completion_notification(
+    artifact_dir: Path,
     status: ExportStatus,
     notification_provider=None,
     dry_run: bool = False,
+    jira: bool = True,
 ) -> bool:
     """Send job completion notifications based on caliper export status.
 
@@ -315,6 +316,7 @@ def send_notification(
         status: Caliper export status dataclass
         notification_provider: Optional per-project SlackNotificationProvider instance
         dry_run: If True, only build and log notification content without sending
+        jira: If True, send Jira notification (if configured)
 
     Returns:
         bool: True if notifications were sent successfully, False otherwise
@@ -323,14 +325,14 @@ def send_notification(
     project = config.project.get_config("project.name")
 
     # Check individual step exit statuses from exit_status.yaml files once
-    step_status = None
-    if artifact_dir:
-        try:
-            step_status = _get_overall_step_status(artifact_dir)
-            if step_status == StepStatus.FAILURE:
-                logger.info("Step failure detected from exit_status.yaml files")
-        except Exception as e:
-            logger.warning(f"Failed to check step exit statuses for notification: {e}")
+
+    try:
+        step_status = _get_overall_step_status(artifact_dir)
+        if step_status == StepStatus.FAILURE:
+            logger.info("Step failure detected from exit_status.yaml files")
+    except Exception as e:
+        logger.warning(f"Failed to check step exit statuses for notification: {e}")
+        step_status = None
 
     finish_reason = _extract_finish_reason_from_status(status, step_status)
 
@@ -354,19 +356,13 @@ def send_notification(
         logger.info("Sending notification ...")
 
     # Write notification to file for GitHub pickup (always generate, even in dry-run)
-    try:
-        if env.ARTIFACT_DIR:
-            notification_file = Path(env.ARTIFACT_DIR) / "NOTIFICATION-github.md"
-            with open(notification_file, "w", encoding="utf-8") as f:
-                f.write(notification_status + "\n")
-            if dry_run:
-                logger.info(f"DRY RUN: Generated notification file {notification_file}")
-            else:
-                logger.info(f"Wrote export notification file {notification_file}")
-        else:
-            logger.warning("ARTIFACT_DIR not available, skipping notification file")
-    except Exception as e:
-        logger.exception(f"Failed to write notification file: {e}")
+    notification_file = env.ARTIFACT_DIR / "COMPLETION-NOTIFICATION.md"
+    notification_file.write_text(notification_status + "\n")
+
+    if dry_run:
+        logger.info(f"DRY RUN: Generated notification file {notification_file}")
+    else:
+        logger.info(f"Wrote export notification file {notification_file}")
 
     # Actually send notification through GitHub API
     try:
@@ -380,20 +376,21 @@ def send_notification(
         except Exception as e:
             logger.warning(f"Failed to get notification vault from config: {e}")
 
-        success = send_github_notification(
+        success = _send_github_notification(
             message=notification_status,
             github=True,
             slack=False,
+            jira=jira,
             dry_run=dry_run,
             notification_vault=notification_vault,
         )
         if success:
-            logger.info("Successfully sent GitHub notification")
+            logger.info("Successfully sent GitHub and Jira notifications")
         else:
-            logger.error("GitHub notification sending failed")
+            logger.error("Notification sending failed")
             notification_success = False
     except Exception as e:
-        logger.error(f"Failed to send GitHub notification: {e}")
+        logger.error(f"Failed to send notifications: {e}")
         notification_success = False
 
     # Per-project Slack notification via provider
