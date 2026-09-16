@@ -23,14 +23,14 @@ benchmarks:
 tests:
   rhaiis:
     model_key: qwen3-0_6b
-    workload_key: ci-quick
+    workload_key: profile1
     workload_keys: []
     run_benchmark: true
-    warmup: false
+    warmup: true
     version: ""
     compare_version: ""
     slack_user: ""
-    slack_notify_always: true
+    slack_notify_always: false
 
 caliper:
   postprocess:
@@ -50,7 +50,7 @@ caliper:
         enabled: true
         output: dashboard.csv
     csv_dashboard:
-      enabled: false
+      enabled: true
       s3_key: staging/rhaiis-dashboard/consolidated_dashboard.csv
     analyze:
       enabled: false

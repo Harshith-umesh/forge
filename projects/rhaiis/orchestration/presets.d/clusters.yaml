@@ -31,10 +31,10 @@ b200:
 #   /cluster hera
 
 cluster_hera:
-  extends: [nvidia, hera]
+  extends: [nvidia, ci-quick, hera]
 
 cluster_zeus:
-  extends: [nvidia, zeus]
+  extends: [nvidia, ci-quick, zeus]
 
 cluster_old_zeus:
-  extends: [nvidia, old-zeus]
+  extends: [nvidia, ci-quick, old-zeus]
