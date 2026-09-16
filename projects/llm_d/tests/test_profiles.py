@@ -196,7 +196,7 @@ def test_release_preset_expands_benchmark_list_and_merges_workload_args() -> Non
     for run_spec in run_specs:
         with runtime_config.activate_run_spec(run_spec):
             benchmark = runtime_config.get_benchmark_config()
-            assert benchmark["args"]["request_type"] == "text_completions"
+            assert benchmark["args"]["backend"] == "request_format=/v1/completions"
 
 
 def test_gpt_release_preset_produces_deployment_workload_matrix() -> None:

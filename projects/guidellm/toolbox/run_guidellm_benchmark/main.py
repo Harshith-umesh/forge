@@ -76,7 +76,7 @@ def run(
         image: Full container image reference for the benchmark
         timeout: Active deadline for the Job and timeout in seconds to wait for completion
         pvc_size: Size of the PersistentVolumeClaim for storing results (only used in PVC mode)
-        guidellm_args: List of additional guidellm arguments (e.g., ["--rate=10", "--max-seconds=30"])
+        guidellm_args: List of additional guidellm arguments (e.g., ["--profile=kind=concurrent,streams=10"])
         config_path: Path to a GuideLLM config YAML file on the local filesystem.
             When set, the file is read and embedded in the container, and GuideLLM
             is invoked with ``--config`` pointing to it.
