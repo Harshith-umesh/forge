@@ -293,7 +293,7 @@ def _censor_notification_text(text: str, verbose: bool = False) -> str:
         Censored notification text with sensitive content replaced
 
     Raises:
-        Exception: If vault discovery fails, preventing notification delivery
+        Exception: If vault secret retrieval fails, preventing notification delivery
     """
     try:
         return censor_text(text, verbose=verbose)

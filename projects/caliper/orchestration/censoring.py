@@ -21,11 +21,11 @@ from projects.core.library import vault as vault_lib
 logger = logging.getLogger(__name__)
 
 
-def discover_vault_secrets(
+def retrieve_vault_secrets(
     verbose: bool = False,
 ) -> tuple[set[str], dict[str, str], dict[str, str]]:
     """
-    Discover all vault secrets for censoring (all vault content is treated as sensitive).
+    Retrieve vault secrets for censoring from the initialized vaults.
 
     Args:
         verbose: Enable verbose logging
@@ -42,13 +42,13 @@ def discover_vault_secrets(
 
     try:
         vault_manager = vault_lib.get_vault_manager()
-        available_vaults = vault_manager.list_vaults()
+        vault_names = vault_manager.list_initialized_vaults()
 
         if verbose:
-            logger.info(f"Discovering vault secrets from {len(available_vaults)} vaults")
+            logger.info(f"Retrieving vault secrets from {len(vault_names)} vaults")
 
         secrets_discovered = 0
-        for vault_name in available_vaults:
+        for vault_name in vault_names:
             vault = vault_manager.get_vault(vault_name)
             if not vault:
                 continue
@@ -87,10 +87,10 @@ def discover_vault_secrets(
                     logger.warning(f"Failed to read vault content {vault_name}/{content_name}: {e}")
 
         if verbose:
-            logger.info(f"Discovered {secrets_discovered} vault secrets for censoring")
+            logger.info(f"Retrieved {secrets_discovered} vault secrets for censoring")
 
     except Exception as e:
-        logger.exception(f"Failed to discover vault secrets: {e}")
+        logger.exception(f"Failed to retrieve vault secrets: {e}")
         raise
 
     return vault_secrets, secret_mapping, censor_text_mapping
@@ -136,10 +136,9 @@ def censor_text(text: str, verbose: bool = False) -> str:
                     f"Censored {len(matches)} instances of pattern '{KEYWORD_PATTERNS[i]}' in text"
                 )
 
-    # Now try vault secrets discovery and censoring
+    # Now try vault secrets retrieval and censoring
     try:
-        # Discover vault secrets for censoring
-        vault_secrets, secret_mapping, censor_text_mapping = discover_vault_secrets(verbose=verbose)
+        vault_secrets, secret_mapping, censor_text_mapping = retrieve_vault_secrets(verbose=verbose)
         # /!\ secret_mapping contains the secret values. Process with extra care.
 
         # Replace vault secrets (more specific)
@@ -165,8 +164,8 @@ def censor_text(text: str, verbose: bool = False) -> str:
             logger.info("No sensitive content found in text")
 
     except Exception as e:
-        logger.error(f"Failed to discover vault secrets during text censoring: {e}")
-        # Propagate the vault discovery failure after keyword censoring is complete
+        logger.error(f"Failed to retrieve vault secrets during text censoring: {e}")
+        # Propagate the vault retrieval failure after keyword censoring is complete
         # This allows _censor_notification_text to handle the failure appropriately
         raise
 
@@ -194,8 +193,7 @@ def orchestration_apply_censoring(
             logger.info("Censoring disabled via --disable-censoring flag")
         return False
 
-    # Discover vault secrets
-    vault_secrets, secret_mapping, censor_text_mapping = discover_vault_secrets(
+    vault_secrets, secret_mapping, censor_text_mapping = retrieve_vault_secrets(
         verbose=export_cfg.verbose
     )
     # /!\ secret_mapping contains the secret values. Process with extra care.
