@@ -86,11 +86,8 @@ def test_smoke_presets_inherit_deployment_modes(preset: str, expected_deployment
     core_config.project.apply_preset(preset)
     assert runtime_config.get_deployment_profile_name() == expected_deployment
     assert runtime_config.get_model_name() == "Qwen/Qwen3-0.6B"
-    # Only the base "smoke" preset enables benchmarking via runtime.benchmark_key: short
-    if preset == "smoke":
-        assert runtime_config.get_benchmark_config() is not None
-    else:
-        assert runtime_config.get_benchmark_config() is None
+    # All smoke presets inherit smoke-base which sets runtime.benchmark_key: short
+    assert runtime_config.get_benchmark_config() is not None
 
 
 def test_benchmark_workloads_are_available() -> None:
