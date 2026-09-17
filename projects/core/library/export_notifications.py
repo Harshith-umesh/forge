@@ -1210,7 +1210,7 @@ def _process_notification_files(step_dir: Path) -> list[str]:
     return notifications_from_files
 
 
-def _extract_postprocess_status_info(artifact_dir: Path) -> list[str]:
+def _extract_postprocess_status_info(artifact_dir: Path, get_file_link=None) -> list[str]:
     """Extract post-processing status information from POSTPROCESS_STATUS_FILENAME files.
 
     Returns:
@@ -1235,6 +1235,8 @@ def _extract_postprocess_status_info(artifact_dir: Path) -> list[str]:
                 relative_dir = relative_dir.parent
             dir_name = str(relative_dir) if relative_dir != Path(".") else "root"
 
+            base_directory = postprocess_data.get("base_directory", "")
+
             # Extract overall status
             overall_success = postprocess_data.get("success", False)
             final_status = postprocess_data.get("final_status", "unknown")
@@ -1250,7 +1252,13 @@ def _extract_postprocess_status_info(artifact_dir: Path) -> list[str]:
                         status_emoji = (
                             "✔️" if status == "success" else "❌" if status == "failed" else "⚪"
                         )
-                        step_statuses.append(f"{status_emoji} {step_name}")
+                        log_file = step_data.get("log_file")
+                        if log_file and get_file_link:
+                            log_path = Path(base_directory) / log_file
+                            step_label = get_file_link(log_path, text=step_name)
+                        else:
+                            step_label = step_name
+                        step_statuses.append(f"{status_emoji} {step_label}")
 
             # Format overall line
             overall_emoji = "✅" if overall_success else "❌"
@@ -1289,7 +1297,7 @@ def _process_step_details(step_dir: Path, mlflow_run_url: str | None = None) -> 
 
     # Extract postprocess status for this specific step
     try:
-        postprocess_info = _extract_postprocess_status_info(step_dir)
+        postprocess_info = _extract_postprocess_status_info(step_dir, get_file_link)
         step_details.extend(postprocess_info)
     except Exception as e:
         logger.warning(f"Failed to extract postprocess status for step {step_dir.name}: {e}")
