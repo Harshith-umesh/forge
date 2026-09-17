@@ -212,6 +212,7 @@ def _build_v07x_args(endpoint_url: str, old_args: list[str]) -> list[str]:
     max_seconds = None
     max_requests = None
     rampup = None
+    warmup = None
     passthrough: list[str] = []
 
     for arg in old_args:
@@ -232,6 +233,8 @@ def _build_v07x_args(endpoint_url: str, old_args: list[str]) -> list[str]:
             max_requests = val
         elif key == "--rampup":
             rampup = val
+        elif key == "--warmup":
+            warmup = val
         elif key in ("--outputs", "--output-dir"):
             pass
         else:
@@ -252,6 +255,8 @@ def _build_v07x_args(endpoint_url: str, old_args: list[str]) -> list[str]:
         rate_values = [v.strip() for v in rates_str.split(",") if v.strip()]
         if len(rate_values) == 1:
             profile_spec = f"kind={rate_type},{rate_key}={rate_values[0]}"
+            if warmup:
+                profile_spec += f",warmup={warmup}"
             if rampup:
                 profile_spec += f",rampup_duration={rampup}"
             new_args.append(f"--profile={profile_spec}")
@@ -264,12 +269,18 @@ def _build_v07x_args(endpoint_url: str, old_args: list[str]) -> list[str]:
                 "kind": rate_type,
                 rate_key: parsed_rates,
             }
+            if warmup:
+                f = float(warmup)
+                profile_dict["warmup"] = int(f) if f == int(f) else f
             if rampup:
                 f = float(rampup)
                 profile_dict["rampup_duration"] = int(f) if f == int(f) else f
             new_args.append(f"--profile={_json.dumps(profile_dict)}")
     else:
-        new_args.append(f"--profile=kind={rate_type}")
+        profile_spec = f"kind={rate_type}"
+        if warmup:
+            profile_spec += f",warmup={warmup}"
+        new_args.append(f"--profile={profile_spec}")
 
     if max_seconds:
         new_args.append(f"--constraint=kind=max_duration,seconds={max_seconds}")
