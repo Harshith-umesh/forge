@@ -81,6 +81,7 @@ class VaultManager:
     def __init__(self, vault_definitions_dir: Path = None):
         self.vault_definitions_dir = vault_definitions_dir or env.FORGE_HOME / "vaults"
         self._vault_cache: dict[str, VaultDefinition] = {}
+        self._initialized_vaults: set[str] = set()
         self._load_vault_definitions()
 
     def _load_vault_definitions(self):
@@ -140,12 +141,14 @@ class VaultManager:
         return vault_def
 
     def get_vault(self, vault_name: str) -> VaultDefinition | None:
-        """Get a vault definition by name"""
+        """Get a vault definition by name, only if it has been initialized"""
+        if vault_name not in self._initialized_vaults:
+            return None
         return self._vault_cache.get(vault_name)
 
     def list_vaults(self) -> list[str]:
-        """List all available vault names"""
-        return list(self._vault_cache.keys())
+        """List initialized vault names"""
+        return list(self._initialized_vaults)
 
     def validate_vault(self, vault_name: str, strict: bool = True) -> bool:
         """
@@ -161,7 +164,7 @@ class VaultManager:
         # Override strict parameter if globally disabled
         global _strict_validation_enabled
         effective_strict = strict and _strict_validation_enabled
-        vault = self.get_vault(vault_name)
+        vault = self._vault_cache.get(vault_name)
         if vault is None:
             logger.error(f"Vault '{vault_name}' is not defined")
             return False
@@ -331,7 +334,7 @@ class VaultManager:
         """Validate all defined vaults"""
         all_valid = True
 
-        for vault_name in self.list_vaults():
+        for vault_name in self._vault_cache:
             if not self.validate_vault(vault_name, strict=strict):
                 all_valid = False
 
@@ -355,8 +358,7 @@ def _filter_and_validate_vaults(
     if strict is None:
         strict = _strict_validation_enabled
 
-    # Filter to only keep specified vaults, but don't remove others if this is not the first call
-    available_vaults = set(vault_manager.list_vaults())
+    available_vaults = set(vault_manager._vault_cache)
     requested_vaults = set(vaults)
 
     # Check for requested vaults that don't exist
@@ -369,6 +371,8 @@ def _filter_and_validate_vaults(
             logger.warning(msg)
             # Remove missing vaults from requested list
             requested_vaults = requested_vaults - missing_vaults
+
+    vault_manager._initialized_vaults.update(requested_vaults)
 
     logger.info(
         f"Processing {len(requested_vaults)} vaults with strict={strict}: {sorted(requested_vaults)}"

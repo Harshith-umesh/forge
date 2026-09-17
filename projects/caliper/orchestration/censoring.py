@@ -42,7 +42,7 @@ def retrieve_vault_secrets(
 
     try:
         vault_manager = vault_lib.get_vault_manager()
-        vault_names = vault_manager.list_initialized_vaults()
+        vault_names = vault_manager.list_vaults()
 
         if verbose:
             logger.info(f"Retrieving vault secrets from {len(vault_names)} vaults")
