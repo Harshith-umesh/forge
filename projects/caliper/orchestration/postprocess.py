@@ -955,7 +955,8 @@ class CaliperPostprocessOrchestrator:
                     VisualizeStepResult(
                         status=StepStatus.FAILED,
                         completed_at=time.time(),
-                        detail=error_msg,
+                        error=error_msg,
+                        message=(status_data or {}).get("message"),
                         exit_code=result.returncode,
                     ),
                     log_file,
@@ -969,7 +970,7 @@ class CaliperPostprocessOrchestrator:
                 VisualizeStepResult(
                     status=StepStatus.FAILED,
                     completed_at=time.time(),
-                    detail=f"{str(e)}\n{traceback.format_exc()}",
+                    error=str(e),
                 ),
                 None,  # No log file if we couldn't even start
             )
