@@ -71,6 +71,10 @@ def format_postprocess_status_notification(
 
         # Format step with message if available
         lines.append(f"- {step_emoji} {step_name_display}: `{step_data.get('status', 'unknown')}`")
+        error = step_data.get("error")
+        if error:
+            lines.append(f"  * ⚠️ `{error}`")
+
         message = step_data.get("message")
         if message:
             lines.append(f"  * `{message}`")
@@ -230,14 +234,8 @@ def _format_analyse_kpis_step(step_data: dict, get_file_link: callable | None) -
 
     step_status = step_data.get("status")
 
-    # Show error message if step failed
-    if step_status == "failed":
-        error_msg = step_data.get("error")
-        if error_msg:
-            lines.append(f"  - ❌ `{error_msg}`")
-
     # Show regression analysis results if the step was successful
-    elif step_status in ("success", "warning", "regression_detected"):
+    if step_status in ("success", "warning", "regression_detected"):
         # Show regression analysis results
         if step_data.get("regressions_detected"):
             lines.append("  - ❌ Regression detected")
