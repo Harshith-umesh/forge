@@ -13,7 +13,7 @@ engines:
   vllm:
     images:
       nvidia: vllm/vllm-openai:v0.24.0
-      amd: vllm/vllm-openai-rocm:v0.22.0
+      amd: vllm/vllm-openai-rocm:v0.26.0
     port: 8080
     args:
       gpu-memory-utilization: 0.92
