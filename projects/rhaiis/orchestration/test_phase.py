@@ -127,7 +127,9 @@ def _run_test(
     from projects.core.library import config as _cfg
 
     version = _cfg.project.get_config("tests.rhaiis.version", "")
-    run_uuid = _cfg.project.get_config("tests.rhaiis.run_uuid", "") or str(_uuid_mod.uuid4())
+    run_uuid = _cfg.project.get_config("tests.rhaiis.run_uuid", "", warn=False) or str(
+        _uuid_mod.uuid4()
+    )
     logger.info("Run UUID for this job: %s", run_uuid)
 
     import subprocess
