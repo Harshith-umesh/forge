@@ -12,7 +12,9 @@ overrides: {} # don't touch this one directly, the config module will populate i
 extra_overrides: {}
 fournos_launcher:
   parallel_jobs: {}
-
+notifications:
+  vault:
+    name: psap-forge-notifications
 fournos:
   namespace: psap-automation
   kubeconfig:

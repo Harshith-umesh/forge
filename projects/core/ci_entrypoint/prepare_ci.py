@@ -374,18 +374,6 @@ def system_prechecks() -> bool:
             f"File '{failures_file}' already exists, cannot continue. Set FORGE_IGNORE_FAILURES_FILE=1 to ignore this."
         )
 
-    # Handle OpenShift CI PR arguments (already handled by parse_and_save_pr_arguments)
-    if (
-        os.environ.get("OPENSHIFT_CI") == "true"
-        and os.environ.get("FORGE_JUMP_CI_INSIDE_JUMP_HOST") != "true"
-    ):
-        if not os.environ.get("FORGE_OPENSHIFT_CI_STEP_DIR"):
-            hostname = os.environ.get("HOSTNAME", "")
-            job_name_safe = os.environ.get("JOB_NAME_SAFE", "")
-            if hostname and job_name_safe:
-                step_dir = hostname.replace(f"{job_name_safe}-", "") + "/artifacts"
-                os.environ["FORGE_OPENSHIFT_CI_STEP_DIR"] = step_dir
-
     # Remove any old failure markers
     old_failure = artifact_path / "FAILURE.txt"
     if old_failure.exists():

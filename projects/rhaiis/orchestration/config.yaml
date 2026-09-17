@@ -78,7 +78,9 @@ caliper:
           tags: {}
           parameters: {}
           metrics: {}
-
+    notifications:
+      enabled: true
+      vault: psap-forge-notifications
 agentic:
   enabled: true
   model_key: qwen-3-6-35b
