@@ -1,5 +1,6 @@
 vaults:
 - psap-forge-ci
+- psap-forge-notifications
 
 cluster:
   name: null
