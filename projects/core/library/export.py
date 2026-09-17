@@ -551,6 +551,9 @@ def caliper_export_list_vaults() -> list[str]:
     try:
         from projects.core.library import config
 
+        # S3 vaults are only needed when postprocessing is enabled
+        postprocess_enabled = config.project.get_config("caliper.postprocess.enabled", False)
+
         # Check if S3 export or import is enabled in the project configuration
         s3_parent_config = config.project.get_config("caliper.postprocess.s3", {})
         s3_export_config = config.project.get_config("caliper.postprocess.s3.export", {})
@@ -559,7 +562,7 @@ def caliper_export_list_vaults() -> list[str]:
         s3_export_enabled = s3_export_config.get("enabled", False)
         s3_import_enabled = s3_import_config.get("enabled", False)
 
-        if s3_export_enabled or s3_import_enabled:
+        if postprocess_enabled and (s3_export_enabled or s3_import_enabled):
             # Add the configured vault for S3 credentials (shared between import and export)
             vault_config = s3_parent_config.get("vault", {})
             vault_name = (
