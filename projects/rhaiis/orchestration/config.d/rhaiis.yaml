@@ -13,7 +13,7 @@ engines:
   vllm:
     images:
       nvidia: vllm/vllm-openai:v0.24.0
-      amd: quay.io/aipcc/rhaiis/rocm-ubi9:3.2.5
+      amd: vllm/vllm-openai-rocm:v0.22.0
     port: 8080
     args:
       gpu-memory-utilization: 0.92
