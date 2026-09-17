@@ -6,7 +6,31 @@ from projects.guidellm.toolbox.run_guidellm_benchmark import build_guidellm_args
 from projects.guidellm.toolbox.run_guidellm_benchmark.utils import (
     expand_guidellm_runs,
     render_guidellm_job_from_parts,
+    render_guidellm_shared_volume_job_from_parts,
 )
+
+
+def _render_args() -> dict:
+    return {
+        "namespace": "kserve-e2e-perf",
+        "name": "guidellm-benchmark",
+        "image": "ghcr.io/vllm-project/guidellm:v0.6.0",
+        "endpoint_url": "https://example.test/model",
+        "timeout_seconds": 3600,
+        "guidellm_args": [
+            "--backend-type=openai_http",
+            "--rate-type=concurrent",
+            "--rate=1",
+        ],
+    }
+
+
+def test_render_guidellm_jobs_set_host_users_false() -> None:
+    job = render_guidellm_job_from_parts(**_render_args())
+    shared_volume_job = render_guidellm_shared_volume_job_from_parts(**_render_args())
+
+    assert job["spec"]["template"]["spec"]["hostUsers"] is False
+    assert shared_volume_job["spec"]["template"]["spec"]["hostUsers"] is False
 
 
 def test_expand_guidellm_runs_converts_rates_to_individual_runs() -> None:

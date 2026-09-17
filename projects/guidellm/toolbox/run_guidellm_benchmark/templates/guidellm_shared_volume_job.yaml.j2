@@ -17,6 +17,7 @@ spec:
     spec:
       serviceAccountName: default
       restartPolicy: Never
+      hostUsers: false
 {% if fs_group is not none %}
       securityContext:
         fsGroup: {{ fs_group }}

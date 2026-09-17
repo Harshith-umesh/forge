@@ -72,7 +72,7 @@ Key sections:
 | `rhaiis.profiler` | PyTorch profiler settings (enable, S3 prefix, rates, labels) |
 | `models` | Model definitions (hf_model_id, per-model `vllm_args` overrides) |
 | `workloads` | Benchmark profiles (data shape, rates, max_seconds) |
-| `benchmarks.guidellm` | GuideLLM image, backend, timeout, PVC size, HF token secret, fs_group |
+| `benchmarks.guidellm` | GuideLLM image, backend, timeout, PVC size, HF token secret, and fs_group |
 | `tests` | CI test mapping (model_key, workload_keys, version) |
 | `caliper.postprocess` | Caliper postprocessing pipeline (parse, KPI, CSV export) |
 
@@ -287,6 +287,13 @@ Available configOverrides:
 | `benchmarks.guidellm.timeout` | Benchmark timeout in seconds |
 | `benchmarks.guidellm.hf_token_secret` | K8s secret name for HF_TOKEN (omit to skip) |
 | `benchmarks.guidellm.fs_group` | Pod-level fsGroup for PVC permissions (disabled by default) |
+
+GuideLLM benchmark Pods always set `spec.template.spec.hostUsers: false` for
+compatibility with the restricted SCC configuration used by supported
+OpenShift clusters. This is an implementation detail and is not a
+user-configurable benchmark option. The B200 preset does not set
+`benchmarks.guidellm.fs_group: 0`, because that value is rejected by its
+restricted SCC.
 
 Monitoring Fournos jobs:
 ```bash
