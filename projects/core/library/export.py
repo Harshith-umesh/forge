@@ -210,23 +210,6 @@ def run_caliper_orchestration_export(
             "caliper.export.backend.mlflow.config.run_name", os.environ["FJOB_NAME"], print=False
         )
 
-    # Initialize vaults needed for export operations
-    try:
-        from projects.core.library import vault
-
-        # Get export-specific vaults (MLflow, S3, notifications)
-        export_vaults = caliper_export_list_vaults()
-
-        if export_vaults:
-            vault.init(vaults=export_vaults)
-            logger.info(f"Initialized vault manager with {len(export_vaults)} vaults for export")
-        else:
-            logger.info("No vaults needed for export operation")
-
-    except Exception as e:
-        logger.warning(f"Failed to initialize vaults for export: {e}")
-        logger.warning("Continuing with export operation - some features may not work")
-
     caliper_cfg = config.project.get_config("caliper", print=False)
 
     return run_from_orchestration_config(
@@ -568,6 +551,9 @@ def caliper_export_list_vaults() -> list[str]:
     try:
         from projects.core.library import config
 
+        # S3 vaults are only needed when postprocessing is enabled
+        postprocess_enabled = config.project.get_config("caliper.postprocess.enabled", False)
+
         # Check if S3 export or import is enabled in the project configuration
         s3_parent_config = config.project.get_config("caliper.postprocess.s3", {})
         s3_export_config = config.project.get_config("caliper.postprocess.s3.export", {})
@@ -576,7 +562,7 @@ def caliper_export_list_vaults() -> list[str]:
         s3_export_enabled = s3_export_config.get("enabled", False)
         s3_import_enabled = s3_import_config.get("enabled", False)
 
-        if s3_export_enabled or s3_import_enabled:
+        if postprocess_enabled and (s3_export_enabled or s3_import_enabled):
             # Add the configured vault for S3 credentials (shared between import and export)
             vault_config = s3_parent_config.get("vault", {})
             vault_name = (

@@ -159,7 +159,9 @@ def agent_review_on_failure(func):
         try:
             exit_code = func(*args, **kwargs)
         except Exception as e:
-            logger.error(f"🤖 Exception in CI command '{function_name}': {e}")
+            logger.info(
+                f"🤖 Exception in CI command '{function_name}': {e} ==> triggering failure agent"
+            )
             _try_run_agent_on_exception()
             raise e
 
@@ -169,8 +171,8 @@ def agent_review_on_failure(func):
             return exit_code
 
         # Failure - run agent
-        logger.warning(
-            f"❌ CI command '{function_name}' failed with exit code {exit_code} - triggering failure agent"
+        logger.info(
+            f"❌ CI command '{function_name}' failed with exit code {exit_code} ==> triggering failure agent"
         )
         _run_agent_and_log_results()
         return exit_code

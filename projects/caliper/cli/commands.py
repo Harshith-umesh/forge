@@ -385,17 +385,29 @@ def visualize_cmd(
             verbose_parsing=verbose_parsing,
         )
 
-        status.update(
-            {
-                "success": True,
-                "plugin_module": mod,
-                "output_files": paths,
-                "output_dir": str(output_dir),
-                "generated_files": len(paths),
-            }
-        )
-
-        click.echo("Wrote: " + ", ".join(paths))
+        if not paths:
+            status.update(
+                {
+                    "success": False,
+                    "error": "No visualization files generated",
+                    "plugin_module": mod,
+                    "output_files": [],
+                    "output_dir": str(output_dir),
+                    "generated_files": 0,
+                }
+            )
+            click.echo("visualize failed: no visualization files generated", err=True)
+        else:
+            status.update(
+                {
+                    "success": True,
+                    "plugin_module": mod,
+                    "output_files": paths,
+                    "output_dir": str(output_dir),
+                    "generated_files": len(paths),
+                }
+            )
+            click.echo("Wrote: " + ", ".join(paths))
 
     except Exception as e:  # noqa: BLE001
         import traceback
@@ -654,7 +666,7 @@ def kpi_generate(
         if test_dir_count == 0:
             status_data = {
                 "success": False,
-                "message": "No test directories found - nothing to process for KPI generation",
+                "error": "No test directories found - nothing to process for KPI generation",
                 "test_directories_count": 0,
                 "test_directories": [],
                 "excluded_test_directories": excluded_summary,
@@ -693,7 +705,7 @@ def kpi_generate(
             if not status_details.get("success", True):
                 status_data = {
                     "success": False,
-                    "message": status_details.get("message", "KPI generation failed"),
+                    "error": status_details.get("message", "KPI generation failed"),
                     "test_directories_count": test_dir_count,
                     "test_directories": test_directories,
                     "excluded_test_directories": excluded_summary,
@@ -708,7 +720,7 @@ def kpi_generate(
             if not rows:
                 status_data = {
                     "success": False,
-                    "message": "No KPIs generated",
+                    "error": "No KPIs generated",
                     "test_directories_count": test_dir_count,
                     "test_directories": test_directories,
                     "excluded_test_directories": excluded_summary,
@@ -752,7 +764,7 @@ def kpi_generate(
         import traceback
 
         full_traceback = traceback.format_exc()
-        status_data = {"success": False, "message": str(e), "traceback": full_traceback}
+        status_data = {"success": False, "error": str(e), "traceback": full_traceback}
         click.echo(f"kpi generate failed: {e}", err=True)
         click.echo(f"Full traceback:\n{full_traceback}", err=True)
 
@@ -828,15 +840,28 @@ def kpi_csv_export(
             output_path=output,
         )
 
-        status_data = {
-            "success": True,
-            "output_file": str(result_path),
-            "kpi_count": kpi_count,
-            "record_count": len(model.unified_result_records),
-        }
-        click.echo(
-            f"Generated dashboard CSV with {kpi_count} KPI rows from {len(model.unified_result_records)} records: {result_path}"
-        )
+        if kpi_count == 0:
+            status_data = {
+                "success": False,
+                "error": "No CSV lines generated",
+                "output_file": str(result_path),
+                "kpi_count": 0,
+                "record_count": len(model.unified_result_records),
+            }
+            click.echo(
+                f"kpi csv-export failed: no CSV lines generated from {len(model.unified_result_records)} records",
+                err=True,
+            )
+        else:
+            status_data = {
+                "success": True,
+                "output_file": str(result_path),
+                "kpi_count": kpi_count,
+                "record_count": len(model.unified_result_records),
+            }
+            click.echo(
+                f"Generated dashboard CSV with {kpi_count} KPI rows from {len(model.unified_result_records)} records: {result_path}"
+            )
     except Exception as e:  # noqa: BLE001
         import traceback
 

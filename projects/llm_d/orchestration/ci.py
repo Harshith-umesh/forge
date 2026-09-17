@@ -32,12 +32,9 @@ from projects.llm_d.orchestration.cleanup_phase import (
 )
 from projects.llm_d.orchestration.preflight_phase import run as preflight_toolbox_run
 from projects.llm_d.orchestration.prepare_sequence import run_prepare_sequence
+from projects.rhoai.library.deploy import list_mandatory_vaults as rhoai_list_mandatory_vaults
 
 logger = logging.getLogger(__name__)
-RHOAI_CUSTOM_CATALOG_VAULTS = [
-    "psap-rhoai-rc",
-    "psap-forge-staging-image-pull",
-]
 
 
 def init(presets=None):
@@ -54,29 +51,19 @@ def init(presets=None):
 
 def list_vaults() -> list[str]:
     """List all vaults (includes both mandatory and optional)."""
+
     all_vaults = vault.phase_vault_list_all()
-    if config.project.get_config("platform.rhoai.custom_catalog.enabled", False):
-        return [*all_vaults, *RHOAI_CUSTOM_CATALOG_VAULTS]
-
-    return all_vaults
+    return [*all_vaults, *rhoai_list_mandatory_vaults()]
 
 
-def init_vaults_for_phase(phase: str) -> None:
-    mandatory_vaults = [
-        *config.project.get_config("vaults.all", []),
-        *config.project.get_config(f"vaults.{phase}", []),
-    ]
-    optional_vaults = [
-        *config.project.get_config("vaults.all-optional", []),
-        *config.project.get_config(f"vaults.{phase}-optional", []),
-    ]
+def init_vaults_for_phase(phase: str):
+    """Initialize vaults for a specific CI phase, including conditional vaults."""
 
-    if phase == "prepare" and config.project.get_config(
-        "platform.rhoai.custom_catalog.enabled", False
-    ):
-        mandatory_vaults = [*mandatory_vaults, *RHOAI_CUSTOM_CATALOG_VAULTS]
+    extra_mandatory = []
+    if phase == "prepare":
+        extra_mandatory.extend(rhoai_list_mandatory_vaults())
 
-    vault.init(mandatory_vaults=mandatory_vaults, optional_vaults=optional_vaults)
+    vault.phase_vault_init(phase, extra_mandatory=(extra_mandatory or None))
 
 
 @click.group(cls=ci_lib.HelpfulGroup)

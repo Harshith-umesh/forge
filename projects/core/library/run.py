@@ -44,6 +44,7 @@ def run(
     log_command=True,
     decode_stdout=True,
     decode_stderr=True,
+    timeout=None,
 ):
     if log_command:
         logger.info(f"run: {command}")
@@ -63,6 +64,9 @@ def run(
         if not hasattr(stdin_file, "fileno"):
             raise ValueError("Argument 'stdin_file' must be an open file (with a file descriptor)")
         args["stdin"] = stdin_file
+
+    if timeout is not None:
+        args["timeout"] = timeout
 
     if protect_shell:
         command = f"set -o errexit;set -o pipefail;set -o nounset;set -o errtrace;{command}"
