@@ -132,7 +132,7 @@ def test_benchmark_resolution_applies_workload_defaults_and_per_benchmark_overri
     assert multi_turn["timeout_seconds"] == 7200
 
 
-def test_guidellm_benchmark_uses_served_model_name(
+def test_guidellm_benchmark_uses_hf_model_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _init_project_config()
@@ -785,7 +785,7 @@ def test_render_uses_sanitized_model_name_and_profile_resources() -> None:
 
     assert manifest["spec"]["replicas"] == 4
     assert manifest["spec"]["model"]["uri"] == "hf://openai/gpt-oss-120b"
-    assert manifest["spec"]["model"]["name"] == "openai-gpt-oss-120b"
+    assert manifest["spec"]["model"]["name"] == "openai/gpt-oss-120b"
     assert manifest["spec"]["template"]["containers"][0]["resources"] == {
         "requests": {"nvidia.com/gpu": "2"},
         "limits": {"nvidia.com/gpu": "2"},
