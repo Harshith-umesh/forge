@@ -132,7 +132,7 @@ def test_benchmark_resolution_applies_workload_defaults_and_per_benchmark_overri
     assert multi_turn["timeout_seconds"] == 7200
 
 
-def test_guidellm_benchmark_uses_original_model_name_as_processor(
+def test_guidellm_benchmark_uses_served_model_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _init_project_config()
