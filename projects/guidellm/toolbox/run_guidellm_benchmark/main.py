@@ -59,6 +59,7 @@ def run(
     guidellm_args: list[str] | None = None,
     hf_token_secret: str = "",
     fs_group: int | None = None,
+    host_users: bool | None = None,
     keep_full_benchmark_file: bool = False,
     use_pvc: bool = False,
 ) -> int:
@@ -75,6 +76,7 @@ def run(
         guidellm_args: List of additional guidellm arguments (e.g., ["--rate=10", "--max-seconds=30"])
         hf_token_secret: Name of the K8s secret containing HF_TOKEN. If empty, HF_TOKEN is not injected.
         fs_group: If set, adds securityContext.fsGroup to the GuideLLM job pod.
+        host_users: If set, adds the PodSpec hostUsers field to the GuideLLM job pod.
         keep_full_benchmark_file: Whether to keep the full untrimmed benchmark JSON files alongside trimmed ones (default: False)
         use_pvc: Use PVC with copy pod instead of shared emptyDir volume with sidecar (default: False)
     """
@@ -176,6 +178,7 @@ def create_guidellm_resources_task(args, ctx):
                 timeout_seconds=args.timeout,
                 hf_token_secret=args.hf_token_secret,
                 fs_group=args.fs_group,
+                host_users=args.host_users,
             ),
         )
 
@@ -219,6 +222,7 @@ def create_guidellm_resources_task(args, ctx):
                 timeout_seconds=args.timeout,
                 hf_token_secret=args.hf_token_secret,
                 fs_group=args.fs_group,
+                host_users=args.host_users,
             ),
         )
         ctx.wait_deadline = time.monotonic() + args.timeout + JOB_COMPLETION_GRACE_SECONDS

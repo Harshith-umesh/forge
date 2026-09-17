@@ -194,6 +194,7 @@ def render_guidellm_job_from_parts(
     timeout_seconds: int,
     hf_token_secret: str = "",
     fs_group: int | None = None,
+    host_users: bool | None = None,
 ) -> dict[str, Any]:
     """Render a GuideLL-M job manifest from individual components.
 
@@ -208,6 +209,8 @@ def render_guidellm_job_from_parts(
         fs_group: If set, adds a pod-level securityContext.fsGroup to ensure
             the PVC is writable by the container. Needed on clusters where the
             CSI driver provisions volumes with root-only permissions.
+        host_users: If set, adds the PodSpec hostUsers field. This is used by
+            clusters whose restricted SCC requires hostUsers to be explicit.
 
     Returns:
         Job manifest as dict
@@ -221,6 +224,7 @@ def render_guidellm_job_from_parts(
             "image": image,
             "hf_token_secret": hf_token_secret,
             "fs_group": fs_group,
+            "host_users": host_users,
         },
     )
     manifest = yaml.safe_load(rendered_yaml)
@@ -251,6 +255,7 @@ def render_guidellm_shared_volume_job_from_parts(
     timeout_seconds: int,
     hf_token_secret: str = "",
     fs_group: int | None = None,
+    host_users: bool | None = None,
 ) -> dict[str, Any]:
     """Render a GuideLL-M job manifest with shared volume (main + sidecar containers).
 
@@ -264,6 +269,8 @@ def render_guidellm_shared_volume_job_from_parts(
         hf_token_secret: Name of the K8s secret containing HF_TOKEN. If empty, HF_TOKEN is not injected.
         fs_group: If set, adds a pod-level securityContext.fsGroup to ensure
             the shared volume is writable by both containers.
+        host_users: If set, adds the PodSpec hostUsers field. This is used by
+            clusters whose restricted SCC requires hostUsers to be explicit.
 
     Returns:
         Job manifest as dict with main and sidecar containers
@@ -277,6 +284,7 @@ def render_guidellm_shared_volume_job_from_parts(
             "image": image,
             "hf_token_secret": hf_token_secret,
             "fs_group": fs_group,
+            "host_users": host_users,
         },
     )
     manifest = yaml.safe_load(rendered_yaml)

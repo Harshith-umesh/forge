@@ -72,7 +72,7 @@ Key sections:
 | `rhaiis.profiler` | PyTorch profiler settings (enable, S3 prefix, rates, labels) |
 | `models` | Model definitions (hf_model_id, per-model `vllm_args` overrides) |
 | `workloads` | Benchmark profiles (data shape, rates, max_seconds) |
-| `benchmarks.guidellm` | GuideLLM image, backend, timeout, PVC size, HF token secret, fs_group |
+| `benchmarks.guidellm` | GuideLLM image, backend, timeout, PVC size, HF token secret, fs_group, and host_users |
 | `tests` | CI test mapping (model_key, workload_keys, version) |
 | `caliper.postprocess` | Caliper postprocessing pipeline (parse, KPI, CSV export) |
 
@@ -287,6 +287,7 @@ Available configOverrides:
 | `benchmarks.guidellm.timeout` | Benchmark timeout in seconds |
 | `benchmarks.guidellm.hf_token_secret` | K8s secret name for HF_TOKEN (omit to skip) |
 | `benchmarks.guidellm.fs_group` | Pod-level fsGroup for PVC permissions (disabled by default) |
+| `benchmarks.guidellm.host_users` | Optional PodSpec `hostUsers` value; the B200 preset sets this to `false` for its restricted SCC |
 
 Monitoring Fournos jobs:
 ```bash

@@ -475,6 +475,7 @@ def _run_workload_benchmark(
                 guidellm_args=guidellm_args,
                 hf_token_secret=benchmark_cfg.get("hf_token_secret", ""),
                 fs_group=benchmark_cfg.get("fs_group"),
+                host_users=benchmark_cfg.get("host_users"),
             )
 
 
@@ -749,6 +750,7 @@ def _run_warmup_step(
             guidellm_args=guidellm_args,
             hf_token_secret=benchmark_cfg.get("hf_token_secret", ""),
             fs_group=benchmark_cfg.get("fs_group"),
+            host_users=benchmark_cfg.get("host_users"),
         )
         logger.info("Warmup completed")
     except Exception:
@@ -815,6 +817,7 @@ def _run_profiler_step(
                 guidellm_args=guidellm_args,
                 hf_token_secret=benchmark_cfg.get("hf_token_secret", ""),
                 fs_group=benchmark_cfg.get("fs_group"),
+                host_users=benchmark_cfg.get("host_users"),
             )
         finally:
             enable_profiler_gate(
