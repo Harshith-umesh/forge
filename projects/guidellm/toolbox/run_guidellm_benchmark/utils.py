@@ -177,6 +177,7 @@ def _build_run_args(endpoint_url: str, old_args: list[str]) -> list[str]:
     max_requests = None
     rampup = None
     warmup = None
+    processor = None
     passthrough: list[str] = []
 
     for arg in old_args:
@@ -199,6 +200,9 @@ def _build_run_args(endpoint_url: str, old_args: list[str]) -> list[str]:
             rampup = val
         elif key == "--warmup":
             warmup = val
+        elif key in ("--processor", "--processor-args"):
+            if key == "--processor":
+                processor = val
         elif key in ("--outputs", "--output-dir"):
             pass
         else:
@@ -244,6 +248,8 @@ def _build_run_args(endpoint_url: str, old_args: list[str]) -> list[str]:
         profile_spec = f"kind={rate_type}"
         if warmup:
             profile_spec += f",warmup={warmup}"
+        if rampup:
+            profile_spec += f",rampup_duration={rampup}"
         new_args.append(f"--profile={profile_spec}")
 
     if max_seconds:
@@ -252,6 +258,9 @@ def _build_run_args(endpoint_url: str, old_args: list[str]) -> list[str]:
         new_args.append(f"--constraint=kind=max_requests,count={max_requests}")
 
     new_args.append("--output=kind=json,path=/results/benchmarks.json")
+
+    if processor:
+        new_args.append(f"--tokenizer=kind=huggingface_auto,model={processor}")
 
     new_args.extend(passthrough)
     return new_args

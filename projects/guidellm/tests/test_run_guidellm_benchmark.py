@@ -285,3 +285,27 @@ class TestBuildRunArgs:
         assert not any("--outputs" in a for a in args)
         assert not any("--output-dir" in a for a in args)
         assert "--output=kind=json,path=/results/benchmarks.json" in args
+
+    def test_processor_converted_to_tokenizer(self) -> None:
+        args = self._build(
+            "http://model:8000",
+            ["--processor=meta-llama/Llama-3.1-8B-Instruct"],
+        )
+        assert "--tokenizer=kind=huggingface_auto,model=meta-llama/Llama-3.1-8B-Instruct" in args
+        assert not any("--processor" in a for a in args)
+
+    def test_processor_args_stripped(self) -> None:
+        args = self._build(
+            "http://model:8000",
+            ["--processor=gpt2", '--processor-args={"use_fast": false}'],
+        )
+        assert "--tokenizer=kind=huggingface_auto,model=gpt2" in args
+        assert not any("--processor-args" in a for a in args)
+
+    def test_rampup_in_no_rate_branch(self) -> None:
+        args = self._build(
+            "http://model:8000",
+            ["--rate-type=throughput", "--rampup=30"],
+        )
+        profile_arg = next(a for a in args if a.startswith("--profile="))
+        assert "rampup_duration=30" in profile_arg
