@@ -83,10 +83,15 @@ def run(
         proc = subprocess.run(command, **args)
     except subprocess.CalledProcessError as e:
         if handled_securely:
-            # swallow e.output and e.stderr from the original exception
             raise subprocess.CalledProcessError(
-                e.returncode, "<command hidden for security>"
+                e.returncode,
+                "<command hidden for security>",
+                stderr=e.stderr,
             ) from None
+        raise
+    except subprocess.TimeoutExpired as e:
+        if handled_securely:
+            raise subprocess.TimeoutExpired("<command hidden for security>", e.timeout) from None
         raise
 
     if capture_stdout and decode_stdout:
