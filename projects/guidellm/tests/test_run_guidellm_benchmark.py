@@ -183,3 +183,105 @@ def test_build_guidellm_args_renders_list_values() -> None:
         "--max-seconds=600",
         "--outputs=json",
     ]
+
+
+class TestConvertDataSpec:
+    def _convert(self, spec: str) -> str:
+        from projects.guidellm.toolbox.run_guidellm_benchmark.utils import _convert_data_spec
+
+        return _convert_data_spec(spec)
+
+    def test_synthetic_text_from_token_spec(self) -> None:
+        assert (
+            self._convert("prompt_tokens=1000,output_tokens=100")
+            == "kind=synthetic_text,prompt_tokens=1000,output_tokens=100"
+        )
+
+    def test_json_file_from_path(self) -> None:
+        assert self._convert("/data/test.json") == "kind=json_file,path=/data/test.json"
+
+    def test_csv_file_from_path(self) -> None:
+        assert self._convert("dataset.csv") == "kind=csv_file,path=dataset.csv"
+
+    def test_huggingface_from_slash_source(self) -> None:
+        assert (
+            self._convert("abisee/cnn_dailymail") == "kind=huggingface,source=abisee/cnn_dailymail"
+        )
+
+    def test_passthrough_already_converted(self) -> None:
+        spec = "kind=synthetic_text,prompt_tokens=256"
+        assert self._convert(spec) == spec
+
+
+class TestBuildRunArgs:
+    def _build(self, endpoint: str, old_args: list[str]) -> list[str]:
+        from projects.guidellm.toolbox.run_guidellm_benchmark.utils import _build_run_args
+
+        return _build_run_args(endpoint, old_args)
+
+    def test_single_rate_concurrent(self) -> None:
+        args = self._build(
+            "http://model:8000",
+            [
+                "--backend-type=openai_http",
+                "--rate-type=concurrent",
+                "--rate=16",
+                "--data=prompt_tokens=256,output_tokens=128",
+                "--max-seconds=60",
+            ],
+        )
+        assert "--backend=kind=openai_http,target=http://model:8000" in args
+        assert "--data=kind=synthetic_text,prompt_tokens=256,output_tokens=128" in args
+        assert "--profile=kind=concurrent,streams=16" in args
+        assert "--constraint=kind=max_duration,seconds=60" in args
+        assert "--output=kind=json,path=/results/benchmarks.json" in args
+
+    def test_warmup_injected_into_profile(self) -> None:
+        args = self._build(
+            "http://model:8000",
+            ["--rate-type=concurrent", "--rate=8", "--warmup=75"],
+        )
+        profile_arg = next(a for a in args if a.startswith("--profile="))
+        assert "warmup=75" in profile_arg
+        assert not any(a.startswith("--warmup") for a in args)
+
+    def test_rampup_injected_into_profile(self) -> None:
+        args = self._build(
+            "http://model:8000",
+            ["--rate-type=concurrent", "--rate=8", "--rampup=35"],
+        )
+        profile_arg = next(a for a in args if a.startswith("--profile="))
+        assert "rampup_duration=35" in profile_arg
+
+    def test_decimal_rates_preserved(self) -> None:
+        args = self._build(
+            "http://model:8000",
+            ["--rate-type=concurrent", "--rate=0.5,1.5"],
+        )
+        profile_arg = next(a for a in args if a.startswith("--profile="))
+        assert "0.5" in profile_arg
+        assert "1.5" in profile_arg
+
+    def test_model_included_in_backend(self) -> None:
+        args = self._build(
+            "http://model:8000",
+            ["--model=meta-llama/Llama-3.1-8B-Instruct"],
+        )
+        backend_arg = next(a for a in args if a.startswith("--backend="))
+        assert "model=meta-llama/Llama-3.1-8B-Instruct" in backend_arg
+
+    def test_max_requests_constraint(self) -> None:
+        args = self._build(
+            "http://model:8000",
+            ["--max-requests=500"],
+        )
+        assert "--constraint=kind=max_requests,count=500" in args
+
+    def test_outputs_stripped(self) -> None:
+        args = self._build(
+            "http://model:8000",
+            ["--outputs=json", "--output-dir=/tmp"],
+        )
+        assert not any("--outputs" in a for a in args)
+        assert not any("--output-dir" in a for a in args)
+        assert "--output=kind=json,path=/results/benchmarks.json" in args
