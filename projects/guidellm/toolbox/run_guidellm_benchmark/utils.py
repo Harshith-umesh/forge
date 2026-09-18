@@ -127,39 +127,11 @@ def build_guidellm_args(benchmark: dict[str, object]) -> list[str]:
     return guidellm_args
 
 
-def _build_multi_run_script(*, endpoint_url: str, runs: list[GuideLLMRun]) -> str:
-    lines = ["set -euo pipefail", "mkdir -p /results"]
-    for run in runs:
-        lines.append("rm -f /results/benchmarks.json")
-        command = [
-            "/opt/app-root/bin/guidellm",
-            "benchmark",
-            "run",
-            f"--target={endpoint_url}",
-            *run.args,
-        ]
-        lines.append(shlex.join(command))
-        output_path = shlex.quote(f"/results/benchmarks-{run.label}.json")
-        lines.append(
-            f"test -f /results/benchmarks.json && mv /results/benchmarks.json {output_path}"
-        )
-
-    return "\n".join(lines)
-
-
 _RATE_KEY_BY_PROFILE = {
     "concurrent": "streams",
     "sweep": "sweep_size",
     "throughput": "max_concurrency",
 }
-
-
-def _is_guidellm_v07x(image: str) -> bool:
-    """Return True when the image tag indicates GuideLLM >= 0.7.0."""
-    m = re.search(r":v?(\d+)\.(\d+)", image)
-    if not m:
-        return False
-    return (int(m.group(1)), int(m.group(2))) >= (0, 7)
 
 
 _FILE_KIND_BY_EXT = {
@@ -177,7 +149,7 @@ _FILE_KIND_BY_EXT = {
 
 
 def _convert_data_spec(data_spec: str) -> str:
-    """Convert a legacy v0.6.x ``--data`` value to v0.7.x ``kind=…`` format."""
+    """Convert a ``--data`` value to GuideLLM ``kind=…`` format if needed."""
     if data_spec.startswith("kind="):
         return data_spec
 
@@ -194,16 +166,8 @@ def _convert_data_spec(data_spec: str) -> str:
     return f"kind=synthetic_text,{data_spec}"
 
 
-def _build_v07x_args(endpoint_url: str, old_args: list[str]) -> list[str]:
-    """Transform v0.6.x CLI args to the v0.7.x ``guidellm run`` format.
-
-    Handles the major CLI refactor shipped in GuideLLM 0.7.0:
-      * ``guidellm benchmark run`` → ``guidellm run``
-      * separate ``--target``, ``--backend-type``, ``--model`` → ``--backend kind=…``
-      * ``--rate-type`` + ``--rate`` → ``--profile kind=…``
-      * ``--max-seconds`` / ``--max-requests`` → ``--constraint kind=…``
-      * ``--output-dir`` + ``--outputs`` → ``--output kind=…``
-    """
+def _build_run_args(endpoint_url: str, old_args: list[str]) -> list[str]:
+    """Transform config-derived CLI args into ``guidellm run`` arguments."""
     backend_type = "openai_http"
     model = None
     data_spec = None
@@ -293,13 +257,13 @@ def _build_v07x_args(endpoint_url: str, old_args: list[str]) -> list[str]:
     return new_args
 
 
-def _build_v07x_multi_run_script(*, endpoint_url: str, runs: list[GuideLLMRun]) -> str:
-    """Shell script for multiple GuideLLM 0.7.x runs (rate-expression expansion)."""
+def _build_multi_run_script(*, endpoint_url: str, runs: list[GuideLLMRun]) -> str:
+    """Shell script for multiple GuideLLM runs (rate-expression expansion)."""
     lines = ["set -euo pipefail", "mkdir -p /results"]
     for run in runs:
-        v07_args = _build_v07x_args(endpoint_url, run.args)
+        run_args = _build_run_args(endpoint_url, run.args)
         output_path = f"/results/benchmarks-{run.label}.json"
-        filtered = [a for a in v07_args if not a.startswith("--output=")]
+        filtered = [a for a in run_args if not a.startswith("--output=")]
         filtered.append(f"--output=kind=json,path={output_path}")
         command = ["/opt/app-root/bin/guidellm", "run", *filtered]
         lines.append(shlex.join(command))
@@ -386,29 +350,17 @@ def render_guidellm_job_from_parts(
     manifest = yaml.safe_load(rendered_yaml)
     manifest["spec"]["activeDeadlineSeconds"] = timeout_seconds
     container = manifest["spec"]["template"]["spec"]["containers"][0]
-    v07 = _is_guidellm_v07x(image)
 
     if len(runs) == 1 and runs[0].rate is None:
         container["command"] = ["/opt/app-root/bin/guidellm"]
-        if v07:
-            container["args"] = [
-                "run",
-                *_build_v07x_args(endpoint_url, runs[0].args),
-            ]
-        else:
-            container["args"] = [
-                "benchmark",
-                "run",
-                f"--target={endpoint_url}",
-                *runs[0].args,
-            ]
+        container["args"] = [
+            "run",
+            *_build_run_args(endpoint_url, runs[0].args),
+        ]
         return manifest
 
     container["command"] = ["/bin/sh", "-lc"]
-    if v07:
-        container["args"] = [_build_v07x_multi_run_script(endpoint_url=endpoint_url, runs=runs)]
-    else:
-        container["args"] = [_build_multi_run_script(endpoint_url=endpoint_url, runs=runs)]
+    container["args"] = [_build_multi_run_script(endpoint_url=endpoint_url, runs=runs)]
     return manifest
 
 
@@ -453,22 +405,16 @@ def render_guidellm_shared_volume_job_from_parts(
     manifest = yaml.safe_load(rendered_yaml)
     manifest["spec"]["activeDeadlineSeconds"] = timeout_seconds
 
-    v07 = _is_guidellm_v07x(image)
-
     if len(runs) == 1 and runs[0].rate is None:
-        if v07:
-            v07_args = _build_v07x_args(endpoint_url, runs[0].args)
-            cmd = shlex.join(["/opt/app-root/bin/guidellm", "run", *v07_args])
-        else:
-            cmd = f"/opt/app-root/bin/guidellm benchmark run --target={endpoint_url} {' '.join(runs[0].args)}"
-        main_script_lines = [
-            "set -euo pipefail",
-            "mkdir -p /results",
-            cmd,
-        ]
-        main_script = "\n".join(main_script_lines)
-    elif v07:
-        main_script = _build_v07x_multi_run_script(endpoint_url=endpoint_url, runs=runs)
+        run_args = _build_run_args(endpoint_url, runs[0].args)
+        cmd = shlex.join(["/opt/app-root/bin/guidellm", "run", *run_args])
+        main_script = "\n".join(
+            [
+                "set -euo pipefail",
+                "mkdir -p /results",
+                cmd,
+            ]
+        )
     else:
         main_script = _build_multi_run_script(endpoint_url=endpoint_url, runs=runs)
 

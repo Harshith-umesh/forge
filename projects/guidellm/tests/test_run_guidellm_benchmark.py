@@ -112,7 +112,7 @@ def test_render_guidellm_job_from_parts_uses_shell_for_multi_run_benchmarks() ->
     manifest = render_guidellm_job_from_parts(
         namespace="forge-llm-d",
         name="guidellm-benchmark",
-        image="ghcr.io/vllm-project/guidellm:v0.5.4",
+        image="ghcr.io/vllm-project/guidellm:v0.7.4",
         endpoint_url="https://example.test/llm-d",
         timeout_seconds=3600,
         guidellm_args=[
@@ -128,12 +128,11 @@ def test_render_guidellm_job_from_parts_uses_shell_for_multi_run_benchmarks() ->
     assert manifest["spec"]["activeDeadlineSeconds"] == 3600
     assert container["command"] == ["/bin/sh", "-lc"]
     script = container["args"][0]
-    assert "--rate=32" in script
-    assert "--rate=64" in script
+    assert "guidellm run" in script
+    assert "kind=openai_http" in script
     assert "prefix_count=64" in script
     assert "prefix_count=128" in script
-    assert "max-requests=320" in script
-    assert "max-requests=640" in script
+    assert "max_requests" in script
     assert "benchmarks-rate-32.json" in script
     assert "benchmarks-rate-64.json" in script
 
@@ -142,7 +141,7 @@ def test_render_guidellm_job_from_parts_keeps_plain_rates_as_single_guidellm_run
     manifest = render_guidellm_job_from_parts(
         namespace="forge-llm-d",
         name="guidellm-benchmark",
-        image="ghcr.io/vllm-project/guidellm:v0.5.4",
+        image="ghcr.io/vllm-project/guidellm:v0.7.4",
         endpoint_url="https://example.test/llm-d",
         timeout_seconds=3600,
         guidellm_args=[
@@ -156,16 +155,14 @@ def test_render_guidellm_job_from_parts_keeps_plain_rates_as_single_guidellm_run
 
     container = manifest["spec"]["template"]["spec"]["containers"][0]
     assert container["command"] == ["/opt/app-root/bin/guidellm"]
-    assert container["args"] == [
-        "benchmark",
-        "run",
-        "--target=https://example.test/llm-d",
-        "--backend-type=openai_http",
-        "--rate-type=concurrent",
-        "--rate=300,200,100",
-        "--data=prompt_tokens=1000,output_tokens=1000",
-        "--max-seconds=600",
-    ]
+    args = container["args"]
+    assert args[0] == "run"
+    assert "--backend=kind=openai_http,target=https://example.test/llm-d" in args
+    assert "--data=kind=synthetic_text,prompt_tokens=1000,output_tokens=1000" in args
+    profile_arg = next(a for a in args if a.startswith("--profile="))
+    assert '"kind": "concurrent"' in profile_arg
+    assert "[300, 200, 100]" in profile_arg
+    assert "--constraint=kind=max_duration,seconds=600" in args
 
 
 def test_build_guidellm_args_renders_list_values() -> None:
