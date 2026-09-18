@@ -26,6 +26,10 @@ benchmarks:
       constraint: kind=max_duration,seconds=120
     rate: [1, 4, 8]
 
+  smoke:
+    timeout_seconds: 300
+    benchconf: llm-d/smoke
+
   concurrent-1k-1k:
     timeout_seconds: 3600
     benchconf: llm-d/concurrent-1k-1k
