@@ -83,8 +83,9 @@ def run(
         proc = subprocess.run(command, **args)
     except subprocess.CalledProcessError as e:
         if handled_securely:
+            # swallow e.output and e.stderr from the original exception
             raise subprocess.CalledProcessError(
-                e.returncode, "<command hidden for security>", e.output, e.stderr
+                e.returncode, "<command hidden for security>"
             ) from None
         raise
 
