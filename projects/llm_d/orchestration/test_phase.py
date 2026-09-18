@@ -256,26 +256,16 @@ def run_all_tests(stop_on_error: bool = False) -> int:
     Returns:
         Maximum exit code from all tests
     """
-    from projects.caliper.orchestration.export import (
-        precreate_mlflow_run_if_configured,
-        write_mlflow_destination_marker,
-    )
     from projects.llm_d.orchestration import runtime_config
 
     run_specs = runtime_config.get_run_specs()
-    mlflow_destination = precreate_mlflow_run_if_configured()
-    if mlflow_destination:
-        write_mlflow_destination_marker(mlflow_destination)
 
     max_exit_code = 0
     for run_spec in run_specs:
         with runtime_config.activate_run_spec(run_spec):
             with env.NextArtifactDir(run_spec.artifact_dirname):
                 try:
-                    exit_code = do_test(
-                        mlflow_destination=mlflow_destination,
-                        precreate_mlflow=False,
-                    )
+                    exit_code = do_test()
                     max_exit_code = max(max_exit_code, exit_code)
 
                     if exit_code != 0 and stop_on_error:
@@ -364,12 +354,8 @@ def run_finalizers(
     return primary_exc, finalizer_exc
 
 
-def do_test(
-    *,
-    mlflow_destination: dict[str, str] | None = None,
-    precreate_mlflow: bool = True,
-) -> int:
-    """Run one active LLM-D specification, optionally reusing a job MLflow run."""
+def do_test() -> int:
+    """Run one active LLM-D specification and create its MLflow destination."""
     # Load minimal config needed for orchestration flow
 
     namespace = runtime_config.get_namespace()
@@ -387,21 +373,14 @@ def do_test(
         # Delete all existing resources if configured
         cleanup_existing_resources(namespace)
 
-<<<<<<< HEAD
         # validate before prepare: fail_if_not_enabled is a safeguard against
         # accidentally enabling UWM, so it must run before prepare gets a chance to.
         validate_user_workload_monitoring()
         prepare_user_workload_monitoring(during="test")
 
-    if precreate_mlflow:
-        from projects.caliper.orchestration.export import (
-            precreate_mlflow_run_if_configured,
-            write_mlflow_destination_marker,
-        )
+    from projects.caliper.orchestration.export import precreate_mlflow_run_if_configured
 
-        mlflow_destination = precreate_mlflow_run_if_configured()
-        if mlflow_destination:
-            write_mlflow_destination_marker(mlflow_destination)
+    mlflow_destination = precreate_mlflow_run_if_configured()
 
     endpoint_url: str | None = None
     primary_exc: tuple[type[BaseException], BaseException, Any] | None = None
