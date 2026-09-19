@@ -15,14 +15,10 @@ content:
     description: |
       Hostname of the SSH bastion. Not used, only for censoring
 
-  cluster_login_user:
-    description: |
-      Username for 'oc login' to the intlab cluster
-
-  cluster_login_password:
-    description: |
-      Password for 'oc login' to the intlab cluster
-
   cluster_api_endpoint:
     description: |
-      Host:port of the K8s API server behind the VPN (tunnel target)
+      host:port of the K8s API endpoint, used as the SSH tunnel target
+
+  cluster_kubeconfig:
+    description: |
+      Kubeconfig file for authenticating to the intlab cluster

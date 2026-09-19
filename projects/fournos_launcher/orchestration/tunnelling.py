@@ -5,8 +5,9 @@ import subprocess
 import tempfile
 import time
 
-from projects.core.library import config, run, vault
-from projects.fournos_launcher.orchestration.utils import ensure_oc_available
+import yaml
+
+from projects.core.library import config, vault
 
 logger = logging.getLogger(__name__)
 
@@ -16,9 +17,9 @@ RECREATE_TUNNEL_INTERVAL = 5
 
 
 def open_tunnel():
-    """Open an SSH tunnel to the intlab K8s API endpoint and login via oc.
+    """Open an SSH tunnel to the intlab K8s API endpoint.
 
-    Sets os.environ["KUBECONFIG"] to point to the new cluster.
+    Sets os.environ["KUBECONFIG"] to point to the cluster via the tunnel.
     """
 
     vault_name = config.project.get_config("fournos.intlab.vault.name")
@@ -28,8 +29,7 @@ def open_tunnel():
     private_key_path = vault.get_vault_content_path(vault_name, "bastion_ssh_private_key")
     bastion_ssh_host_path = vault.get_vault_content_path(vault_name, "bastion_ssh_host")
     cluster_api_endpoint_path = vault.get_vault_content_path(vault_name, "cluster_api_endpoint")
-    login_user_path = vault.get_vault_content_path(vault_name, "cluster_login_user")
-    login_password_path = vault.get_vault_content_path(vault_name, "cluster_login_password")
+    kubeconfig_path = vault.get_vault_content_path(vault_name, "cluster_kubeconfig")
 
     cmd = (
         f"ssh {' '.join(ssh_flags)}"
@@ -41,7 +41,9 @@ def open_tunnel():
     proc = _create_and_probe_tunnel(cmd, local_port)
     atexit.register(proc.kill)
 
-    _oc_login(local_port, login_user_path, login_password_path)
+    local_kubeconfig = _setup_kubeconfig(kubeconfig_path, local_port)
+    os.environ["KUBECONFIG"] = local_kubeconfig
+    logger.info(f"Kubeconfig set for localhost:{local_port}.")
 
 
 def _create_and_probe_tunnel(cmd, local_port):
@@ -103,27 +105,30 @@ def _probe_endpoint(local_port):
         return False
 
 
-def _oc_login(local_port, login_user_path, login_password_path):
-    """Login to the cluster via oc and return the path to a tmp kubeconfig."""
+def _setup_kubeconfig(vault_kubeconfig_path, local_port):
+    """Copy the vault kubeconfig and rewrite the server URL to the tunnel endpoint."""
 
     kubeconfig_fd, kubeconfig_path = tempfile.mkstemp(prefix="kubeconfig-intlab-")
     os.close(kubeconfig_fd)
 
-    os.environ["KUBECONFIG"] = kubeconfig_path
+    with open(vault_kubeconfig_path) as f:
+        kubeconfig = yaml.safe_load(f)
 
-    ensure_oc_available()
+    for cluster in kubeconfig.get("clusters", []):
+        cluster_conf = cluster.get("cluster", {})
+        cluster_conf["server"] = f"https://localhost:{local_port}"
 
-    try:
-        run.run(
-            f"oc login https://localhost:{local_port}"
-            f" --insecure-skip-tls-verify"
-            f" -u $(cat {login_user_path}) -p $(cat {login_password_path})",
-            capture_stderr=True,
-            handled_securely=True,
-        )
-    except subprocess.CalledProcessError as e:
-        if e.stderr:
-            logger.error(f"oc login failed: {e.stderr}")
-        raise
+    with open(kubeconfig_path, "w") as f:
+        yaml.dump(kubeconfig, f, default_flow_style=False)
 
-    logger.info("oc login successful.")
+    os.chmod(kubeconfig_path, 0o600)
+
+    def _cleanup():
+        try:
+            os.remove(kubeconfig_path)
+        except FileNotFoundError:
+            pass
+
+    atexit.register(_cleanup)
+
+    return kubeconfig_path
