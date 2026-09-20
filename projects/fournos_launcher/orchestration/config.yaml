@@ -18,7 +18,7 @@ notifications:
   vault:
     name: psap-forge-notifications
 fournos:
-  instance: psap-mgmt # psap-mgmt or intlab
+  instance: intlab # psap-mgmt or intlab
   namespace: psap-automation
   psap_mgmt:
     vault:
