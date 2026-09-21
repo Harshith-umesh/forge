@@ -155,7 +155,7 @@ def test_guidellm_benchmark_uses_original_model_name_as_processor(
     assert captured["timeout"] == 3600
     guidellm_args = captured["guidellm_args"]
     assert isinstance(guidellm_args, list)
-    assert "--processor=openai/gpt-oss-120b" in guidellm_args
+    assert "--tokenizer=kind=huggingface_auto,model=openai/gpt-oss-120b" in guidellm_args
 
 
 def test_release_preset_expands_benchmark_list_and_merges_workload_args() -> None:
