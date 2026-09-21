@@ -12,7 +12,11 @@ import yaml
 from projects.caliper.engine.kpi.dataclasses import (
     MlflowDestination,
 )
-from projects.cluster.toolbox.capture_prometheus.main import run as capture_prometheus
+from projects.cluster.library.prom.collection import (
+    capture_prometheus,
+    prepare_user_workload_monitoring,
+    validate_user_workload_monitoring,
+)
 from projects.core.ci_entrypoint.prepare_ci import CI_METADATA_DIRNAME
 from projects.core.dsl import shell
 from projects.core.dsl.utils import slugify_identifier
@@ -365,6 +369,11 @@ def do_test() -> int:
 
         # Delete all existing resources if configured
         cleanup_existing_resources(namespace)
+
+        # validate before prepare: fail_if_not_enabled is a safeguard against
+        # accidentally enabling UWM, so it must run before prepare gets a chance to.
+        validate_user_workload_monitoring()
+        prepare_user_workload_monitoring(during="test")
 
     try:
         from projects.caliper.orchestration.export import precreate_mlflow_run_if_configured
@@ -776,7 +785,9 @@ def run_guidellm_benchmark(test_dir, *, endpoint_url: str) -> None:
         end_time = update_test_labels_with_timing(test_dir, "benchmark", "end")
 
         # Capture prometheus metrics if enabled
-        if config.project.get_config("prom.capture.enabled"):
+        if config.project.get_config("prom.capture.enabled") or config.project.get_config(
+            "prom.capture.user_workload.enabled"
+        ):
             capture_prometheus(start_time, end_time)
 
 

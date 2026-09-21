@@ -22,6 +22,7 @@ CONFIG_OVERRIDES = {
     "runtime.kserve.dry_run": True,
     "caliper.postprocess.enabled": False,
     "cpt.kpi.labels.product_version": "RHOAI-XXX",
+    "prom.capture.enabled": False,
     "agentic.enabled": False,
     "caliper.export.backend.mlflow.enabled": False,
     "caliper.export.notifications.enabled": False,
