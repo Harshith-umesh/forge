@@ -29,6 +29,7 @@ tests:
     warmup: true
     version: ""
     compare_version: ""
+    run_uuid: ""
     slack_user: ""
     slack_notify_always: false
 
