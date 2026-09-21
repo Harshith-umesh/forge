@@ -68,6 +68,9 @@ def get_supported_fournos_directives() -> dict[str, str]:
                          Format: /replot.url URL
                          Example: /replot.url s3://bucket/path/to/artifacts
                          Effect: Sets caliper.replot.url in configuration.""",
+        "/external": """Use the external (psap-mgmt) FOURNOS instance instead of intlab.
+                       Format: /external
+                       Effect: Sets fournos.instance to psap-mgmt.""",
         "/help": """Show all supported FOURNOS directives.
                    Format: /help
                    Effect: Logs available directive information.""",
@@ -269,6 +272,21 @@ def handle_gpu_directive(line: str) -> dict[str, str]:
     return {"fournos.job.hardware.gpu_type": gpu_type, "fournos.job.hardware.gpu_count": gpu_count}
 
 
+def handle_external_directive(line: str) -> dict[str, str]:
+    """
+    Handle /external directive for using the psap-mgmt FOURNOS instance.
+
+    Format: /external
+
+    Args:
+        line: The directive line
+
+    Returns:
+        Dictionary with instance configuration
+    """
+    return {"fournos.instance": "psap-mgmt"}
+
+
 def handle_replot_url_directive(line: str) -> dict[str, str]:
     """
     Handle /replot.url directive for setting replot URL.
@@ -377,6 +395,7 @@ def get_fournos_directive_handlers() -> dict[str, callable]:
         "/ttl": handle_ttl_directive,
         "/gpu": handle_gpu_directive,
         "/parallel": handle_parallel_directive,
+        "/external": handle_external_directive,
         "/replot.url": handle_replot_url_directive,
         "/help": handle_help_directive,
     }
@@ -413,6 +432,14 @@ def parse_fournos_directives(
     ):
         raise ValueError(
             "Conflicting directives: /clusterless and /exclusive true cannot both be used"
+        )
+
+    if (
+        "fournos.namespace" in config_overrides
+        and config_overrides.get("fournos.instance") != "psap-mgmt"
+    ):
+        raise ValueError(
+            "/fournos directive requires /external (namespace override only applies to the psap-mgmt instance)"
         )
 
     # Log successful parses at info level for FOURNOS
