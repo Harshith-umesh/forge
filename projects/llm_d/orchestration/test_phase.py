@@ -9,9 +9,7 @@ from typing import Any
 
 import yaml
 
-from projects.caliper.engine.kpi.dataclasses import (
-    MlflowDestination,
-)
+from projects.caliper.engine.kpi.dataclasses import TimingData
 from projects.cluster.library.prom.collection import (
     capture_prometheus,
     prepare_user_workload_monitoring,
@@ -198,12 +196,6 @@ def get_iso_timestamp() -> str:
 def create_test_labels() -> None:
     """Create caliper metadata file with model name, guidellm configuration, and test start time."""
 
-    mlflow_destination = None
-    if env.running_inside_fournos():
-        from projects.caliper.orchestration.export import read_mlflow_destination_marker
-
-        mlflow_destination = read_mlflow_destination_marker()
-
     model_name = runtime_config.get_model_name()
     deployment_profile = runtime_config.get_deployment_profile_name()
     benchmark_keys = runtime_config.get_benchmark_keys()
@@ -219,13 +211,14 @@ def create_test_labels() -> None:
     # Extract kpi_labels from config
     kpi_labels = extract_kpi_labels_from_config()
 
+    timing_data = TimingData()
+    timing_data.set_phase("test", get_iso_timestamp())
+
     create_test_metadata(
         env.ARTIFACT_DIR,
         labels,
         kpi_labels=kpi_labels if kpi_labels else None,
-        mlflow_destination=MlflowDestination.from_dict(mlflow_destination)
-        if mlflow_destination
-        else None,
+        timing=timing_data,
     )
     logger.info("Created test labels with start time: %s", labels)
 
