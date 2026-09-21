@@ -177,6 +177,7 @@ def _build_run_args(endpoint_url: str, old_args: list[str]) -> list[str]:
     max_requests = None
     rampup = None
     warmup = None
+    request_format = None
     processor = None
     processor_args: dict | None = None
     passthrough: list[str] = []
@@ -209,6 +210,8 @@ def _build_run_args(endpoint_url: str, old_args: list[str]) -> list[str]:
                     processor_args = _json.loads(val)
                 except (ValueError, TypeError):
                     pass
+        elif key == "--request-type":
+            request_format = val
         elif key in ("--outputs", "--output-dir"):
             pass
         else:
@@ -219,6 +222,8 @@ def _build_run_args(endpoint_url: str, old_args: list[str]) -> list[str]:
     backend_spec = f"kind={backend_type},target={endpoint_url}"
     if model:
         backend_spec += f",model={model}"
+    if request_format:
+        backend_spec += f",request_format={request_format}"
     new_args.append(f"--backend={backend_spec}")
 
     if data_spec:

@@ -307,6 +307,15 @@ class TestBuildRunArgs:
         assert f"--tokenizer={expected}" in args
         assert not any("--processor-args" in a for a in args)
 
+    def test_request_type_converted_to_backend_request_format(self) -> None:
+        args = self._build(
+            "http://model:8000",
+            ["--request-type=text_completions"],
+        )
+        backend_arg = next(a for a in args if a.startswith("--backend="))
+        assert "request_format=text_completions" in backend_arg
+        assert not any("--request-type" in a for a in args)
+
     def test_rampup_in_no_rate_branch(self) -> None:
         args = self._build(
             "http://model:8000",
