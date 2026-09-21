@@ -171,6 +171,14 @@ def post_cleanup(ctx) -> int:
     return 0
 
 
+def _resolve_spec_defaults(spec: dict) -> None:
+    if not spec.get("cluster") and not spec.get("clusterless"):
+        default_cluster = config.project.get_config("ci_job.llm_d.default_cluster", None)
+        if default_cluster:
+            spec["cluster"] = default_cluster
+            logger.info(f"Set spec.cluster to default: {default_cluster}")
+
+
 main.add_command(
     create_fournos_resolve_entrypoint(
         vault_list_funcs=[
@@ -180,7 +188,8 @@ main.add_command(
             caliper_export_list_vaults,
             caliper_export_list_optional_vaults,
             caliper_agentic_list_vaults,
-        ]
+        ],
+        spec_resolver_func=_resolve_spec_defaults,
     )
 )
 main.add_command(caliper_export_entrypoint)
