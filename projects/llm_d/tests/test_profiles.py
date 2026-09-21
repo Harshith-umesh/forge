@@ -121,7 +121,7 @@ def test_benchmark_resolution_applies_workload_defaults_and_per_benchmark_overri
     concurrent = runtime_config.get_benchmark_config()
     assert concurrent is not None
     assert concurrent["job_name"] == "guidellm-benchmark"
-    assert concurrent["image"] == "ghcr.io/vllm-project/guidellm:v0.5.4"
+    assert concurrent["image"] == "ghcr.io/vllm-project/guidellm:v0.7.4"
     assert concurrent["pvc_size"] == "1Gi"
     assert concurrent["timeout_seconds"] == 3600
 
@@ -129,7 +129,7 @@ def test_benchmark_resolution_applies_workload_defaults_and_per_benchmark_overri
     multi_turn = runtime_config.get_benchmark_config()
     assert multi_turn is not None
     assert multi_turn["job_name"] == "guidellm-benchmark"
-    assert multi_turn["image"] == "ghcr.io/vllm-project/guidellm:v0.5.4"
+    assert multi_turn["image"] == "ghcr.io/vllm-project/guidellm:v0.7.4"
     assert multi_turn["pvc_size"] == "1Gi"
     assert multi_turn["timeout_seconds"] == 7200
 
@@ -155,7 +155,7 @@ def test_guidellm_benchmark_uses_original_model_name_as_processor(
     assert captured["timeout"] == 3600
     guidellm_args = captured["guidellm_args"]
     assert isinstance(guidellm_args, list)
-    assert "--processor=openai/gpt-oss-120b" in guidellm_args
+    assert "--tokenizer=kind=huggingface_auto,model=openai/gpt-oss-120b" in guidellm_args
 
 
 def test_release_preset_expands_benchmark_list_and_merges_workload_args() -> None:
