@@ -8,7 +8,6 @@ from pathlib import Path
 
 import yaml
 
-from projects.caliper.engine.kpi.dataclasses import MlflowDestination
 from projects.core.library import env
 from projects.core.library.postprocess import create_test_metadata, run_and_postprocess
 from projects.rhaiis.orchestration import runtime_config
@@ -40,10 +39,6 @@ def run(
     namespace: str,
     deployment_name: str | None = None,
 ) -> int:
-    from projects.caliper.orchestration.export import ensure_mlflow_destination_marker
-
-    ensure_mlflow_destination_marker()
-
     ret = run_and_postprocess(
         do_test,
         model_key=model_key,
@@ -200,10 +195,6 @@ def _run_test(
     benchmark_timeout = benchmark_cfg.get("timeout", 14400)
     wait_guidellm_benchmark_task._retry_config["attempts"] = max(1, benchmark_timeout // 10)
 
-    from projects.caliper.orchestration.export import read_mlflow_destination_marker
-
-    mlflow_destination = read_mlflow_destination_marker()
-
     try:
         isvc_labels = {
             "opendatahub.io/dashboard": "true",
@@ -333,7 +324,6 @@ def _run_test(
                 version=version,
                 cluster_tag=cluster_tag,
                 trtllm_config=trtllm_cfg,
-                mlflow_destination=mlflow_destination,
             )
 
         try:
@@ -400,7 +390,6 @@ def _run_workload_benchmark(
     version: str,
     cluster_tag: str,
     trtllm_config: dict | None = None,
-    mlflow_destination: dict[str, str] | None = None,
 ) -> None:
     """Run benchmark and post-processing for a single workload.
 
@@ -435,7 +424,6 @@ def _run_workload_benchmark(
             accelerator_chip=gpu_type.upper(),
             run_uuid=run_uuid,
             trtllm_config=trtllm_config,
-            mlflow_destination=mlflow_destination,
         )
 
         if not run_benchmark:
@@ -493,7 +481,6 @@ def _create_test_labels(
     accelerator_chip: str = "",
     run_uuid: str = "",
     trtllm_config: dict | None = None,
-    mlflow_destination: dict[str, str] | None = None,
 ) -> None:
     _, image_tag = runtime_config.split_image_tag(serving_image) if serving_image else ("", "")
     parts = [f"{k}: {v}" for k, v in engine_args.items()]
@@ -525,9 +512,6 @@ def _create_test_labels(
     create_test_metadata(
         env.ARTIFACT_DIR,
         labels,
-        mlflow_destination=MlflowDestination.from_dict(mlflow_destination)
-        if mlflow_destination
-        else None,
     )
     logger.info("Created test labels: %s", labels)
 
