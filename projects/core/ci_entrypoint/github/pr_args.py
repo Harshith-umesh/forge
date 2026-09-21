@@ -157,7 +157,7 @@ def handle_test_directive(line: str) -> dict[str, Any]:
         # Build result with test info and PR positional arguments
         result.update(
             {
-                "ci_job.name": test_name,
+                "ci_job.display_name": test_name,
                 "ci_job.project": project_name,
                 "ci_job.args": args,
             }
