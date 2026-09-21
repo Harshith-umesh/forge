@@ -55,7 +55,7 @@ def transform_fournos_config_to_variable_overrides(fjob: dict) -> dict:
 
     Returns:
         Dictionary in variable_overrides format:
-        - metadata.name -> ci_job.fjob
+        - metadata.name -> ci_job.fjob_name
         - spec.executionEngine.forge.project -> project.name
         - spec.executionEngine.forge.args -> project.args
         - spec.executionEngine.forge.configOverrides entries are flattened directly
@@ -63,7 +63,7 @@ def transform_fournos_config_to_variable_overrides(fjob: dict) -> dict:
         - spec.hardware -> ci_job.hardware
         - spec.cluster -> ci_job.cluster
         - spec.owner -> ci_job.owner
-        - spec.displayName -> ci_job.name
+        - spec.displayName -> ci_job.display_name
     """
     variable_overrides = {}
 
@@ -103,14 +103,14 @@ def transform_fournos_config_to_variable_overrides(fjob: dict) -> dict:
         variable_overrides["ci_job.cluster"] = fjob_spec["cluster"]
 
     if "displayName" in fjob_spec:
-        variable_overrides["ci_job.name"] = fjob_spec["displayName"]
+        variable_overrides["ci_job.display_name"] = fjob_spec["displayName"]
 
     if "owner" in fjob_spec:
         variable_overrides["ci_job.owner"] = fjob_spec["owner"]
 
     # Add ci_job mappings from metadata
     if "name" in metadata:
-        variable_overrides["ci_job.fjob"] = metadata["name"]
+        variable_overrides["ci_job.fjob_name"] = metadata["name"]
 
     return variable_overrides
 

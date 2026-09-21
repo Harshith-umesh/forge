@@ -7,6 +7,7 @@ Registers a :mod:`click` subcommand that reads ``caliper`` from project config a
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from enum import StrEnum
@@ -197,6 +198,43 @@ def _process_caliper_postprocess_status(
             raise
 
 
+def _inject_fournos_job_tags():
+    """Add FournosJob metadata as MLflow tags when running under FournosCI."""
+    fjob_tags = {}
+    fjob_name = config.project.get_config("ci_job.fjob_name", None, print=False, warn=False)
+    if not fjob_name:
+        logger.info("inject_fournos_job_tags: no fjob available, skipping.")
+        return
+
+    fjob_tags["fjob.name"] = fjob_name
+    for config_key, tag_key in [
+        ("ci_job.owner", "fjob.owner"),
+        ("ci_job.display_name", "fjob.display_name"),
+        ("ci_job.cluster", "fjob.cluster"),
+        ("project.name", "fjob.forge.project"),
+    ]:
+        val = config.project.get_config(config_key, None, print=False, warn=False)
+        if val:
+            fjob_tags[tag_key] = str(val)
+
+    args = config.project.get_config("project.args", None, print=False, warn=False)
+    if args:
+        fjob_tags["fjob.forge.args"] = json.dumps(args)
+
+    if not fjob_tags:
+        logger.info("inject_fournos_job_tags: no fjob tag found, skipping.")
+        return
+
+    existing_tags = (
+        config.project.get_config(
+            "caliper.export.backend.mlflow.config.tags", {}, print=False, warn=False
+        )
+        or {}
+    )
+    merged = {**fjob_tags, **existing_tags}
+    config.project.set_config("caliper.export.backend.mlflow.config.tags", merged, print=False)
+
+
 def run_caliper_orchestration_export(
     *, artifact_dir: Path, disable_censoring: bool = False, disable_file_export: bool = False
 ):
@@ -209,6 +247,8 @@ def run_caliper_orchestration_export(
         config.project.set_config(
             "caliper.export.backend.mlflow.config.run_name", os.environ["FJOB_NAME"], print=False
         )
+
+    _inject_fournos_job_tags()
 
     caliper_cfg = config.project.get_config("caliper", print=False)
 
