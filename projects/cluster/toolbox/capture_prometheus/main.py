@@ -184,9 +184,7 @@ def dump_metrics(args, ctx):
         **_pod_kwargs(ctx),
     )
 
-    size_result = shell.run(
-        ["stat", "-c", "%s", str(output_file)], shell=False, check=False, capture_output=True
-    )
+    size_result = shell.run(["stat", "-c", "%s", str(output_file)], shell=False, check=False)
 
     ctx.archive_size_bytes = int(size_result.stdout.strip()) if size_result.success else 0
 
