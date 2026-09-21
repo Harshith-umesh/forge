@@ -830,7 +830,7 @@ def run_guidellm_benchmark(*, endpoint_url: str) -> None:
     try:
         benchmark_key = runtime_config.get_benchmark_keys()[0]
         guidellm_args = build_guidellm_args(benchmark)
-        if not any(arg.startswith("--tokenizer=") for arg in guidellm_args):
+        if not any(arg.startswith(("--tokenizer=", "--processor=")) for arg in guidellm_args):
             guidellm_args.append(
                 f"--tokenizer=kind=huggingface_auto,model={runtime_config.get_model_name()}"
             )

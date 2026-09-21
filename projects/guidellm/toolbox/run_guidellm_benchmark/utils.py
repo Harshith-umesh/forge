@@ -178,6 +178,7 @@ def _build_run_args(endpoint_url: str, old_args: list[str]) -> list[str]:
     rampup = None
     warmup = None
     processor = None
+    processor_args: dict | None = None
     passthrough: list[str] = []
 
     for arg in old_args:
@@ -203,6 +204,11 @@ def _build_run_args(endpoint_url: str, old_args: list[str]) -> list[str]:
         elif key in ("--processor", "--processor-args"):
             if key == "--processor":
                 processor = val
+            else:
+                try:
+                    processor_args = _json.loads(val)
+                except (ValueError, TypeError):
+                    pass
         elif key in ("--outputs", "--output-dir"):
             pass
         else:
@@ -260,7 +266,15 @@ def _build_run_args(endpoint_url: str, old_args: list[str]) -> list[str]:
     new_args.append("--output=kind=json,path=/results/benchmarks.json")
 
     if processor:
-        new_args.append(f"--tokenizer=kind=huggingface_auto,model={processor}")
+        if processor_args:
+            tokenizer_dict = {
+                "kind": "huggingface_auto",
+                "model": processor,
+                "load_kwargs": processor_args,
+            }
+            new_args.append(f"--tokenizer={_json.dumps(tokenizer_dict)}")
+        else:
+            new_args.append(f"--tokenizer=kind=huggingface_auto,model={processor}")
 
     new_args.extend(passthrough)
     return new_args

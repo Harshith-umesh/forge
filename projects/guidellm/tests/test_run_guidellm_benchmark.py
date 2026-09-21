@@ -294,12 +294,17 @@ class TestBuildRunArgs:
         assert "--tokenizer=kind=huggingface_auto,model=meta-llama/Llama-3.1-8B-Instruct" in args
         assert not any("--processor" in a for a in args)
 
-    def test_processor_args_stripped(self) -> None:
+    def test_processor_args_preserved_as_load_kwargs(self) -> None:
         args = self._build(
             "http://model:8000",
             ["--processor=gpt2", '--processor-args={"use_fast": false}'],
         )
-        assert "--tokenizer=kind=huggingface_auto,model=gpt2" in args
+        import json
+
+        expected = json.dumps(
+            {"kind": "huggingface_auto", "model": "gpt2", "load_kwargs": {"use_fast": False}}
+        )
+        assert f"--tokenizer={expected}" in args
         assert not any("--processor-args" in a for a in args)
 
     def test_rampup_in_no_rate_branch(self) -> None:
