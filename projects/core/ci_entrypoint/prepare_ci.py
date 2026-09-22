@@ -334,10 +334,10 @@ def ci_banner(project: str, operation: str, args: list[str]):
         pull_sha = "HEAD"
 
     try:
-        run.run(f"git fetch --quiet origin {base_sha}", check=False, timeout=30)
+        run.run("git fetch --quiet origin main --deepen=20", check=False, timeout=30)
 
         result = run.run(
-            f"git show --quiet --oneline {base_sha}..{pull_sha}",
+            f"git show --quiet --oneline {base_sha}..{pull_sha} | head -20",
             check=False,
             timeout=30,
         )
