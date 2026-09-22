@@ -82,9 +82,7 @@ def main(ctx, preset):
         return
 
     init_vaults_for_phase(ctx.invoked_subcommand)
-
-    if ctx.invoked_subcommand in {"prepare", "preflight", "test"}:
-        ensure_mlflow_destination_marker()
+    ensure_mlflow_destination_marker()
 
 
 @main.command()

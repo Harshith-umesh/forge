@@ -255,10 +255,8 @@ def run_all_tests(stop_on_error: bool = False) -> int:
     """
     from projects.llm_d.orchestration import runtime_config
 
-    run_specs = runtime_config.get_run_specs()
-
     max_exit_code = 0
-    for run_spec in run_specs:
+    for run_spec in runtime_config.get_run_specs():
         with runtime_config.activate_run_spec(run_spec):
             with env.NextArtifactDir(run_spec.artifact_dirname):
                 try:
@@ -352,7 +350,6 @@ def run_finalizers(
 
 
 def do_test() -> int:
-    """Run one active LLM-D specification."""
     # Load minimal config needed for orchestration flow
 
     namespace = runtime_config.get_namespace()
