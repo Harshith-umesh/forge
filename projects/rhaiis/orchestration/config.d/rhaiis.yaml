@@ -77,7 +77,7 @@ s3:
 
 warmup:
   rate: 200
-  max_seconds: 60
+  max_seconds: 75
 
 profiler:
   enabled: false

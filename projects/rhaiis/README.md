@@ -69,9 +69,10 @@ Key sections:
 | `rhaiis.engines.trtllm.trtllm_config` | TRT-LLM server config (KV cache, CUDA graphs, MoE) |
 | `rhaiis.deploy` | Deploy settings (replicas, CPU/memory, image_pull_secrets list, storage) |
 | `rhaiis.s3` | S3 bucket, vault, and credentials for dashboard CSV and profiler trace uploads |
+| `rhaiis.warmup` | Warmup benchmark settings applied before each selected workload |
 | `rhaiis.profiler` | PyTorch profiler settings (enable, S3 prefix, rates, labels) |
 | `models` | Model definitions (hf_model_id, per-model `vllm_args` overrides) |
-| `workloads` | Benchmark profiles (data shape, rates, max_seconds) |
+| `workloads` | Benchmark profiles (data shape, rates, max_seconds, rampup) |
 | `benchmarks.guidellm` | GuideLLM image, backend, timeout, PVC size, HF token secret, fs_group |
 | `tests` | CI test mapping (model_key, workload_keys, version) |
 | `caliper.postprocess` | Caliper postprocessing pipeline (parse, KPI, CSV export) |
@@ -504,12 +505,15 @@ Full list: `grep "^[a-z]" orchestration/config.d/models.yaml`
 
 ## Workload profiles
 
-| Key | Prompt tokens | Output tokens | Rates | Max seconds |
-|-----|--------------|---------------|-------|-------------|
-| `profile1` | 1000 | 1000 | 1, 50, 100, 200, 300 | 450 |
-| `profile2` | 512 (stdev 128) | 2048 (stdev 512) | 1, 50, 100, 200, 300 | 450 |
-| `profile3` | 2048 | 128 | 1, 50, 100, 200, 300 | 450 |
-| `profile4` | 8000 | 1000 | 1, 25, 50, 75, 100 | 450 |
+The standard workload profiles run for 275 seconds per rate with a 35-second
+GuideLLM ramp-up. A 75-second warmup pass runs before each selected workload.
+
+| Key | Prompt tokens | Output tokens | Rates | Max seconds | Rampup |
+|-----|--------------|---------------|-------|-------------|--------|
+| `profile1` | 1000 | 1000 | 1, 50, 100, 200, 300 | 275 | 35 |
+| `profile2` | 512 (stdev 128) | 2048 (stdev 512) | 1, 50, 100, 200, 300 | 275 | 35 |
+| `profile3` | 2048 | 128 | 1, 50, 100, 200, 300 | 275 | 35 |
+| `profile4` | 8000 | 1000 | 1, 25, 50, 75, 100 | 275 | 35 |
 
 ## Presets
 
