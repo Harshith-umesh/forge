@@ -183,6 +183,7 @@ def _build_run_args(endpoint_url: str, old_args: list[str]) -> list[str]:
     processor = None
     processor_args: dict | None = None
     passthrough: list[str] = []
+    extra_backend_parts: list[str] = []
 
     for arg in old_args:
         key, _, val = arg.partition("=")
@@ -214,6 +215,22 @@ def _build_run_args(endpoint_url: str, old_args: list[str]) -> list[str]:
                     pass
         elif key == "--request-type":
             request_format = val
+        elif key == "--backend":
+            # v0.7.x-style --backend=subkey=subval from presets/workload args.
+            # Parse the comma-separated parts and merge known keys; pass
+            # anything else through as extra backend properties.
+            for part in val.split(","):
+                subkey, _, subval = part.partition("=")
+                if subkey == "kind":
+                    backend_type = subval
+                elif subkey == "model":
+                    model = subval
+                elif subkey == "request_format":
+                    request_format = subval
+                elif subkey == "target":
+                    pass  # endpoint_url is already set
+                else:
+                    extra_backend_parts.append(part)
         elif key in ("--outputs", "--output-dir"):
             pass
         else:
@@ -226,6 +243,8 @@ def _build_run_args(endpoint_url: str, old_args: list[str]) -> list[str]:
         backend_spec += f",model={model}"
     if request_format:
         backend_spec += f",request_format={request_format}"
+    for part in extra_backend_parts:
+        backend_spec += f",{part}"
     new_args.append(f"--backend={backend_spec}")
 
     if data_spec:

@@ -310,6 +310,17 @@ class TestBuildRunArgs:
         assert "request_format=text_completions" in backend_arg
         assert not any("--request-type" in a for a in args)
 
+    def test_backend_arg_merged_into_backend_spec(self) -> None:
+        args = self._build(
+            "http://model:8000",
+            ["--backend=request_format=/v1/completions"],
+        )
+        backend_arg = next(a for a in args if a.startswith("--backend="))
+        assert "request_format=/v1/completions" in backend_arg
+        assert "target=http://model:8000" in backend_arg
+        # Only one --backend= arg should exist
+        assert sum(1 for a in args if a.startswith("--backend=")) == 1
+
     def test_rampup_in_no_rate_branch(self) -> None:
         args = self._build(
             "http://model:8000",
