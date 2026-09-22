@@ -72,7 +72,7 @@ Key sections:
 | `rhaiis.warmup` | Warmup benchmark settings applied before each selected workload |
 | `rhaiis.profiler` | PyTorch profiler settings (enable, S3 prefix, rates, labels) |
 | `models` | Model definitions (hf_model_id, per-model `vllm_args` overrides) |
-| `workloads` | Benchmark profiles (data shape, rates, max_seconds, rampup) |
+| `workloads` | Benchmark profiles (name, data shape, rates, max_seconds, rampup) |
 | `benchmarks.guidellm` | GuideLLM image, backend, timeout, PVC size, HF token secret, fs_group |
 | `tests` | CI test mapping (model_key, workload_keys, version) |
 | `caliper.postprocess` | Caliper postprocessing pipeline (parse, KPI, CSV export) |
@@ -508,12 +508,12 @@ Full list: `grep "^[a-z]" orchestration/config.d/models.yaml`
 The standard workload profiles run for 275 seconds per rate with a 35-second
 GuideLLM ramp-up. A 75-second warmup pass runs before each selected workload.
 
-| Key | Prompt tokens | Output tokens | Rates | Max seconds | Rampup |
-|-----|--------------|---------------|-------|-------------|--------|
-| `profile1` | 1000 | 1000 | 1, 50, 100, 200, 300 | 275 | 35 |
-| `profile2` | 512 (stdev 128) | 2048 (stdev 512) | 1, 50, 100, 200, 300 | 275 | 35 |
-| `profile3` | 2048 | 128 | 1, 50, 100, 200, 300 | 275 | 35 |
-| `profile4` | 8000 | 1000 | 1, 25, 50, 75, 100 | 275 | 35 |
+| Key | Name | Prompt tokens | Output tokens | Rates | Max seconds | Rampup |
+|-----|------|--------------|---------------|-------|-------------|--------|
+| `profile1` | `profile1-balanced` | 1000 | 1000 | 1, 50, 100, 200, 300 | 275 | 35 |
+| `profile2` | `profile2-decode-heterogeneous` | 512 (stdev 128) | 2048 (stdev 512) | 1, 50, 100, 200, 300 | 275 | 35 |
+| `profile3` | `profile3-summarization` | 2048 | 128 | 1, 50, 100, 200, 300 | 275 | 35 |
+| `profile4` | `profile4-long-context` | 8000 | 1000 | 1, 25, 50, 75, 100 | 275 | 35 |
 
 ## Presets
 

@@ -1,28 +1,33 @@
 ci-quick:
+  name: ci-quick
   data: "prompt_tokens=1000,output_tokens=1000"
   rates: [1, 5]
   max_seconds: 275
   rampup: 35
 
 profile1:
+  name: profile1-balanced
   data: "prompt_tokens=1000,output_tokens=1000"
   rates: [1,50,100,200,300]
   max_seconds: 275
   rampup: 35
 
 profile2:
+  name: profile2-decode-heterogeneous
   data: "prompt_tokens=512,prompt_tokens_stdev=128,prompt_tokens_min=1,prompt_tokens_max=1024,output_tokens=2048,output_tokens_stdev=512,output_tokens_min=1,output_tokens_max=4096"
   rates: [1,50,100,200,300]
   max_seconds: 275
   rampup: 35
 
 profile3:
+  name: profile3-summarization
   data: "prompt_tokens=2048,output_tokens=128"
   rates: [1, 50, 100, 200, 300]
   max_seconds: 275
   rampup: 35
 
 profile4:
+  name: profile4-long-context
   data: "prompt_tokens=8000,output_tokens=1000"
   rates: [1,25,50,75,100]
   max_seconds: 275
@@ -30,6 +35,7 @@ profile4:
   samples: 50
 
 profile5:
+  name: profile5-ultra-long-context
   data: "prompt_tokens=100000,output_tokens=1000"
   rates: [1, 2, 5]
   max_seconds: 275
@@ -37,12 +43,14 @@ profile5:
   samples: 10
 
 profile6:
+  name: profile6-multi-turn
   data: "prompt_tokens=128,output_tokens=128,turns=5,prefix_tokens=512,prefix_count=10000"
   rates: [1, 32, 64, 128, 256, 512]
   max_seconds: 275
   rampup: 35
 
 profile7:
+  name: profile7-heavy-heterogeneous
   data: "prompt_tokens=8000,prompt_tokens_stdev=8500,prompt_tokens_min=50,prompt_tokens_max=30000,output_tokens=800,output_tokens_stdev=1500,output_tokens_min=20,output_tokens_max=8000"
   rates: [1, 50, 100, 200, 300]
   max_seconds: 275
@@ -50,6 +58,7 @@ profile7:
 
 # Dashboard override stub (set data, rates, max_seconds, and rampup at runtime)
 custom:
+  name: custom
   data: "prompt_tokens=1000,output_tokens=1000"
   rates: [1]
   max_seconds: 275
