@@ -11,6 +11,25 @@ qwen3-0.6b:
 llama-8b:
   tests.rhaiis.model_key: llama-3-1-8b
 
+llama-8b-fp8:
+  tests.rhaiis.model_key: llama-3-1-8b-fp8
+
+llama-8b-w8a8:
+  tests.rhaiis.model_key: llama-3-1-8b-w8a8
+
+llama-8b-w4a16:
+  tests.rhaiis.model_key: llama-3-1-8b-w4a16
+
+# Llama 3.1 405B
+llama-405b:
+  tests.rhaiis.model_key: llama-3-1-405b-fp8
+
+llama-405b-bf16:
+  tests.rhaiis.model_key: llama-3-1-405b
+
+llama-405b-w8a8:
+  tests.rhaiis.model_key: llama-3-1-405b-w8a8
+
 # Llama 3.3 70B
 llama-70b:
   tests.rhaiis.model_key: llama-3-3-70b-fp8
@@ -23,10 +42,6 @@ llama-70b-w8a8:
 
 llama-70b-w4a16:
   tests.rhaiis.model_key: llama-3-3-70b-w4a16
-
-# Llama 3.1 405B
-llama-405b:
-  tests.rhaiis.model_key: llama-3-1-405b-fp8
 
 # Llama 4 Scout (MoE)
 llama-4-scout:
@@ -78,6 +93,10 @@ mistral-24b-w8a8:
 mistral-7b:
   tests.rhaiis.model_key: mistral-7b
 
+# Mixtral 8x7B
+mixtral:
+  tests.rhaiis.model_key: mixtral-8x7b
+
 # Ministral 3 14B
 ministral-14b:
   tests.rhaiis.model_key: ministral-3-14b-fp8
@@ -87,10 +106,6 @@ ministral-14b-bf16:
 
 ministral-14b-reasoning:
   tests.rhaiis.model_key: ministral-3-14b-reasoning
-
-# Phi 4
-phi-4:
-  tests.rhaiis.model_key: phi-4-fp8
 
 # Qwen 2.5 7B
 qwen25-7b:
@@ -122,7 +137,7 @@ qwen3-30b:
 qwen3-30b-a3b:
   tests.rhaiis.model_key: qwen3-30b-a3b
 
-# Qwen3 80B (MoE)
+# Qwen3 Next 80B (MoE)
 qwen3-80b:
   tests.rhaiis.model_key: qwen3-n-80b-a3b-instruct
 
@@ -132,6 +147,47 @@ qwen3-vl-235b:
 
 qwen3-vl-30b:
   tests.rhaiis.model_key: qwen3-vl-30b-a3b
+
+# Qwen 3.5
+qwen3-5-35b:
+  tests.rhaiis.model_key: qwen3-5-35b-fp8
+
+qwen3-5-122b:
+  tests.rhaiis.model_key: qwen3-5-122b-fp8
+
+qwen3-5-397b:
+  tests.rhaiis.model_key: qwen3-5-397b-fp8
+
+# Qwen3 Coder
+qwen3-coder:
+  tests.rhaiis.model_key: qwen3-coder-next-fp8
+
+# Qwen 3.6 35B-A3B
+qwen3-6-35b:
+  tests.rhaiis.model_key: qwen3-6-35b-nvfp4
+
+qwen3-6-35b-bf16:
+  tests.rhaiis.model_key: qwen3-6-35b-a3b
+
+qwen3-6-35b-fp8:
+  tests.rhaiis.model_key: qwen3-6-35b-fp8
+
+# Qwen 3.8 27B
+qwen3-8-27b:
+  tests.rhaiis.model_key: qwen3-8-27b-fp8
+
+qwen3-8-27b-bf16:
+  tests.rhaiis.model_key: qwen3-8-27b
+
+qwen3-8-27b-int4:
+  tests.rhaiis.model_key: qwen3-8-27b-int4
+
+qwen3-8-27b-nvfp4:
+  tests.rhaiis.model_key: qwen3-8-27b-nvfp4
+
+# Qwen 3.8 2.4T (flagship)
+qwen3-8-2-4t:
+  tests.rhaiis.model_key: qwen3-8-2-4t-fp8
 
 # GPT-OSS
 gpt-oss-120b:
@@ -161,9 +217,12 @@ nemotron3nano-30b-fp8:
 nemotron3super-120b:
   tests.rhaiis.model_key: nemotron3super-120b-fp8
 
-# Mixtral 8x7B
-mixtral:
-  tests.rhaiis.model_key: mixtral-8x7b
+nemotron3super-120b-nvfp4:
+  tests.rhaiis.model_key: nemotron3super-120b-nvfp4
+
+# Nemotron 3 Ultra 550B (MoE)
+nemotron3ultra-550b:
+  tests.rhaiis.model_key: nemotron3ultra-550b
 
 # Gemma 2 9B
 gemma-9b:
@@ -174,6 +233,51 @@ gemma-9b-bf16:
 
 gemma-9b-w8a16:
   tests.rhaiis.model_key: gemma-9b-w8a16
+
+# Gemma 4 26B-A4B
+gemma-4-26b:
+  tests.rhaiis.model_key: gemma-4-26b-a4b-nvfp4
+
+gemma-4-26b-bf16:
+  tests.rhaiis.model_key: gemma-4-26b-a4b
+
+gemma-4-26b-fp8:
+  tests.rhaiis.model_key: gemma-4-26b-a4b-fp8
+
+# Gemma 4 31B
+gemma-4-31b:
+  tests.rhaiis.model_key: gemma-4-31b-nvfp4
+
+gemma-4-31b-bf16:
+  tests.rhaiis.model_key: gemma-4-31b-it
+
+gemma-4-31b-fp8-block:
+  tests.rhaiis.model_key: gemma-4-31b-fp8-block
+
+# Gemma 4 E4B / 12B
+gemma-4-e4b:
+  tests.rhaiis.model_key: gemma-4-e4b-it
+
+gemma-4-12b:
+  tests.rhaiis.model_key: gemma-4-12b-it
+
+# Infomaniak TranslateGemma
+infomaniak-translategemma:
+  tests.rhaiis.model_key: infomaniak-translategemma-12b
+
+# DeepSeek V4 Pro
+deepseek-v4-pro:
+  tests.rhaiis.model_key: deepseek-v4-pro
+
+deepseek-v4-pro-nvfp4:
+  tests.rhaiis.model_key: deepseek-v4-pro-nvfp4
+
+# DeepSeek V4 Flash
+deepseek-v4-flash:
+  tests.rhaiis.model_key: deepseek-v4-flash-nvfp4
+
+deepseek-v4-flash-base:
+  tests.rhaiis.model_key: deepseek-v4-flash
 
 # DeepSeek R1
 deepseek-r1:
@@ -186,164 +290,57 @@ deepseek-r1-w4a16:
 deepseek-v3:
   tests.rhaiis.model_key: deepseek-v3-2
 
-# DeepSeek V4 Pro
-deepseek-v4-pro:
-  tests.rhaiis.model_key: deepseek-v4-pro
-
-# Phi-4 quants
-phi-4-w4a16:
-  tests.rhaiis.model_key: phi-4-w4a16
-
-phi-4-w8a8:
-  tests.rhaiis.model_key: phi-4-w8a8
-
-# Llama 3.1 8B quants
-llama-8b-fp8:
-  tests.rhaiis.model_key: llama-3-1-8b-fp8
-
-llama-8b-w8a8:
-  tests.rhaiis.model_key: llama-3-1-8b-w8a8
-
-llama-8b-w4a16:
-  tests.rhaiis.model_key: llama-3-1-8b-w4a16
-
-# Llama 3.1 405B quants
-llama-405b-bf16:
-  tests.rhaiis.model_key: llama-3-1-405b
-
-llama-405b-w8a8:
-  tests.rhaiis.model_key: llama-3-1-405b-w8a8
-
-# Qwen 3.5
-qwen3-5-35b:
-  tests.rhaiis.model_key: qwen3-5-35b-fp8
-
-qwen3-5-122b:
-  tests.rhaiis.model_key: qwen3-5-122b-fp8
-
-qwen3-5-397b:
-  tests.rhaiis.model_key: qwen3-5-397b-fp8
-
-# Qwen3 Coder
-qwen3-coder:
-  tests.rhaiis.model_key: qwen3-coder-next-fp8
-
-# Infomaniak
-infomaniak-translategemma:
-  tests.rhaiis.model_key: infomaniak-translategemma-12b
-
-# Kimi-K2.5
+# Kimi K2.5
 kimi-k2-5:
   tests.rhaiis.model_key: kimi-k2-5-nvfp4
 
-# GLM-5.2
-glm-5-2:
-  tests.rhaiis.model_key: glm-5-2-nvfp4
-
-glm-5-2-fp8:
-  tests.rhaiis.model_key: glm-5-2-fp8
-
-# Nemotron-3-Super-120B NVFP4
-nemotron3super-120b-nvfp4:
-  tests.rhaiis.model_key: nemotron3super-120b-nvfp4
-
-# DeepSeek V4 Pro NVFP4
-deepseek-v4-pro-nvfp4:
-  tests.rhaiis.model_key: deepseek-v4-pro-nvfp4
-
-# Gemma 4
-gemma-4-26b:
-  tests.rhaiis.model_key: gemma-4-26b-a4b-nvfp4
-
-gemma-4-31b:
-  tests.rhaiis.model_key: gemma-4-31b-nvfp4
-
-# Kimi-K3
+# Kimi K3
 kimi-k3:
   tests.rhaiis.model_key: kimi-k3
 
 kimi-k3-nvfp4:
   tests.rhaiis.model_key: kimi-k3-nvfp4
 
-# Qwen 3.6 35B-A3B
-qwen3-6-35b:
-  tests.rhaiis.model_key: qwen3-6-35b-nvfp4
+# GLM 5.2
+glm-5-2:
+  tests.rhaiis.model_key: glm-5-2-nvfp4
 
-qwen3-6-35b-bf16:
-  tests.rhaiis.model_key: qwen3-6-35b-a3b
+glm-5-2-fp8:
+  tests.rhaiis.model_key: glm-5-2-fp8
 
-qwen3-6-35b-fp8:
-  tests.rhaiis.model_key: qwen3-6-35b-fp8
-
-# Qwen 3.8 27B
-qwen3-8-27b:
-  tests.rhaiis.model_key: qwen3-8-27b-fp8
-
-qwen3-8-27b-bf16:
-  tests.rhaiis.model_key: qwen3-8-27b
-
-# Qwen 3.8 2.4T (flagship)
-qwen3-8-2-4t:
-  tests.rhaiis.model_key: qwen3-8-2-4t-fp8
-
-# DeepSeek V4 Flash
-deepseek-v4-flash:
-  tests.rhaiis.model_key: deepseek-v4-flash-nvfp4
-
-deepseek-v4-flash-base:
-  tests.rhaiis.model_key: deepseek-v4-flash
-
-# Gemma 4 26B-A4B
-gemma-4-26b-fp8:
-  tests.rhaiis.model_key: gemma-4-26b-a4b-fp8
-
-gemma-4-26b-bf16:
-  tests.rhaiis.model_key: gemma-4-26b-a4b
-
-# Muse Glimmer 30B
-muse-glimmer:
-  tests.rhaiis.model_key: muse-glimmer-30b
-
-# Inkling Small
-inkling-small:
-  tests.rhaiis.model_key: inkling-small
-
-# Nightly release regression models
-gemma-4-31b-bf16:
-  tests.rhaiis.model_key: gemma-4-31b-it
-
-gemma-4-31b-fp8-block:
-  tests.rhaiis.model_key: gemma-4-31b-fp8-block
-
-gemma-4-e4b:
-  tests.rhaiis.model_key: gemma-4-e4b-it
-
-gemma-4-12b:
-  tests.rhaiis.model_key: gemma-4-12b-it
-
-nemotron3ultra-550b:
-  tests.rhaiis.model_key: nemotron3ultra-550b
-
-inkling-small-fp8:
-  tests.rhaiis.model_key: inkling-small-fp8
-
-qwen3-8-27b-int4:
-  tests.rhaiis.model_key: qwen3-8-27b-int4
-
+# GLM 5.3
 glm-5-3-flash:
   tests.rhaiis.model_key: glm-5-3-flash
 
 glm-5-3-flash-nvfp4:
   tests.rhaiis.model_key: glm-5-3-flash-nvfp4
 
-qwen3-8-27b-nvfp4:
-  tests.rhaiis.model_key: qwen3-8-27b-nvfp4
-
-inkling-small-nvfp4:
-  tests.rhaiis.model_key: inkling-small-nvfp4
-
 glm-5-3-mxfp4:
   tests.rhaiis.model_key: glm-5-3-mxfp4
 
+# Phi 4
+phi-4:
+  tests.rhaiis.model_key: phi-4-fp8
+
+phi-4-w4a16:
+  tests.rhaiis.model_key: phi-4-w4a16
+
+phi-4-w8a8:
+  tests.rhaiis.model_key: phi-4-w8a8
+
+# Muse Glimmer 30B
+muse-glimmer:
+  tests.rhaiis.model_key: muse-glimmer-30b
+
 muse-glimmer-30b-int4:
   tests.rhaiis.model_key: muse-glimmer-30b-int4
+
+# Inkling Small
+inkling-small:
+  tests.rhaiis.model_key: inkling-small
+
+inkling-small-fp8:
+  tests.rhaiis.model_key: inkling-small-fp8
+
+inkling-small-nvfp4:
+  tests.rhaiis.model_key: inkling-small-nvfp4
