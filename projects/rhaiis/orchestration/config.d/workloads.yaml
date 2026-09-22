@@ -1,7 +1,7 @@
 ci-quick:
   data: "prompt_tokens=1000,output_tokens=1000"
   rates: [1, 5]
-  max_seconds: 275
+  max_seconds: 60
   rampup: 35
   warmup: 75
 
