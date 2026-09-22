@@ -511,12 +511,8 @@ def extract_results_from_copy_pod(args, ctx, results_dir: Path):
     """Extract results from copy pod (PVC mode)"""
     extracted_files: list[dict[str, str | None]] = []
     for run in ctx.guidellm_runs:
-        if run.rate is None:
-            remote_path = "/results/benchmarks.json"
-            local_path = results_dir / "benchmarks.json"
-        else:
-            remote_path = f"/results/benchmarks-{run.label}.json"
-            local_path = results_dir / f"benchmarks-{run.label}.json"
+        remote_path = f"/results/benchmarks-{run.label}.json"
+        local_path = results_dir / f"benchmarks-{run.label}.json"
 
         logger.info(f"Retrieving the compressed benchmark file for {run.label}...")
 
@@ -611,12 +607,8 @@ def extract_results_from_sidecar(args, ctx, results_dir: Path):
 
     extracted_files: list[dict[str, str | None]] = []
     for run in ctx.guidellm_runs:
-        if run.rate is None:
-            remote_path = "/results/benchmarks.json"
-            local_path = results_dir / "benchmarks.json"
-        else:
-            remote_path = f"/results/benchmarks-{run.label}.json"
-            local_path = results_dir / f"benchmarks-{run.label}.json"
+        remote_path = f"/results/benchmarks-{run.label}.json"
+        local_path = results_dir / f"benchmarks-{run.label}.json"
 
         logger.info(f"Retrieving the compressed benchmark file for {run.label} from sidecar...")
 

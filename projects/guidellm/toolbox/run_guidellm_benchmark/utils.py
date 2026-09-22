@@ -289,7 +289,7 @@ def _build_run_args(endpoint_url: str, old_args: list[str]) -> list[str]:
     if max_requests:
         new_args.append(f"--constraint=kind=max_requests,count={max_requests}")
 
-    new_args.append("--output=kind=json,path=/results/benchmarks.json")
+    new_args.append("--output=kind=json,path=/results/benchmarks-default.json")
 
     if processor:
         if processor_args:
@@ -318,7 +318,7 @@ def _build_multi_run_script(
     config_content: str | None = None,
 ) -> str:
     """Shell script for multiple GuideLLM runs (rate-expression expansion)."""
-    lines = ["set -euo pipefail", "mkdir -p /results"]
+    lines = ["set -euxo pipefail", "mkdir -p /results"]
     if config_content:
         lines.append(_build_config_heredoc(config_content))
     for run in runs:
@@ -487,7 +487,7 @@ def render_guidellm_shared_volume_job_from_parts(
         cmd = shlex.join(["/opt/app-root/bin/guidellm", "run", *run_args])
         main_script = "\n".join(
             [
-                "set -euo pipefail",
+                "set -euxo pipefail",
                 "mkdir -p /results",
                 cmd,
             ]

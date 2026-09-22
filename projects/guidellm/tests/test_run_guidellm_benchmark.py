@@ -228,7 +228,7 @@ class TestBuildRunArgs:
         assert "--data=kind=synthetic_text,prompt_tokens=256,output_tokens=128" in args
         assert "--profile=kind=concurrent,streams=16" in args
         assert "--constraint=kind=max_duration,seconds=60" in args
-        assert "--output=kind=json,path=/results/benchmarks.json" in args
+        assert "--output=kind=json,path=/results/benchmarks-default.json" in args
 
     def test_warmup_injected_into_profile(self) -> None:
         args = self._build(
@@ -278,7 +278,7 @@ class TestBuildRunArgs:
         )
         assert not any("--outputs" in a for a in args)
         assert not any("--output-dir" in a for a in args)
-        assert "--output=kind=json,path=/results/benchmarks.json" in args
+        assert "--output=kind=json,path=/results/benchmarks-default.json" in args
 
     def test_processor_converted_to_tokenizer(self) -> None:
         args = self._build(
