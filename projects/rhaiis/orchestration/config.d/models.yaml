@@ -480,6 +480,13 @@ glm-5-2-nvfp4:
     tool-call-parser: glm47
     enable-auto-tool-choice: true
 
+# GLM-5.2 FP8
+glm-5-2-fp8:
+  name: GLM-5.2-FP8
+  hf_model_id: zai-org/GLM-5.2-FP8
+  vllm_args:
+    tensor-parallel-size: 8
+
 # Nemotron-3-Super-120B NVFP4
 nemotron3super-120b-nvfp4:
   name: Nemotron-3-Super-120B-A12B-NVFP4

@@ -240,6 +240,9 @@ kimi-k2-5:
 glm-5-2:
   tests.rhaiis.model_key: glm-5-2-nvfp4
 
+glm-5-2-fp8:
+  tests.rhaiis.model_key: glm-5-2-fp8
+
 # Nemotron-3-Super-120B NVFP4
 nemotron3super-120b-nvfp4:
   tests.rhaiis.model_key: nemotron3super-120b-nvfp4
