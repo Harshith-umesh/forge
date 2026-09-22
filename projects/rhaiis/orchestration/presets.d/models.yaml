@@ -134,7 +134,7 @@ qwen3-vl-30b:
   tests.rhaiis.model_key: qwen3-vl-30b-a3b
 
 # GPT-OSS
-gpt-oss:
+gpt-oss-120b:
   tests.rhaiis.model_key: gpt-oss-120b
 
 gpt-oss-fp8:
