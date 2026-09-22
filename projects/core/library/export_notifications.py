@@ -780,15 +780,22 @@ def _get_execution_engine_config(artifact_dir: Path) -> str | None:
 
         execution_engine = fjob_data.get("spec", {}).get("executionEngine", {})
 
+        spec = fjob_data.get("spec", {})
+
         config = {}
         config["executionEngine"] = execution_engine
-        config["owner"] = fjob_data.get("spec", {}).get("owner")
+        config["exclusive"] = spec.get("exclusive")
+        config["owner"] = spec.get("owner")
+        config["pipeline"] = spec.get("pipeline")
 
-        if cluster := fjob_data.get("spec", {}).get("cluster"):
+        if cluster := spec.get("cluster"):
             config["cluster"] = cluster
 
-        if pipeline := fjob_data.get("spec", {}).get("pipeline"):
-            config["pipeline"] = pipeline
+        if clusterless := spec.get("clusterless"):
+            config["clusterless"] = clusterless
+
+        if hardware := spec.get("hardware"):
+            config["hardware"] = hardware
 
         config_yaml = yaml.dump(config, default_flow_style=False, sort_keys=True)
         return f"```yaml\n{config_yaml.strip()}\n```"
