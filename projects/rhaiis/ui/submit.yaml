@@ -161,7 +161,7 @@ modes:
     label: CPT Pipeline
     kind: matrix
     presets_ref:
-      dir: presets.d
+      dir: cpt.d
     matrix:
       marker_key: __cpt
       models_key: __models
@@ -224,9 +224,7 @@ modes:
               profile photo → Profile → ⋮ → Copy member ID. For a group,
               use the group's own ID (starts with S).
             maps_to: tests.rhaiis.slack_member_id
-    # NOTE: no presets.d entries are currently tagged `__cpt: true` in this
-    # repo, so this mode resolves to zero pipelines today. Once RHAIIS
-    # publishes real `__cpt` pipeline presets (the old fournos-ui
-    # convention: __cpt / __models / __workloads / __description / __tp —
-    # see git history of app/projects/rhaiis.py::fetch_config), they show
-    # up here automatically. No Control Center change required.
+    # CPT definitions live in orchestration/cpt.d and carry the matrix
+    # metadata consumed by fournos-ui. The Kubernetes cluster remains a
+    # user-selected Fournos field; __clusters in each CPT definition only
+    # restricts the valid choices for that pipeline.
