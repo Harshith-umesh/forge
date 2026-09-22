@@ -330,6 +330,9 @@ def submit_job():
             config.project.set_config("ci_job.project", project_name)
             config.project.set_config("ci_job.args", job_args)
 
+        if project_name == "project_not_set":
+            raise RuntimeError("Forge project isn't configured. Cannot submit the Fjob")
+
         # job_args is always a list, format accordingly
         args_str = " ".join(job_args)
 
