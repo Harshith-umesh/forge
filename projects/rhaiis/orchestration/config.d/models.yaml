@@ -279,11 +279,6 @@ deepseek-v4-pro:
   hf_model_id: deepseek-ai/DeepSeek-V4-Pro
   vllm_args:
     tensor-parallel-size: 8
-    kv-cache-dtype: fp8
-    tokenizer-mode: deepseek_v4
-    tool-call-parser: deepseek_v4
-    enable-auto-tool-choice: true
-    reasoning-parser: deepseek_v4
 
 deepseek-r1-0528:
   name: DeepSeek-R1-0528
@@ -328,7 +323,6 @@ nemotron3super-120b-fp8:
   hf_model_id: nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8
   vllm_args:
     tensor-parallel-size: 2
-    kv-cache-dtype: fp8
   sglang_args:
     tp-size: 2
     disable-radix-cache: true
@@ -485,7 +479,6 @@ nemotron3super-120b-nvfp4:
   hf_model_id: RedHatAI/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
   vllm_args:
     tensor-parallel-size: 1
-    kv-cache-dtype: fp8
 
 # DeepSeek-V4-Pro NVFP4+FP8
 deepseek-v4-pro-nvfp4:
@@ -501,9 +494,6 @@ gemma-4-26b-a4b-nvfp4:
   hf_model_id: RedHatAI/gemma-4-26B-A4B-it-NVFP4
   vllm_args:
     tensor-parallel-size: 1
-    reasoning-parser: gemma4
-    tool-call-parser: gemma4
-    enable-auto-tool-choice: true
 
 gemma-4-31b-nvfp4:
   name: Gemma-4-31B-NVFP4
@@ -592,10 +582,6 @@ muse-glimmer-30b:
   hf_model_id: meta-models/Muse-Glimmer-30B
   vllm_args:
     tensor-parallel-size: 1
-    generation-config: auto
-    enable-auto-tool-choice: true
-    tool-call-parser: muse_glimmer
-    reasoning-parser: muse_glimmer
 
 # Inkling Small (276B total / 12B active MoE)
 inkling-small:
@@ -616,10 +602,6 @@ gemma-4-31b-fp8-block:
   hf_model_id: RedHatAI/gemma-4-31B-it-FP8-block
   vllm_args:
     tensor-parallel-size: 1
-    kv-cache-dtype: fp8
-    reasoning-parser: gemma4
-    tool-call-parser: gemma4
-    enable-auto-tool-choice: true
 
 gemma-4-e4b-it:
   name: Gemma-4-E4B-IT
@@ -638,10 +620,6 @@ nemotron3ultra-550b:
   hf_model_id: RedHatAI/NVIDIA-Nemotron-3-Ultra-550B-A55B-FP8-block
   vllm_args:
     tensor-parallel-size: 8
-    enable-expert-parallel: true
-    reasoning-parser: nemotron_v3
-    kv-cache-dtype: fp8
-    tool-call-parser: qwen3_coder
 
 inkling-small-fp8:
   name: Inkling-Small-FP8
@@ -654,81 +632,48 @@ deepseek-v4-flash:
   hf_model_id: deepseek-ai/DeepSeek-V4-Flash
   vllm_args:
     tensor-parallel-size: 4
-    kv-cache-dtype: fp8
-    tokenizer-mode: deepseek_v4
-    tool-call-parser: deepseek_v4
-    enable-auto-tool-choice: true
-    reasoning-parser: deepseek_v4
 
 qwen3-8-27b-int4:
   name: Qwen3.8-27B-INT4
   hf_model_id: RedHatAI/Qwen3.8-27B-INT4
   vllm_args:
     tensor-parallel-size: 1
-    kv-cache-dtype: fp8
-    enable-auto-tool-choice: true
-    tool-call-parser: qwen3_xml
-    reasoning-parser: qwen3
-    mm-encoder-tp-mode: data
-    speculative-config: '{"model":"Qwen3.8-27B-speculator.dspark-preview","num_speculative_tokens":8,"method":"dspark"}'
 
 glm-5-3-flash:
   name: GLM-5.3-Flash
   hf_model_id: RedHatAI/GLM-5.3-Flash
   vllm_args:
     tensor-parallel-size: 8
-    kv-cache-dtype: bf16
 
 glm-5-3-flash-nvfp4:
   name: GLM-5.3-Flash-NVFP4
   hf_model_id: RedHatAI/GLM-5.3-Flash-NVFP4
   vllm_args:
     tensor-parallel-size: 4
-    no-enable-flashinfer-autotune: true
-    tool-call-parser: glm47
-    enable-auto-tool-choice: true
-    reasoning-parser: glm45
 
 qwen3-8-27b-nvfp4:
   name: Qwen3.8-27B-NVFP4
   hf_model_id: RedHatAI/Qwen3.8-27B-NVFP4
   vllm_args:
     tensor-parallel-size: 1
-    kv-cache-dtype: fp8
-    reasoning-parser: qwen3
-    enable-auto-tool-choice: true
-    tool-call-parser: qwen3_xml
 
 inkling-small-nvfp4:
   name: Inkling-NVFP4-FP8-BLOCK
   hf_model_id: RedHatAI/Inkling-NVFP4-FP8-BLOCK
   vllm_args:
     tensor-parallel-size: 4
-    tokenizer-mode: inkling
-    enable-auto-tool-choice: true
-    tool-call-parser: inkling
-    reasoning-parser: inkling
-    enable-expert-parallel: true
 
 glm-5-3-mxfp4:
   name: GLM-5.3-MXFP4
   hf_model_id: RedHatAI/GLM-5.3-MXFP4
   vllm_args:
     tensor-parallel-size: 4
-    kv-cache-dtype: fp8_e4m3
-    reasoning-parser: glm45
-    speculative-config: '{"method":"mtp","num_speculative_tokens":5}'
 
 muse-glimmer-30b-int4:
   name: Muse-Glimmer-30B-INT4
   hf_model_id: RedHatAI/Muse-Glimmer-30B-INT4
   vllm_args:
     tensor-parallel-size: 1
-    generation-config: auto
-    enable-auto-tool-choice: true
-    tool-call-parser: muse_glimmer
-    reasoning-parser: muse_glimmer
-    attention-backend: ROCM_AITER_FA
 
 kimi-k3:
   name: Kimi-K3
