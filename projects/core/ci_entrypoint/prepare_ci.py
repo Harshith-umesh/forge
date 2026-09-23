@@ -324,6 +324,10 @@ def ci_banner(project: str, operation: str, args: list[str]):
         args: Additional arguments
     """
 
+    if os.environ.get("FORGE_FOREIGN_TESTING_PULL_NUMBER"):
+        logger.info("Forge foreign-testing detect. Skipping the forge git history banner.")
+        return
+
     base_sha = os.environ.get("PULL_BASE_SHA", "main")
     if base_sha == "main":
         logger.info("PULL_BASE_SHA not set. Showing the last commits from main.")
