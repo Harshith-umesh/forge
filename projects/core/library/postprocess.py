@@ -51,9 +51,6 @@ def create_test_metadata(
 ) -> Path:
     """Write Caliper test metadata files to mark a directory as a Caliper test base.
 
-    Creates both caliper metadata file (new format) and __test_labels__.yaml
-    (legacy format) with identical content for backward compatibility.
-
     Args:
         directory: Directory to create the test metadata files in
         labels: Dictionary of label key-value pairs
