@@ -32,9 +32,7 @@ def clone_repository(*, repo_owner, repo_name, pull_pull_sha):
     }
     missing = [name for name, value in values.items() if not value]
     if missing:
-        raise ValueError(
-            f"Required foreign repository variables are missing: {', '.join(missing)}"
-        )
+        raise ValueError(f"Required foreign repository variables are missing: {', '.join(missing)}")
 
     repository_path = pathlib.Path(tempfile.mkdtemp(prefix="forge-foreign-testing-"))
     quoted_path = shlex.quote(str(repository_path))
