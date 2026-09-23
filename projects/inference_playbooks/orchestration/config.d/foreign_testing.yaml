@@ -1,0 +1,6 @@
+foreign_testing:
+  repo:
+    owner: openshift-psap
+    name: inference-playbooks
+    branch: main
+    pr: null

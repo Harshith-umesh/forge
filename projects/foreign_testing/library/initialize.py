@@ -42,6 +42,7 @@ def clone_repository(*, repo_owner, repo_name, pull_pull_sha):
     run.run(f"git clone {repository_url} {quoted_path}")
     run.run(f"git -C {quoted_path} fetch --quiet origin {commit}")
     run.run(f"git -C {quoted_path} reset --hard FETCH_HEAD")
+    run.run(f"git -C {quoted_path} show FETCH_HEAD")
 
     os.environ[REPOSITORY_PATH_ENV] = str(repository_path)
     logger.info("Foreign repository checked out at %s", repository_path)
@@ -52,8 +53,18 @@ def initialize():
     if os.environ.get(REPOSITORY_PATH_ENV):
         return get_repository_path()
 
+    from projects.core.library import config
+
+    repository_config = config.project.get_config("foreign_testing.repo", print=False)
+    pull_pull_sha = os.environ.get(PULL_SHA_ENV)
+    if not pull_pull_sha:
+        if repository_config["pr"] is not None:
+            pull_pull_sha = f"refs/pull/{repository_config['pr']}/head"
+        else:
+            pull_pull_sha = repository_config["branch"]
+
     return clone_repository(
-        repo_owner=os.environ.get("REPO_OWNER"),
-        repo_name=os.environ.get("REPO_NAME"),
-        pull_pull_sha=os.environ.get(PULL_SHA_ENV),
+        repo_owner=repository_config["owner"],
+        repo_name=repository_config["name"],
+        pull_pull_sha=pull_pull_sha,
     )
