@@ -122,8 +122,8 @@ class GuideLLMParser:
 
     @staticmethod
     def _is_benchmarks_artifact(path: Path) -> bool:
-        return path.name == "benchmarks.json" or (
-            path.name.startswith("benchmarks-rate-") and path.suffix == ".json"
+        return path.suffix == ".json" and (
+            path.name == "benchmarks.json" or path.name.startswith("benchmarks-")
         )
 
     @staticmethod
