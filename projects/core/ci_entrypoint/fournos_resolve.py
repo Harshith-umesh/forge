@@ -114,6 +114,7 @@ def resolve_fournos_config(
     dry_run: bool = False,
     vaults: list[str],
     hardware_resolver_func: Callable[[dict], dict] | None = None,
+    spec_resolver_func: Callable[[dict], None] | None = None,
 ) -> int:
     """
     Resolve the FournosJob object configuration by populating spec.secretRefs and spec.hardware.
@@ -164,6 +165,10 @@ def resolve_fournos_config(
 
     logger.info(f"Updated spec.secretRefs with {len(vaults)} vault references")
 
+    # Apply spec-level resolution if function provided
+    if spec_resolver_func:
+        spec_resolver_func(fjob_obj["spec"])
+
     # Apply hardware resolution if function provided
     if hardware_resolver_func:
         try:
@@ -206,6 +211,7 @@ def create_fournos_resolve_entrypoint(
     vault_list_func: Callable[[], list[str]] | None = None,
     vault_list_funcs: list[Callable[[], list[str]]] | None = None,
     hardware_resolver_func: Callable[[dict], dict] | None = None,
+    spec_resolver_func: Callable[[dict], None] | None = None,
 ):
     """
     Create a FournosJob resolve command with the given vault list and hardware resolver functions.
@@ -275,7 +281,10 @@ def create_fournos_resolve_entrypoint(
             raise RuntimeError(f"Failed to get vault lists: {e}") from e
 
         return resolve_fournos_config(
-            dry_run=dry_run, vaults=vaults, hardware_resolver_func=hardware_resolver_func
+            dry_run=dry_run,
+            vaults=vaults,
+            hardware_resolver_func=hardware_resolver_func,
+            spec_resolver_func=spec_resolver_func,
         )
 
     return fournos_resolve_command
