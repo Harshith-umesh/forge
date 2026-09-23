@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Skeleton Project CLI entrypoint
+LLM-D Project CLI entrypoint
 """
 
 import logging

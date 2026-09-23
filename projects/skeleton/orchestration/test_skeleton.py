@@ -9,7 +9,7 @@ import yaml
 
 from projects.caliper.engine.kpi.dataclasses import CompletionData, TimingData
 from projects.core.library import config, env
-from projects.core.library.postprocess import run_and_postprocess, write_test_labels
+from projects.core.library.postprocess import create_test_metadata, run_and_postprocess
 from projects.skeleton.toolbox.cluster_info.main import run as cluster_info
 
 logger = logging.getLogger(__name__)
@@ -76,8 +76,8 @@ def seed_skeleton_caliper_artifacts_with_data(
         # Combine base labels with scenario-specific label
         scenario_labels = {**base_labels, "scenario": scenario}
 
-        # Create metadata with timing and completion data using write_test_labels
-        write_test_labels(
+        # Create metadata with timing and completion data using create_test_metadata
+        create_test_metadata(
             dest_dir,
             scenario_labels,
             timing=timing_data,

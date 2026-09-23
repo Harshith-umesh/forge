@@ -10,7 +10,7 @@ import yaml
 
 from projects.caliper.engine.kpi.dataclasses import MlflowDestination
 from projects.core.library import env
-from projects.core.library.postprocess import run_and_postprocess, write_test_labels
+from projects.core.library.postprocess import create_test_metadata, run_and_postprocess
 from projects.rhaiis.orchestration import runtime_config
 
 logger = logging.getLogger(__name__)
@@ -522,7 +522,7 @@ def _create_test_labels(
         "run_uuid": run_uuid,
     }
 
-    write_test_labels(
+    create_test_metadata(
         env.ARTIFACT_DIR,
         labels,
         mlflow_destination=MlflowDestination.from_dict(mlflow_destination)

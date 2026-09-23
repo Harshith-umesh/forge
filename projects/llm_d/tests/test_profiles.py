@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 from contextlib import nullcontext
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -155,7 +156,13 @@ def test_guidellm_benchmark_uses_hf_model_name(
     monkeypatch.setattr(test_phase.benchconf_lib, "_is_enabled", lambda: True)
     monkeypatch.setattr(test_phase.benchconf_lib, "maybe_install_custom_version", lambda: None)
     monkeypatch.setattr(test_phase.benchconf_lib, "save_version", lambda: None)
-    test_phase.run_guidellm_benchmark(endpoint_url="https://example.test/llm-d")
+
+    monkeypatch.setattr(
+        test_phase,
+        "update_test_labels_with_timing",
+        lambda _dir, _section, _event: datetime.now(UTC),
+    )
+    test_phase.run_guidellm_benchmark(None, endpoint_url="https://example.test/llm-d")
 
     assert captured["timeout"] == 3600
     assert captured["config_path"] == mock_config_path
@@ -320,16 +327,29 @@ def test_ci_init_uses_framework_project_args_preset_and_keeps_var_overrides() ->
     assert runtime_config.get_benchmark_keys() == ["multi-turn"]
 
 
-def test_list_vaults_only_includes_rhoai_custom_catalog_vaults_for_custom_catalog_runs() -> None:
+def test_list_vaults_only_includes_rhoai_custom_catalog_vaults_for_custom_catalog_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _init_project_config()
 
+    calls: list[dict[str, object]] = []
+
+    def _fake_init(**kwargs):
+        calls.append(kwargs)
+
+    monkeypatch.setattr(llmd_ci.vault, "init", _fake_init)
+
     core_config.project.set_config("platform.rhoai.custom_catalog.enabled", False)
-    assert "psap-rhoai-rc" not in llmd_ci.list_vaults()
-    assert "psap-forge-staging-image-pull" not in llmd_ci.list_vaults()
+    llmd_ci.init_vaults_for_phase("prepare")
+
+    assert "psap-rhoai-rc" not in calls[0]["mandatory_vaults"]
+    assert "psap-forge-staging-image-pull" not in calls[0]["mandatory_vaults"]
 
     core_config.project.set_config("platform.rhoai.custom_catalog.enabled", True)
-    assert "psap-rhoai-rc" in llmd_ci.list_vaults()
-    assert "psap-forge-staging-image-pull" in llmd_ci.list_vaults()
+    llmd_ci.init_vaults_for_phase("prepare")
+
+    assert "psap-rhoai-rc" in calls[1]["mandatory_vaults"]
+    assert "psap-forge-staging-image-pull" in calls[1]["mandatory_vaults"]
 
 
 def test_prepare_phase_adds_rhoai_custom_catalog_vaults_only_for_custom_catalog_runs(
