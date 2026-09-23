@@ -44,9 +44,13 @@ def send_notification(
         logger.info("Running from a Periodic job, don't send notification to github")
         github = False
 
-    if github and not os.environ.get("PULL_NUMBER"):
-        logger.info("PULL_NUMBER is not set; don't send notification to github")
-        return True
+    if github and not (
+        os.environ.get("PULL_NUMBER") or os.environ.get("FORGE_FOREIGN_TESTING_PULL_NUMBER")
+    ):
+        logger.info(
+            "PULL_NUMBER/FORGE_FOREIGN_TESTING_PULL_NUMBER is not set; don't send notification to github"
+        )
+        github = False
 
     vault_def = vault_lib.get_vault_manager().get_vault(notification_vault)
     if not vault_def:
@@ -73,7 +77,7 @@ def send_notification_to_github(vault_def, message, dry_run):
     """Send a generic notification message to GitHub."""
 
     pem_file, client_id = get_github_secrets(vault_def)
-    pr_number = os.environ.get("PULL_NUMBER")
+    pr_number = os.environ.get("PULL_NUMBER") or os.environ.get("FORGE_FOREIGN_TESTING_PULL_NUMBER")
     org, repo = get_org_repo()
 
     abort = False
