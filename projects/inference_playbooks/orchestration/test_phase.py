@@ -57,6 +57,12 @@ def do_test():
     logger.info("=== Inference Playbooks Project Test Phase ===")
     repository_path = foreign_repository.initialize()
     logger.info("Testing inference playbooks from %s", repository_path)
+    proof_file = repository_path / "projects/inference_playbooks/orchestration/test_phase.py"
+    logger.info(
+        "Foreign checkout proof file %s:\n%s",
+        proof_file,
+        proof_file.read_text(encoding="utf-8"),
+    )
 
     with env.NextArtifactDir("inference_playbooks_test_dir"):
         test_dir = create_custom_test_metadata()
