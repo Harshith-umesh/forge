@@ -229,6 +229,8 @@ cpt-rhaiis-3.6-b200:
   __accelerator: nvidia
   __gpu_type: b200
   __clusters: [b200]
+  # FlashInfer JIT compilation must use a writable path in restricted Pods.
+  rhaiis.env_vars.FLASHINFER_CUBIN_DIR: /tmp/flashinfer
   __models:
     gpt-oss-120b/tp1:
       rhaiis.engines.vllm.args.tensor-parallel-size: 1
