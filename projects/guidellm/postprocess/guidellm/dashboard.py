@@ -175,6 +175,7 @@ def enrich_guidellm_parse_result(
     base_result: ParseResult, nodes: list[TestBaseNode]
 ) -> ParseResult:
     """Preserve dashboard metrics from raw GuideLLM files on parsed records."""
+    job_mlflow_destination = _read_job_mlflow_destination()
     nodes_by_path = {str(node.test_path): node for node in nodes}
     records: list[UnifiedResultRecord] = []
     for record in base_result.records:
@@ -184,6 +185,11 @@ def enrich_guidellm_parse_result(
             continue
         extra, curves = _extract_dashboard_metrics(node)
         metrics = {**record.metrics, **extra}
+        if job_mlflow_destination:
+            if not metrics.get("mlflow_run_id"):
+                metrics["mlflow_run_id"] = job_mlflow_destination["run_id"]
+            if not metrics.get("mlflow_experiment_id"):
+                metrics["mlflow_experiment_id"] = job_mlflow_destination["experiment_id"]
         metrics["performance_curves"] = {
             **metrics.get("performance_curves", {}),
             **curves,
@@ -198,6 +204,28 @@ def enrich_guidellm_parse_result(
             )
         )
     return ParseResult(records=records, warnings=base_result.warnings)
+
+
+def _read_job_mlflow_destination() -> dict[str, str]:
+    """Read the single Fournos job-level MLflow destination for dashboard labels."""
+    from projects.core.library import env
+
+    if not env.running_inside_fournos():
+        return {}
+
+    from projects.caliper.orchestration.export import read_mlflow_destination_marker
+
+    destination = read_mlflow_destination_marker()
+    if destination is None:
+        logger.warning(
+            "FOURNOS CI is enabled but no MLflow destination marker was found; "
+            "dashboard MLflow IDs will be empty"
+        )
+        return {}
+    return {
+        "run_id": destination.run_id,
+        "experiment_id": destination.experiment_id,
+    }
 
 
 def _extract_dashboard_metrics(node: TestBaseNode) -> tuple[dict[str, Any], dict[str, list]]:

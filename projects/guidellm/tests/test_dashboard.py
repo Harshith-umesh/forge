@@ -3,8 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from projects.caliper.engine.model import TestBaseNode
-from projects.guidellm.postprocess.guidellm.dashboard import _extract_dashboard_metrics
+from projects.caliper.engine.model import ParseResult, TestBaseNode, UnifiedResultRecord
+from projects.guidellm.postprocess.guidellm import dashboard
+from projects.guidellm.postprocess.guidellm.dashboard import (
+    _extract_dashboard_metrics,
+    enrich_guidellm_parse_result,
+)
 
 _MINIMAL_BENCHMARK = {
     "config": {"strategy": {"type_": "concurrent", "streams": 8}},
@@ -63,6 +67,43 @@ def test_tokens_from_default_benchmark_filename(tmp_path: Path) -> None:
     )
     assert extra["prompt_toks"] == 2048
     assert extra["output_toks"] == 512
+
+
+def test_dashboard_metrics_include_job_mlflow_destination(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        dashboard,
+        "_read_job_mlflow_destination",
+        lambda: {"run_id": "job-run", "experiment_id": "264"},
+    )
+
+    benchmark_file = tmp_path / "benchmarks-default.json"
+    _write_payload(
+        benchmark_file,
+        spec={"data": [{"prompt_tokens": 2048, "output_tokens": 512}]},
+    )
+    node = TestBaseNode(
+        directory=tmp_path,
+        test_labels={},
+        artifact_paths=[benchmark_file],
+        test_path=Path("benchmark"),
+    )
+    result = enrich_guidellm_parse_result(
+        ParseResult(
+            records=[
+                UnifiedResultRecord(
+                    test_base_path="benchmark",
+                    distinguishing_labels={},
+                    metrics={},
+                    run_identity={"guidellm": True},
+                )
+            ]
+        ),
+        [node],
+    )
+
+    metrics = result.records[0].metrics
+    assert metrics["mlflow_run_id"] == "job-run"
+    assert metrics["mlflow_experiment_id"] == "264"
 
 
 def test_request_type_from_config_spec(tmp_path: Path) -> None:
