@@ -249,7 +249,8 @@ def get_ci_base_link(is_raw_file=False, is_dir=False):
 
         link_path = f"pr-logs/pull/{github_org}_{github_repo}/{pull_number}/{job}/{build_id}"
 
-    test_path = f"{test_name}/artifacts"
+    hostname = os.environ["HOSTNAME"]
+    test_path = f"{hostname.replace(test_name + '-', '', 1)}/artifacts"
 
     return (
         "https://gcs.ci.openshift.org/gcs/test-platform-results-public/"
