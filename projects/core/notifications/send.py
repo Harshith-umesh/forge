@@ -44,6 +44,10 @@ def send_notification(
         logger.info("Running from a Periodic job, don't send notification to github")
         github = False
 
+    if github and not os.environ.get("PULL_NUMBER"):
+        logger.info("PULL_NUMBER is not set; don't send notification to github")
+        return True
+
     vault_def = vault_lib.get_vault_manager().get_vault(notification_vault)
     if not vault_def:
         if github:
