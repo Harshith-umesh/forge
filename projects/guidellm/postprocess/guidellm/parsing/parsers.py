@@ -17,6 +17,7 @@ from projects.caliper.engine.model import (
 )
 from projects.guidellm.postprocess.guidellm.dashboard import (
     canonical_json,
+    is_benchmarks_artifact,
     normalize_product_version,
 )
 
@@ -122,9 +123,7 @@ class GuideLLMParser:
 
     @staticmethod
     def _is_benchmarks_artifact(path: Path) -> bool:
-        return path.suffix == ".json" and (
-            path.name == "benchmarks.json" or path.name.startswith("benchmarks-")
-        )
+        return is_benchmarks_artifact(path)
 
     @staticmethod
     def _is_llmisvc_artifact(path: Path) -> bool:
