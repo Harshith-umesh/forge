@@ -8,6 +8,7 @@ from projects.core.library.postprocess import (
     update_test_labels_with_status,
     update_test_labels_with_timing,
 )
+from projects.foreign_testing.library import initialize as foreign_repository
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,8 @@ def create_custom_test_metadata():
 
 def do_test():
     logger.info("=== Inference Playbooks Project Test Phase ===")
+    repository_path = foreign_repository.initialize()
+    logger.info("Testing inference playbooks from %s", repository_path)
 
     with env.NextArtifactDir("inference_playbooks_test_dir"):
         test_dir = create_custom_test_metadata()
