@@ -314,6 +314,13 @@ def submit_job():
                 if env_var in os.environ:
                     env_dict[env_var] = os.environ[env_var]
 
+        foreign_testing_project = os.environ.get("FORGE_FOREIGN_TESTING_PROJECT")
+        if foreign_testing_project:
+            logger.info("Foreign testing project detected: %s", foreign_testing_project)
+            for env_var_name in ("PULL_PULL_SHA", "PULL_NUMBER"):
+                if env_var_name in env_dict:
+                    env_dict[f"FORGE_FOREIGN_TESTING_{env_var_name}"] = env_dict.pop(env_var_name)
+
         # Add extra environment variables
         extra_env = config.project.get_config("fournos.job.extra_env", {}, print=False)
         env_dict.update(extra_env)
@@ -321,6 +328,16 @@ def submit_job():
         # Update display name with project and args
         project_name = config.project.get_config("ci_job.project")
         job_args = config.project.get_config("ci_job.args")
+
+        if foreign_testing_project:
+            if project_name != "project_not_set":
+                job_args = [project_name, *job_args]
+            project_name = foreign_testing_project
+            config.project.set_config("ci_job.project", project_name)
+            config.project.set_config("ci_job.args", job_args)
+
+        if project_name == "project_not_set":
+            raise RuntimeError("Forge project isn't configured. Cannot submit the Fjob")
 
         # job_args is always a list, format accordingly
         args_str = " ".join(job_args)
