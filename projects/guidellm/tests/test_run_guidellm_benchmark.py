@@ -24,14 +24,12 @@ def test_expand_guidellm_runs_converts_rates_to_individual_runs() -> None:
     assert runs[0].args == [
         "--backend-type=openai_http",
         "--rate-type=concurrent",
-        "--rate=32",
         "--data=prompt_tokens=128,prefix_count=64",
         "--max-requests=320",
     ]
     assert runs[1].args == [
         "--backend-type=openai_http",
         "--rate-type=concurrent",
-        "--rate=64",
         "--data=prompt_tokens=128,prefix_count=128",
         "--max-requests=640",
     ]
@@ -51,13 +49,11 @@ def test_expand_guidellm_runs_expands_plain_rate_reference() -> None:
     assert runs[0].args == [
         "--backend-type=openai_http",
         "--rate-type=concurrent",
-        "--rate=32",
         "--max-requests=32",
     ]
     assert runs[1].args == [
         "--backend-type=openai_http",
         "--rate-type=concurrent",
-        "--rate=64",
         "--max-requests=64",
     ]
 
@@ -167,7 +163,6 @@ def test_render_guidellm_job_from_parts_keeps_plain_rates_as_single_guidellm_run
 
 def test_build_guidellm_args_renders_list_values() -> None:
     benchmark = {
-        "outputs": "json",
         "args": {
             "backend_type": "openai_http",
             "rate_type": "concurrent",
@@ -181,7 +176,6 @@ def test_build_guidellm_args_renders_list_values() -> None:
         "--rate-type=concurrent",
         "--rate=300,200,100,50,1",
         "--max-seconds=600",
-        "--outputs=json",
     ]
 
 
@@ -234,7 +228,7 @@ class TestBuildRunArgs:
         assert "--data=kind=synthetic_text,prompt_tokens=256,output_tokens=128" in args
         assert "--profile=kind=concurrent,streams=16" in args
         assert "--constraint=kind=max_duration,seconds=60" in args
-        assert "--output=kind=json,path=/results/benchmarks.json" in args
+        assert "--output=kind=json,path=/results/benchmarks-default.json" in args
 
     def test_warmup_injected_into_profile(self) -> None:
         args = self._build(
@@ -284,7 +278,7 @@ class TestBuildRunArgs:
         )
         assert not any("--outputs" in a for a in args)
         assert not any("--output-dir" in a for a in args)
-        assert "--output=kind=json,path=/results/benchmarks.json" in args
+        assert "--output=kind=json,path=/results/benchmarks-default.json" in args
 
     def test_processor_converted_to_tokenizer(self) -> None:
         args = self._build(
@@ -315,6 +309,17 @@ class TestBuildRunArgs:
         backend_arg = next(a for a in args if a.startswith("--backend="))
         assert "request_format=text_completions" in backend_arg
         assert not any("--request-type" in a for a in args)
+
+    def test_backend_arg_merged_into_backend_spec(self) -> None:
+        args = self._build(
+            "http://model:8000",
+            ["--backend=request_format=/v1/completions"],
+        )
+        backend_arg = next(a for a in args if a.startswith("--backend="))
+        assert "request_format=/v1/completions" in backend_arg
+        assert "target=http://model:8000" in backend_arg
+        # Only one --backend= arg should exist
+        assert sum(1 for a in args if a.startswith("--backend=")) == 1
 
     def test_rampup_in_no_rate_branch(self) -> None:
         args = self._build(
