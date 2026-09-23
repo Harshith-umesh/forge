@@ -653,6 +653,9 @@ def phase_vault_list_all() -> list[str]:
     """List all vaults from project config (includes both mandatory and optional)."""
     from projects.core.library import config
 
+    if not config.project:
+        raise RuntimeError("Project config not initialized ...")
+
     vault_config = config.project.get_config("vaults")
 
     # Handle both old format (list) and new format (dict with categories)
