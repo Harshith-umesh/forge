@@ -316,14 +316,11 @@ def submit_job():
 
         foreign_testing_project = os.environ.get("FORGE_FOREIGN_TESTING_PROJECT")
         if foreign_testing_project:
-            for source_name, target_name in {
-                "PULL_PULL_SHA": "FORGE_FOREIGN_TESTING_PULL_PULL_SHA",
-                "REPO_OWNER": "FORGE_FOREIGN_TESTING_REPO_OWNER",
-                "REPO_NAME": "FORGE_FOREIGN_TESTING_REPO_NAME",
-            }.items():
-                if source_name in env_dict:
-                    env_dict[target_name] = env_dict.pop(source_name)
-            env_dict.pop("PULL_NUMBER", None)
+            for env_var_name in ("PULL_PULL_SHA", "PULL_NUMBER"):
+                if env_var_name in env_dict:
+                    env_dict[f"FORGE_FOREIGN_TESTING_{env_var_name}"] = env_dict.pop(env_var_name)
+            env_dict.pop("REPO_OWNER", None)
+            env_dict.pop("REPO_NAME", None)
 
         # Add extra environment variables
         extra_env = config.project.get_config("fournos.job.extra_env", {}, print=False)
