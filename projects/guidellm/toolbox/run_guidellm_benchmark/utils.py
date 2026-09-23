@@ -124,7 +124,10 @@ def build_guidellm_args(benchmark: dict[str, object]) -> list[str]:
             guidellm_args.append(f"--{cli_key}={rendered_value}")
 
     if "rate" in benchmark and "rate" not in benchmark_args:
-        guidellm_args.append(f"--rate={benchmark['rate']}")
+        rate = benchmark["rate"]
+        if isinstance(rate, list):
+            rate = ",".join(str(r) for r in rate)
+        guidellm_args.append(f"--rate={rate}")
 
     return guidellm_args
 

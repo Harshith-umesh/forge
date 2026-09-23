@@ -179,6 +179,20 @@ def test_build_guidellm_args_renders_list_values() -> None:
     ]
 
 
+def test_build_guidellm_args_renders_top_level_rate_list() -> None:
+    benchmark = {
+        "args": {
+            "profile": "kind=concurrent,streams={rate}",
+            "data": "kind=synthetic_text,prompt_tokens=256,output_tokens=128",
+            "constraint": "kind=max_duration,seconds=120",
+        },
+        "rate": [1, 4, 8],
+    }
+
+    args = build_guidellm_args(benchmark)
+    assert "--rate=1,4,8" in args
+
+
 class TestConvertDataSpec:
     def _convert(self, spec: str) -> str:
         from projects.guidellm.toolbox.run_guidellm_benchmark.utils import _convert_data_spec
