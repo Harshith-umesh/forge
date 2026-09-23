@@ -49,13 +49,6 @@ def init(presets=None):
     config.init(Path(__file__).parent)
 
 
-def list_vaults() -> list[str]:
-    """List all vaults (includes both mandatory and optional)."""
-
-    all_vaults = vault.phase_vault_list_all()
-    return [*all_vaults, *rhoai_list_mandatory_vaults()]
-
-
 def init_vaults_for_phase(phase: str):
     """Initialize vaults for a specific CI phase, including conditional vaults."""
 
@@ -181,7 +174,8 @@ def post_cleanup(ctx) -> int:
 main.add_command(
     create_fournos_resolve_entrypoint(
         vault_list_funcs=[
-            list_vaults,
+            vault.phase_vault_list_all,
+            rhoai_list_mandatory_vaults,
             vault.phase_vault_list_all,
             caliper_export_list_vaults,
             caliper_export_list_optional_vaults,
