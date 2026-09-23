@@ -10,6 +10,7 @@ from pathlib import Path
 
 import click
 
+from projects.caliper.orchestration.export import ensure_mlflow_destination_marker
 from projects.caliper.orchestration.postprocess_outcome import TestPhaseOutcome
 from projects.core.agentic.config_review import trigger_config_review_for_ci
 from projects.core.agentic.on_failure import agent_review_on_failure
@@ -81,6 +82,7 @@ def main(ctx, preset):
         return
 
     init_vaults_for_phase(ctx.invoked_subcommand)
+    ensure_mlflow_destination_marker()
 
 
 @main.command()

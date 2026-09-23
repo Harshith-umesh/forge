@@ -8,7 +8,6 @@ from pathlib import Path
 
 import yaml
 
-from projects.caliper.engine.kpi.dataclasses import MlflowDestination
 from projects.core.library import env
 from projects.core.library.postprocess import create_test_metadata, run_and_postprocess
 from projects.rhaiis.orchestration import runtime_config
@@ -197,14 +196,6 @@ def _run_test(
     wait_guidellm_benchmark_task._retry_config["attempts"] = max(1, benchmark_timeout // 10)
 
     try:
-        from projects.caliper.orchestration.export import precreate_mlflow_run_if_configured
-
-        mlflow_destination = precreate_mlflow_run_if_configured()
-    except Exception:
-        logger.warning("MLflow run pre-creation failed; continuing", exc_info=True)
-        mlflow_destination = None
-
-    try:
         isvc_labels = {
             "opendatahub.io/dashboard": "true",
             "deployment_uuid": run_uuid,
@@ -333,7 +324,6 @@ def _run_test(
                 version=version,
                 cluster_tag=cluster_tag,
                 trtllm_config=trtllm_cfg,
-                mlflow_destination=mlflow_destination,
             )
 
         try:
@@ -400,7 +390,6 @@ def _run_workload_benchmark(
     version: str,
     cluster_tag: str,
     trtllm_config: dict | None = None,
-    mlflow_destination: dict[str, str] | None = None,
 ) -> None:
     """Run benchmark and post-processing for a single workload.
 
@@ -435,7 +424,6 @@ def _run_workload_benchmark(
             accelerator_chip=gpu_type.upper(),
             run_uuid=run_uuid,
             trtllm_config=trtllm_config,
-            mlflow_destination=mlflow_destination,
         )
 
         if not run_benchmark:
@@ -493,13 +481,12 @@ def _create_test_labels(
     accelerator_chip: str = "",
     run_uuid: str = "",
     trtllm_config: dict | None = None,
-    mlflow_destination: dict[str, str] | None = None,
 ) -> None:
     _, image_tag = runtime_config.split_image_tag(serving_image) if serving_image else ("", "")
     parts = [f"{k}: {v}" for k, v in engine_args.items()]
     for key, value in (trtllm_config or {}).items():
         formatted_value = (
-            json.dumps(value, separators=(",", ":")) if isinstance(value, (dict, list)) else value
+            json.dumps(value, separators=(",", ":")) if isinstance(value, dict | list) else value
         )
         parts.append(f"trtllm.{key}: {formatted_value}")
     runtime_args = "; ".join(parts)
@@ -525,9 +512,6 @@ def _create_test_labels(
     create_test_metadata(
         env.ARTIFACT_DIR,
         labels,
-        mlflow_destination=MlflowDestination.from_dict(mlflow_destination)
-        if mlflow_destination
-        else None,
     )
     logger.info("Created test labels: %s", labels)
 

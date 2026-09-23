@@ -9,9 +9,7 @@ from typing import Any
 
 import yaml
 
-from projects.caliper.engine.kpi.dataclasses import (
-    MlflowDestination,
-)
+from projects.caliper.engine.kpi.dataclasses import TimingData
 from projects.cluster.library.prom.collection import (
     capture_prometheus,
     prepare_user_workload_monitoring,
@@ -195,9 +193,7 @@ def get_iso_timestamp() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
-def create_test_labels(
-    mlflow_destination: dict[str, str] | None = None,
-) -> None:
+def create_test_labels() -> None:
     """Create caliper metadata file with model name, guidellm configuration, and test start time."""
 
     model_name = runtime_config.get_model_name()
@@ -215,13 +211,14 @@ def create_test_labels(
     # Extract kpi_labels from config
     kpi_labels = extract_kpi_labels_from_config()
 
+    timing_data = TimingData()
+    timing_data.set_phase("test", get_iso_timestamp())
+
     create_test_metadata(
         env.ARTIFACT_DIR,
         labels,
         kpi_labels=kpi_labels if kpi_labels else None,
-        mlflow_destination=MlflowDestination.from_dict(mlflow_destination)
-        if mlflow_destination
-        else None,
+        timing=timing_data,
     )
     logger.info("Created test labels with start time: %s", labels)
 
@@ -374,15 +371,6 @@ def do_test() -> int:
         # accidentally enabling UWM, so it must run before prepare gets a chance to.
         validate_user_workload_monitoring()
         prepare_user_workload_monitoring(during="test")
-
-    try:
-        from projects.caliper.orchestration.export import precreate_mlflow_run_if_configured
-
-        mlflow_destination = precreate_mlflow_run_if_configured()
-    except Exception:
-        logger.error("MLflow run pre-creation failed; continuing", exc_info=True)
-        mlflow_destination = None
-
     endpoint_url: str | None = None
     primary_exc: tuple[type[BaseException], BaseException, Any] | None = None
     finalizer_exc: tuple[type[BaseException], BaseException, Any] | None = None
@@ -391,7 +379,7 @@ def do_test() -> int:
     test_dir = env.ARTIFACT_DIR
     try:
         # Create test labels with actual model and profile information
-        create_test_labels(mlflow_destination=mlflow_destination)
+        create_test_labels()
         update_test_labels_with_timing(test_dir, "test", "start")
 
         # Generate the LLMInferenceService name before deployment
