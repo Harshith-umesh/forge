@@ -38,7 +38,7 @@ from projects.core.library.status_to_html import convert_status_yaml_to_html
 logger = logging.getLogger(__name__)
 
 
-def write_test_labels(
+def create_test_metadata(
     directory: Path,
     labels: dict[str, str],
     *,
@@ -68,7 +68,7 @@ def write_test_labels(
         Path to the created caliper metadata file file
 
     Example:
-        write_test_labels(
+        create_test_metadata(
             test_dir,
             {
                 "model": "llama-3",

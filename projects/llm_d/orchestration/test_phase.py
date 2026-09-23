@@ -22,7 +22,7 @@ from projects.core.dsl import shell
 from projects.core.dsl.utils import slugify_identifier
 from projects.core.dsl.utils.k8s import oc
 from projects.core.library import config, env
-from projects.core.library.postprocess import run_and_postprocess, write_test_labels
+from projects.core.library.postprocess import create_test_metadata, run_and_postprocess
 from projects.core.library.run import SignalInterrupt
 from projects.core.orchestration.utils.k8s import ensure_namespace
 from projects.guidellm.library import benchconf as benchconf_lib  # noqa: F401
@@ -214,7 +214,7 @@ def create_test_labels(
     timing_data = TimingData()
     timing_data.set_phase("test", get_iso_timestamp())  # Start time only
 
-    write_test_labels(
+    create_test_metadata(
         env.ARTIFACT_DIR,
         labels,
         kpi_labels=kpi_labels if kpi_labels else None,
