@@ -38,8 +38,8 @@ def _write_payload(path: Path, *, spec: dict, args: dict | None = None) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def _extract(tmp_path: Path, **kwargs) -> dict:
-    bench_file = tmp_path / "benchmarks.json"
+def _extract(tmp_path: Path, *, filename: str = "benchmarks.json", **kwargs) -> dict:
+    bench_file = tmp_path / filename
     _write_payload(bench_file, **kwargs)
     node = TestBaseNode(directory=tmp_path, test_labels={}, artifact_paths=[bench_file])
     extra, _ = _extract_dashboard_metrics(node)
@@ -49,6 +49,16 @@ def _extract(tmp_path: Path, **kwargs) -> dict:
 def test_tokens_from_config_spec(tmp_path: Path) -> None:
     extra = _extract(
         tmp_path,
+        spec={"data": [{"prompt_tokens": 2048, "output_tokens": 512}]},
+    )
+    assert extra["prompt_toks"] == 2048
+    assert extra["output_toks"] == 512
+
+
+def test_tokens_from_default_benchmark_filename(tmp_path: Path) -> None:
+    extra = _extract(
+        tmp_path,
+        filename="benchmarks-default.json",
         spec={"data": [{"prompt_tokens": 2048, "output_tokens": 512}]},
     )
     assert extra["prompt_toks"] == 2048

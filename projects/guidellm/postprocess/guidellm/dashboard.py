@@ -101,6 +101,13 @@ DASHBOARD_METADATA_LABEL_KEYS = frozenset(
 )
 
 
+def is_benchmarks_artifact(path: Path) -> bool:
+    """Return whether ``path`` is a GuideLLM benchmark result artifact."""
+    return path.suffix == ".json" and (
+        path.name == "benchmarks.json" or path.name.startswith("benchmarks-")
+    )
+
+
 def canonical_json(value: Any) -> str:
     """Serialize structured metadata deterministically for labels and CSVs."""
     return json.dumps(value, separators=(",", ":"), sort_keys=True)
@@ -194,12 +201,7 @@ def enrich_guidellm_parse_result(
 
 
 def _extract_dashboard_metrics(node: TestBaseNode) -> tuple[dict[str, Any], dict[str, list]]:
-    files = sorted(
-        path
-        for path in node.artifact_paths
-        if path.name == "benchmarks.json"
-        or (path.name.startswith("benchmarks-rate-") and path.suffix == ".json")
-    )
+    files = sorted(path for path in node.artifact_paths if is_benchmarks_artifact(path))
     benchmarks: list[dict[str, Any]] = []
     metadata: dict[str, Any] = {}
     args: dict[str, Any] = {}
@@ -207,7 +209,8 @@ def _extract_dashboard_metrics(node: TestBaseNode) -> tuple[dict[str, Any], dict
     for path in files:
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as error:
+            logger.warning("Failed to read GuideLLM benchmark artifact %s: %s", path, error)
             continue
         benchmarks.extend(payload.get("benchmarks", []))
         metadata = metadata or payload.get("metadata", {})
