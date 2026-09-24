@@ -36,11 +36,11 @@ def send_notification(
         bool: False if any notification failed, True if all succeeded
     """
 
-    if not github_api:
+    if github and not github_api:
         logger.info("Github API not available, don't send notification to github")
         github = False
 
-    if os.environ.get("JOB_TYPE") == "periodic":
+    if github and os.environ.get("JOB_TYPE") == "periodic":
         logger.info("Running from a Periodic job, don't send notification to github")
         github = False
 
@@ -51,6 +51,9 @@ def send_notification(
             "PULL_NUMBER/FORGE_FOREIGN_TESTING_PULL_NUMBER is not set; don't send notification to github"
         )
         github = False
+
+    if not github:
+        return True
 
     vault_def = vault_lib.get_vault_manager().get_vault(notification_vault)
     if not vault_def:
