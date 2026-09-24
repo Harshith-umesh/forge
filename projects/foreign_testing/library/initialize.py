@@ -4,18 +4,18 @@ import pathlib
 import shlex
 import tempfile
 
-from projects.core.library import run
+from projects.core.library import config, run
 
 logger = logging.getLogger(__name__)
 
-REPOSITORY_PATH_ENV = "FORGE_FOREIGN_TESTING_REPO_PATH"
-PULL_SHA_ENV = "FORGE_FOREIGN_TESTING_PULL_PULL_SHA"
+FORGE_FOREIGN_TESTING_REPO_PATH = "FORGE_FOREIGN_TESTING_REPO_PATH"
+FORGE_FOREIGN_TESTING_PULL_PULL_SHA = "FORGE_FOREIGN_TESTING_PULL_PULL_SHA"
 
 
 def get_repository_path():
-    repository_path = os.environ.get(REPOSITORY_PATH_ENV)
+    repository_path = os.environ.get(FORGE_FOREIGN_TESTING_REPO_PATH)
     if not repository_path:
-        raise ValueError(f"{REPOSITORY_PATH_ENV} must be set")
+        raise ValueError(f"{FORGE_FOREIGN_TESTING_REPO_PATH} must be set")
 
     path = pathlib.Path(repository_path)
     if not path.is_dir():
@@ -28,7 +28,7 @@ def clone_repository(*, repo_owner, repo_name, pull_pull_sha):
     values = {
         "REPO_OWNER": repo_owner,
         "REPO_NAME": repo_name,
-        PULL_SHA_ENV: pull_pull_sha,
+        FORGE_FOREIGN_TESTING_PULL_PULL_SHA: pull_pull_sha,
     }
     missing = [name for name, value in values.items() if not value]
     if missing:
@@ -42,21 +42,19 @@ def clone_repository(*, repo_owner, repo_name, pull_pull_sha):
     run.run(f"git clone {repository_url} {quoted_path}")
     run.run(f"git -C {quoted_path} fetch --quiet origin {commit}")
     run.run(f"git -C {quoted_path} reset --hard FETCH_HEAD")
-    run.run(f"git -C {quoted_path} show FETCH_HEAD")
+    run.run(f"git -C {quoted_path} show --quiet FETCH_HEAD")
 
-    os.environ[REPOSITORY_PATH_ENV] = str(repository_path)
+    os.environ[FORGE_FOREIGN_TESTING_REPO_PATH] = str(repository_path)
     logger.info("Foreign repository checked out at %s", repository_path)
     return repository_path
 
 
 def initialize():
-    if os.environ.get(REPOSITORY_PATH_ENV):
+    if os.environ.get(FORGE_FOREIGN_TESTING_REPO_PATH):
         return get_repository_path()
 
-    from projects.core.library import config
-
     repository_config = config.project.get_config("foreign_testing.repo", print=False)
-    pull_pull_sha = os.environ.get(PULL_SHA_ENV)
+    pull_pull_sha = os.environ.get(FORGE_FOREIGN_TESTING_PULL_PULL_SHA)
     if not pull_pull_sha:
         if repository_config["pr"] is not None:
             pull_pull_sha = f"refs/pull/{repository_config['pr']}/head"
