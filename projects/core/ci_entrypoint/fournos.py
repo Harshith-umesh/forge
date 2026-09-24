@@ -55,10 +55,74 @@ def check_fjob_resolver_error():
         .get("error")
     )
 
+    resolver_status = (
+        fjob_data.get("status", {}).get("engineStatus", {}).get("forge", {}).get("resolver", {})
+    )
+    resolver_pod = resolver_status.get("pod")
+    logs_captured = resolver_status.get("logsCaptured", False)
+
+    if resolver_pod and not logs_captured:
+        logger.info(f"Capturing logs from resolver pod: {resolver_pod}")
+        _capture_resolver_pod_logs(job_name, namespace, resolver_pod)
+
     if resolver_error:
         raise RuntimeError(f"FournosJob resolver failed: {resolver_error}")
 
     logger.info("FournosJob resolver status: OK (no errors)")
+
+
+def _capture_resolver_pod_logs(job_name: str, namespace: str, pod_name: str) -> None:
+    """Fetch resolver pod logs, save to metadata dir, and mark as captured on the fjob."""
+
+    import json
+
+    from projects.core.library import run
+
+    # Fetch the logs
+    try:
+        result = run.run(
+            f"oc logs {pod_name} -n {namespace}",
+            capture_stdout=True,
+            check=False,
+        )
+    except Exception as e:
+        logger.warning(f"Could not fetch resolver pod logs: {e}")
+        return
+
+    resolver_logs = result.stdout or ""
+
+    # Save to metadata dir
+    artifact_dir = os.environ.get("ARTIFACT_DIR")
+    if artifact_dir:
+        from .prepare_ci import CI_METADATA_DIRNAME
+
+        metadata_dir = Path(artifact_dir) / CI_METADATA_DIRNAME
+        metadata_dir.mkdir(parents=True, exist_ok=True)
+        log_file = metadata_dir / "resolver_pod.log"
+        log_file.write_text(resolver_logs)
+        logger.info(f"Saved resolver pod logs to {log_file}")
+
+    # Mark logs as captured on the fjob status
+    patch_data = {
+        "status": {
+            "engineStatus": {
+                "forge": {
+                    "resolver": {
+                        "logsCaptured": True,
+                    }
+                }
+            }
+        }
+    }
+    patch_json = json.dumps(patch_data)
+    try:
+        run.run(
+            f"oc patch fjob/{job_name} -n {namespace} --type=merge --subresource=status -p '{patch_json}'",
+            check=True,
+        )
+        logger.info(f"Marked resolver logs as captured on fjob/{job_name}")
+    except Exception as e:
+        logger.warning(f"Could not mark resolver logs as captured: {e}")
 
 
 def process_fjob_environment(fjob_spec):
