@@ -18,6 +18,49 @@ logger = logging.getLogger(__name__)
 FJOB_FORGE_ENGINE_NAME = "forge"
 
 
+def check_fjob_resolver_error():
+    """Fetch the FournosJob from the cluster and fail if a resolver error is set."""
+
+    import json
+
+    from projects.core.library import run
+
+    job_name = os.environ.get("FJOB_NAME")
+    namespace = os.environ.get("FOURNOS_WORKLOAD_NAMESPACE")
+
+    if not job_name or not namespace:
+        logger.info(
+            "FJOB_NAME or FOURNOS_WORKLOAD_NAMESPACE not set, skipping resolver error check"
+        )
+        return
+
+    logger.info(f"Checking FournosJob resolver status for fjob/{job_name} in {namespace}")
+
+    try:
+        result = run.run(
+            f"oc get fjob/{job_name} -n {namespace} -o json",
+            capture_stdout=True,
+            check=True,
+        )
+        fjob_data = json.loads(result.stdout)
+    except Exception as e:
+        logger.warning(f"Could not fetch FournosJob for resolver error check: {e}")
+        return
+
+    resolver_error = (
+        fjob_data.get("status", {})
+        .get("engineStatus", {})
+        .get("forge", {})
+        .get("resolver", {})
+        .get("error")
+    )
+
+    if resolver_error:
+        raise RuntimeError(f"FournosJob resolver failed: {resolver_error}")
+
+    logger.info("FournosJob resolver status: OK (no errors)")
+
+
 def process_fjob_environment(fjob_spec):
     """
     Process FOURNOS environment variables from FournosJob YAML.
@@ -135,6 +178,9 @@ def parse_and_save_pr_arguments_fournos():
     metadata_dir = artifact_path / CI_METADATA_DIRNAME
     # Create CI metadata directory
     metadata_dir.mkdir(parents=True, exist_ok=True)
+
+    # Check for resolver errors before proceeding
+    check_fjob_resolver_error()
 
     # Load FournosJob YAML
     fournos_fjob = metadata_dir.parent / "fournos_fjob.yaml"
