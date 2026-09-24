@@ -109,18 +109,22 @@ def update_fournos_job(job_name: str, namespace: str, fjob_obj: dict) -> None:
         raise RuntimeError(f"Failed to apply updated FournosJob: {e}") from e
 
 
-def _patch_resolver_error(job_name: str, namespace: str, error_message: str) -> None:
-    """Patch the FournosJob status with a resolver error (best-effort)."""
+def _patch_resolver_status(job_name: str, namespace: str, error_message: str | None = None) -> None:
+    """Patch the FournosJob status with resolver pod name and optional error (best-effort)."""
 
     import json
+
+    resolver_status = {
+        "pod": os.environ.get("HOSTNAME", "unknown"),
+    }
+    if error_message:
+        resolver_status["error"] = error_message
 
     patch_data = {
         "status": {
             "engineStatus": {
                 "forge": {
-                    "resolver": {
-                        "error": error_message,
-                    }
+                    "resolver": resolver_status,
                 }
             }
         }
@@ -131,9 +135,9 @@ def _patch_resolver_error(job_name: str, namespace: str, error_message: str) -> 
 
     try:
         run.run(patch_cmd, check=True)
-        logger.info(f"Set resolver error status on fjob/{job_name}")
+        logger.info(f"Patched resolver status on fjob/{job_name}")
     except Exception as e:
-        logger.error(f"Failed to set resolver error status: {e}")
+        logger.error(f"Failed to patch resolver status: {e}")
 
 
 def _execute_fournos_resolve(
@@ -250,9 +254,8 @@ def _execute_fournos_resolve(
         logger.error(f"Failed to update FournosJob: {e}")
         errors.append(f"Failed to update FournosJob: {e}")
 
-    if errors:
-        error_message = "; ".join(errors)
-        _patch_resolver_error(job_name, namespace, error_message)
+    error_message = "; ".join(errors) if errors else None
+    _patch_resolver_status(job_name, namespace, error_message)
 
     return 0
 
