@@ -645,7 +645,7 @@ def init(orchestration_dir, *, apply_config_overrides=True, apply_cluster_config
     lenient_presets = False
     try:
         ctx = click.get_current_context()
-        lenient_presets = ctx.info_name == "resolve-fournos-config"
+        lenient_presets = ctx.invoked_subcommand == "resolve-fournos-config"
     except (ImportError, RuntimeError):
         # Fallback to sys.argv when Click context is not available
         lenient_presets = "resolve-fournos-config" in sys.argv
