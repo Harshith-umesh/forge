@@ -167,24 +167,40 @@ def prepare():
         prepare_ci.setup_dual_output()
 
 
-def find_project_directory(project_name: str) -> Path | None:
+def find_project_directory(project_name: str) -> tuple[Path | None, list[str]]:
     """
     Find the directory for the specified project.
 
-    Args:
-        project_name: Name of the project to find
+    Supports exact match, dash/underscore normalization, and
+    prefix-per-segment abbreviations (e.g. "l-d" matches "llm_d").
 
     Returns:
-        Path to project directory if found, None otherwise
+        (project_dir, candidates) — project_dir is set when exactly one
+        match is found; candidates lists all matching directory names
+        (useful for reporting ambiguity).
     """
-    # Look in the projects directory
     projects_dir = FORGE_HOME / "projects"
     project_dir = projects_dir / project_name
 
     if project_dir.exists() and project_dir.is_dir():
-        return project_dir
+        return project_dir, [project_name]
 
-    return None
+    # Fuzzy match: normalize dashes/underscores, then prefix-per-segment
+    input_segs = project_name.replace("-", "_").split("_")
+    matches = []
+    for proj_dir in projects_dir.iterdir():
+        if not proj_dir.is_dir():
+            continue
+        proj_segs = proj_dir.name.replace("-", "_").split("_")
+        if len(input_segs) != len(proj_segs):
+            continue
+        if all(ps.startswith(is_) for is_, ps in zip(input_segs, proj_segs, strict=True)):
+            matches.append(proj_dir)
+
+    if len(matches) == 1:
+        return matches[0], [matches[0].name]
+
+    return None, sorted(m.name for m in matches)
 
 
 def find_script(project_dir: Path, operation: str, *, use_cli: bool = False) -> Path | None:
@@ -318,17 +334,25 @@ def execute_project_operation(
         logger.warning(f"{mode_name} preparation not enabled, skipping preparation")
 
     # Find project directory
-    project_dir = find_project_directory(project)
+    project_dir, candidates = find_project_directory(project)
     if not project_dir:
-        click.echo(click.style(f"❌ ERROR: Project '{project}' not found.", fg="red"), err=True)
-
-        available_projects = get_available_projects(use_cli=use_cli)
-        if available_projects:
-            click.echo("\n📂 Available projects:")
-            for proj in available_projects:
+        if candidates:
+            click.echo(
+                click.style(f"❌ ERROR: Project '{project}' is ambiguous.", fg="red"), err=True
+            )
+            click.echo("\n📂 Matching projects:")
+            for proj in candidates:
                 click.echo(f"   • {proj}")
         else:
-            click.echo("📂 No projects found in projects/ directory")
+            click.echo(click.style(f"❌ ERROR: Project '{project}' not found.", fg="red"), err=True)
+
+            available_projects = get_available_projects(use_cli=use_cli)
+            if available_projects:
+                click.echo("\n📂 Available projects:")
+                for proj in available_projects:
+                    click.echo(f"   • {proj}")
+            else:
+                click.echo("📂 No projects found in projects/ directory")
 
         sys.exit(1)
 
@@ -501,9 +525,15 @@ def show_project_operations(project: str, *, use_cli: bool = False):
     click.echo(f"🔧 Available operations for project '{project}':")
 
     # Find project directory
-    project_dir = find_project_directory(project)
+    project_dir, candidates = find_project_directory(project)
     if not project_dir:
-        click.echo(click.style(f"❌ ERROR: Project '{project}' not found.", fg="red"), err=True)
+        if candidates:
+            click.echo(
+                click.style(f"❌ ERROR: Project '{project}' is ambiguous.", fg="red"), err=True
+            )
+            click.echo("Matching projects: " + ", ".join(candidates))
+        else:
+            click.echo(click.style(f"❌ ERROR: Project '{project}' not found.", fg="red"), err=True)
         return
 
     if use_cli:
