@@ -8,9 +8,9 @@ from typing import Any
 
 from projects.caliper.engine.kpi import KpiCatalogEntry, KpiComputationStatus, KpiRecord
 from projects.caliper.engine.model import (
+    BaseTestNode,
     ParseResult,
     PostProcessingPlugin,
-    TestBaseNode,
     UnifiedRunModel,
 )
 from projects.llm_d.postprocess.llm_d.parsing.kpis import GuideLLMKpiHandler
@@ -97,7 +97,7 @@ class GuideLLMPlugin(PostProcessingPlugin):
         self.kpi_handler = GuideLLMKpiHandler()
         self.ai_evaluator = GuideLLMAIEvaluator()
 
-    def parse(self, nodes: list[TestBaseNode]) -> ParseResult:
+    def parse(self, nodes: list[BaseTestNode]) -> ParseResult:
         """Parse test nodes using the GuideLLM parser."""
         return self.parser.parse(nodes)
 

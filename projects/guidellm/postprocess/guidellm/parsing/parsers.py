@@ -11,8 +11,8 @@ import jsonpath_ng
 import yaml
 
 from projects.caliper.engine.model import (
+    BaseTestNode,
     ParseResult,
-    TestBaseNode,
     UnifiedResultRecord,
 )
 from projects.guidellm.postprocess.guidellm.dashboard import (
@@ -26,7 +26,7 @@ from .models import GuideLLMBenchmark, GuideLLMConfiguration
 logger = logging.getLogger(__name__)
 
 
-def _labels_from_node(node: TestBaseNode) -> dict[str, Any]:
+def _labels_from_node(node: BaseTestNode) -> dict[str, Any]:
     """Extract labels from a test node."""
     raw = node.test_labels
     inner = raw.get("labels")
@@ -37,7 +37,7 @@ def _labels_from_node(node: TestBaseNode) -> dict[str, Any]:
     return {"facet": "default"}
 
 
-def _kpi_labels_from_node(node: TestBaseNode) -> dict[str, Any]:
+def _kpi_labels_from_node(node: BaseTestNode) -> dict[str, Any]:
     """Extract kpi_labels from a test node."""
     raw = node.test_labels
     kpi_labels = raw.get("kpi_labels")
@@ -619,7 +619,7 @@ class GuideLLMParser:
 
         return metrics
 
-    def parse(self, nodes: list[TestBaseNode]) -> ParseResult:
+    def parse(self, nodes: list[BaseTestNode]) -> ParseResult:
         """
         Parse test nodes containing GuideLLM benchmarks.json files.
 
