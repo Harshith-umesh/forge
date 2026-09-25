@@ -16,8 +16,8 @@ from projects.caliper.engine.kpi import (
     KpiRecord,
 )
 from projects.caliper.engine.model import (
+    BaseTestNode,
     ParseResult,
-    TestBaseNode,
     UnifiedResultRecord,
     UnifiedRunModel,
 )
@@ -172,7 +172,7 @@ def _milliseconds_to_seconds(value: Any) -> Any:
 
 
 def enrich_guidellm_parse_result(
-    base_result: ParseResult, nodes: list[TestBaseNode]
+    base_result: ParseResult, nodes: list[BaseTestNode]
 ) -> ParseResult:
     """Preserve dashboard metrics from raw GuideLLM files on parsed records."""
     job_mlflow_destination = _read_job_mlflow_destination()
@@ -228,7 +228,7 @@ def _read_job_mlflow_destination() -> dict[str, str]:
     }
 
 
-def _extract_dashboard_metrics(node: TestBaseNode) -> tuple[dict[str, Any], dict[str, list]]:
+def _extract_dashboard_metrics(node: BaseTestNode) -> tuple[dict[str, Any], dict[str, list]]:
     files = sorted(path for path in node.artifact_paths if is_benchmarks_artifact(path))
     benchmarks: list[dict[str, Any]] = []
     metadata: dict[str, Any] = {}

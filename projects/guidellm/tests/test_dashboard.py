@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from projects.caliper.engine.model import ParseResult, TestBaseNode, UnifiedResultRecord
+from projects.caliper.engine.model import BaseTestNode, ParseResult, UnifiedResultRecord
 from projects.guidellm.postprocess.guidellm import dashboard
 from projects.guidellm.postprocess.guidellm.dashboard import (
     _extract_dashboard_metrics,
@@ -45,7 +45,7 @@ def _write_payload(path: Path, *, spec: dict, args: dict | None = None) -> None:
 def _extract(tmp_path: Path, *, filename: str = "benchmarks.json", **kwargs) -> dict:
     bench_file = tmp_path / filename
     _write_payload(bench_file, **kwargs)
-    node = TestBaseNode(directory=tmp_path, test_labels={}, artifact_paths=[bench_file])
+    node = BaseTestNode(directory=tmp_path, test_labels={}, artifact_paths=[bench_file])
     extra, _ = _extract_dashboard_metrics(node)
     return extra
 
@@ -81,7 +81,7 @@ def test_dashboard_metrics_include_job_mlflow_destination(tmp_path: Path, monkey
         benchmark_file,
         spec={"data": [{"prompt_tokens": 2048, "output_tokens": 512}]},
     )
-    node = TestBaseNode(
+    node = BaseTestNode(
         directory=tmp_path,
         test_labels={},
         artifact_paths=[benchmark_file],
