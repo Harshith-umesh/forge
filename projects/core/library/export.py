@@ -374,7 +374,7 @@ def caliper_export_entrypoint(
             )
 
             # Check for job shutdown/abort status and add to mock status
-            shutdown_status = _check_job_shutdown_status(artifact_dir)
+            shutdown_status = _check_job_shutdown_status()
             if shutdown_status:
                 status.job_shutdown = JobShutdown.from_dict(shutdown_status)
                 logger.info(f"Added job shutdown status to dry run mock status: {shutdown_status}")
@@ -386,7 +386,7 @@ def caliper_export_entrypoint(
             )
 
             # Check for job shutdown/abort status and add to main export status
-            shutdown_status = _check_job_shutdown_status(artifact_dir)
+            shutdown_status = _check_job_shutdown_status()
             if shutdown_status:
                 status.job_shutdown = JobShutdown.from_dict(shutdown_status)
                 logger.info(f"Added job shutdown status to main export status: {shutdown_status}")
