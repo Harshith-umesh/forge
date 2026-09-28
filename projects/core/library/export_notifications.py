@@ -1312,18 +1312,27 @@ def _process_step_details(step_dir: Path, mlflow_run_url: str | None = None) -> 
     return step_details
 
 
-def _check_job_shutdown_status(artifact_dir: Path) -> dict[str, Any] | None:
+def _check_job_shutdown_status(artifact_dir: Path | None = None) -> dict[str, Any] | None:
     """Check if the job has been aborted via spec.shutdown field."""
     try:
-        metadata_dir = ci_lib.get_ci_metadata_dir(artifact_dir, any_level=True)
+        metadata_dir = (
+            ci_lib.get_ci_metadata_dir(artifact_dir, any_level=True)
+            if artifact_dir
+            else ci_lib.get_ci_metadata_dir_location()
+        )
+
         fournos_fjob_path = metadata_dir / "fournos_fjob.yaml"
+        logger.info(f"Checking job shutdown status from {fournos_fjob_path}")
         if not fournos_fjob_path.exists():
+            logger.info(f"fournos_fjob.yaml not found at {fournos_fjob_path}")
             return None
 
         with open(fournos_fjob_path, encoding="utf-8") as f:
             fjob_data = yaml.safe_load(f)
 
-        shutdown_value = fjob_data.get("spec", {}).get("shutdown")
+        spec = fjob_data.get("spec", {})
+        shutdown_value = spec.get("shutdown")
+        logger.info(f"spec keys: {list(spec.keys())}, shutdown_value: {shutdown_value!r}")
         if shutdown_value:
             return {
                 "shutdown_detected": True,

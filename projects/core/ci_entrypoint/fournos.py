@@ -36,39 +36,48 @@ def check_fjob_resolver_error():
 
     logger.info(f"Checking FournosJob resolver status for fjob/{job_name} in {namespace}")
 
+    # Unset KUBECONFIG to use the pod SA access (fjob lives on the Fournos cluster)
+    original_kubeconfig = os.environ.get("KUBECONFIG")
+    if "KUBECONFIG" in os.environ:
+        del os.environ["KUBECONFIG"]
+
     try:
-        result = run.run(
-            f"oc get fjob/{job_name} -n {namespace} -o json",
-            capture_stdout=True,
-            check=True,
+        try:
+            result = run.run(
+                f"oc get fjob/{job_name} -n {namespace} -o json",
+                capture_stdout=True,
+                check=True,
+            )
+            fjob_data = json.loads(result.stdout)
+        except Exception as e:
+            logger.warning(f"Could not fetch FournosJob for resolver error check: {e}")
+            return
+
+        resolver_error = (
+            fjob_data.get("status", {})
+            .get("engineStatus", {})
+            .get("forge", {})
+            .get("resolver", {})
+            .get("error")
         )
-        fjob_data = json.loads(result.stdout)
-    except Exception as e:
-        logger.warning(f"Could not fetch FournosJob for resolver error check: {e}")
-        return
 
-    resolver_error = (
-        fjob_data.get("status", {})
-        .get("engineStatus", {})
-        .get("forge", {})
-        .get("resolver", {})
-        .get("error")
-    )
+        resolver_status = (
+            fjob_data.get("status", {}).get("engineStatus", {}).get("forge", {}).get("resolver", {})
+        )
+        resolver_pod = resolver_status.get("pod")
+        logs_captured = resolver_status.get("logsCaptured", False)
 
-    resolver_status = (
-        fjob_data.get("status", {}).get("engineStatus", {}).get("forge", {}).get("resolver", {})
-    )
-    resolver_pod = resolver_status.get("pod")
-    logs_captured = resolver_status.get("logsCaptured", False)
+        if resolver_pod and not logs_captured:
+            logger.info(f"Capturing logs from resolver pod: {resolver_pod}")
+            _capture_resolver_pod_logs(job_name, namespace, resolver_pod)
 
-    if resolver_pod and not logs_captured:
-        logger.info(f"Capturing logs from resolver pod: {resolver_pod}")
-        _capture_resolver_pod_logs(job_name, namespace, resolver_pod)
+        if resolver_error:
+            raise RuntimeError(f"FournosJob resolver failed: {resolver_error}")
 
-    if resolver_error:
-        raise RuntimeError(f"FournosJob resolver failed: {resolver_error}")
-
-    logger.info("FournosJob resolver status: OK (no errors)")
+        logger.info("FournosJob resolver status: OK (no errors)")
+    finally:
+        if original_kubeconfig is not None:
+            os.environ["KUBECONFIG"] = original_kubeconfig
 
 
 def _capture_resolver_pod_logs(job_name: str, namespace: str, pod_name: str) -> None:
@@ -180,24 +189,23 @@ def transform_fournos_config_to_variable_overrides(fjob: dict) -> dict:
 
     fjob_engine = fjob_spec.get("executionEngine")
     forge_config = fjob_engine.get(FJOB_FORGE_ENGINE_NAME)
-    if forge_config:
-        # Process forge configuration
-        # Transform project -> project.name
-        if "project" in forge_config:
-            variable_overrides["project.name"] = forge_config["project"]
-
-        # Transform args -> project.args
-        if "args" in forge_config:
-            variable_overrides["project.args"] = forge_config["args"]
-
-        # Add all configOverrides entries directly (flatten them)
-        config_overrides = forge_config.get("configOverrides", {})
-        variable_overrides.update(config_overrides)
-
-    else:
+    if not forge_config:
         raise ValueError(
             f"Forge received an invalid fjob: spec.executionEngine.{FJOB_FORGE_ENGINE_NAME} not defined. Got {', '.join(fjob_engine.keys())}."
         )
+
+    # Process forge configuration
+    # Transform project -> project.name
+    if "project" in forge_config:
+        variable_overrides["project.name"] = forge_config["project"]
+
+    # Transform args -> project.args
+    if "args" in forge_config:
+        variable_overrides["project.args"] = forge_config["args"]
+
+    # Add all configOverrides entries directly (flatten them)
+    config_overrides = forge_config.get("configOverrides", {})
+    variable_overrides.update(config_overrides)
 
     # Add ci_job mappings from spec
     if "exclusive" in fjob_spec:

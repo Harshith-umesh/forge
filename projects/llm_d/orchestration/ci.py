@@ -5,7 +5,9 @@ LLM-D Project CI Operations
 """
 
 import logging
+import signal
 import types
+from datetime import datetime
 from pathlib import Path
 
 import click
@@ -43,6 +45,8 @@ def init(presets=None):
     env.init()
     run.init()
 
+    run.register_signal_callback(_signal_callback)
+
     # Set presets configuration if provided
     if presets:
         config.write_variables_override(presets=presets)
@@ -58,6 +62,23 @@ def init_vaults_for_phase(phase: str):
         extra_mandatory.extend(rhoai_list_mandatory_vaults())
 
     vault.phase_vault_init(phase, extra_mandatory=(extra_mandatory or None))
+
+
+def _signal_callback(sig, frame, log_file):
+    env.reset_artifact_dir()
+
+    sig_name = signal.Signals(sig).name
+    logger.info(f"Signal callback: received {sig_name}")
+    if not log_file:
+        return
+
+    module_name = (
+        Path(__file__).relative_to(env.FORGE_HOME).with_suffix("").as_posix().replace("/", ".")
+    )
+    with log_file.open("a") as f:
+        f.write(
+            f"{datetime.now()}: {module_name}.{_signal_callback.__qualname__} {sig_name} handler\n"
+        )
 
 
 @click.group(cls=ci_lib.HelpfulGroup)

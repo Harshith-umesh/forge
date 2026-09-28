@@ -1,7 +1,6 @@
 import json
 import logging
 import pathlib
-import signal
 import time
 from datetime import UTC, datetime
 
@@ -93,28 +92,6 @@ def seed_skeleton_caliper_artifacts_with_data(
 
     logger.info("Seeded Caliper demo tree under %s with complete timing data", demo_dir)
     return demo_dir
-
-
-def _signal_handler_sigint(sig, frame):
-    """Sample SIGINT signal handler for skeleton project."""
-    env.reset_artifact_dir()
-    # Sample handler - does nothing else
-
-
-def _signal_handler_sigterm(sig, frame):
-    """Sample SIGTERM signal handler for skeleton project."""
-    env.reset_artifact_dir()
-    # Sample handler - does nothing else
-
-
-def _setup_sample_signal_handlers():
-    """Set up sample signal handlers for demonstration."""
-    try:
-        signal.signal(signal.SIGINT, _signal_handler_sigint)
-        signal.signal(signal.SIGTERM, _signal_handler_sigterm)
-        logger.debug("Sample signal handlers installed")
-    except Exception as e:
-        logger.warning(f"Failed to set up sample signal handlers: {e}")
 
 
 def test():
