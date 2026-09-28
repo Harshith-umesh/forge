@@ -64,16 +64,20 @@ def init_vaults_for_phase(phase: str):
     vault.phase_vault_init(phase, extra_mandatory=(extra_mandatory or None))
 
 
-def _signal_callback(sig, frame):
-
+def _signal_callback(sig, frame, log_file):
     env.reset_artifact_dir()
 
     sig_name = signal.Signals(sig).name
     logger.info(f"Signal callback: received {sig_name}")
-    sig_file = env.BASE_ARTIFACT_DIR / f"{sig_name}_interrupted"
-    with sig_file.open("a") as f:
+    if not log_file:
+        return
+
+    module_name = (
+        Path(__file__).relative_to(env.FORGE_HOME).with_suffix("").as_posix().replace("/", ".")
+    )
+    with log_file.open("a") as f:
         f.write(
-            f"{datetime.now()}: {__name__}.{_signal_callback.__qualname__} {sig_name} handler\n"
+            f"{datetime.now()}: {module_name}.{_signal_callback.__qualname__} {sig_name} handler\n"
         )
 
 

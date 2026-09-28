@@ -10,13 +10,18 @@ _signal_callbacks = {signal.SIGINT: [], signal.SIGTERM: []}
 
 def register_signal_callback(fn, *, sig=None):
     if sig is None:
-        for callbacks in _signal_callbacks.values():
+        for sig_type, callbacks in _signal_callbacks.items():
             callbacks.append(fn)
+            logger.info(
+                f"Registered signal callback {fn.__qualname__} for {signal.Signals(sig_type).name}"
+            )
     else:
         _signal_callbacks[sig].append(fn)
+        logger.info(f"Registered signal callback {fn.__qualname__} for {signal.Signals(sig).name}")
 
 
 def init():
+    logger.info(f"Installing signal handlers for pid={os.getpid()} pgid={os.getpgrp()}")
     signal.signal(signal.SIGINT, raise_signal)
     signal.signal(signal.SIGTERM, raise_signal)
 
@@ -40,22 +45,34 @@ class SignalInterrupt(SystemExit):
 
 
 def raise_signal(sig, frame):
-    logger.info(f"Raising signal {sig}")
+    sig_name = signal.Signals(sig).name
+    # Write to stderr immediately, before any import or env access
+    import sys
 
-    for cb in _signal_callbacks.get(sig, []):
-        try:
-            cb(sig, frame)
-        except Exception:
-            logger.exception(f"Signal callback {cb} failed")
+    print(f"raise_signal: {sig_name} in pid={os.getpid()}", file=sys.stderr, flush=True)
+    logger.info(f"Received {sig_name} in pid={os.getpid()}")
 
     from datetime import datetime
 
     from projects.core.library import env
 
-    sig_name = signal.Signals(sig).name
-    sig_file = env.BASE_ARTIFACT_DIR / f"{sig_name}_interrupted"
-    with sig_file.open("a") as f:
-        f.write(f"{datetime.now()}: {__name__}.{raise_signal.__qualname__} {sig_name} handler\n")
+    log_file = None
+    if env.BASE_ARTIFACT_DIR and env.BASE_ARTIFACT_DIR.is_dir():
+        log_file = env.BASE_ARTIFACT_DIR / f"{sig_name}_interrupted.txt"
+    else:
+        logger.warning("BASE_ARTIFACT_DIR not available, cannot write signal file")
+
+    for cb in _signal_callbacks.get(sig, []):
+        try:
+            cb(sig, frame, log_file)
+        except Exception:
+            logger.exception(f"Signal callback {cb} failed")
+
+    if log_file:
+        with log_file.open("a") as f:
+            f.write(
+                f"{datetime.now()}: {__name__}.{raise_signal.__qualname__} {sig_name} handler\n"
+            )
 
     raise SignalInterrupt(sig, frame)
 

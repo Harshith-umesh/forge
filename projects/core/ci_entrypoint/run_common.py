@@ -34,22 +34,58 @@ EXTRA_PACKAGES = []
 # Global reference to child process for signal forwarding
 _child_process = None
 
+# Track which signals have already been forwarded to prevent re-entrant loops
+_signals_forwarded = set()
 
 CHILD_SIGNAL_TIMEOUT = 30
 
 
-def _write_signal_file(sig_name):
+def _write_signal_file(sig_name, exit_code):
     from datetime import datetime
+
+    import yaml
 
     artifact_dir = os.environ.get("ARTIFACT_DIR")
     if not artifact_dir:
         return
-    sig_file = Path(artifact_dir) / f"{sig_name}_interrupted"
+    sig_file = Path(artifact_dir) / f"{sig_name}_interrupted.txt"
     with sig_file.open("a") as f:
         f.write(f"{datetime.now()}: {__name__}._forward_signal_and_exit {sig_name} handler\n")
 
+    # Write exit_status.yaml to the current step's ci_metadata
+    metadata_dir = Path(artifact_dir) / "000__ci_metadata"
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+    exit_status_file = metadata_dir / "exit_status.yaml"
+    exit_status_data = {
+        "return_code": exit_code,
+        "reason": f"Aborted by signal {sig_name}",
+    }
+    with open(exit_status_file, "w", encoding="utf-8") as f:
+        yaml.dump(exit_status_data, f, default_flow_style=False)
+    logger.info(f"Wrote abort exit status to {exit_status_file}")
+
+
+def _forward_signal_to_child(child_pid, sig, sig_name):
+    try:
+        os.killpg(child_pid, sig)
+        logger.info(f"Forwarded {sig_name} to child process group pgid={child_pid}")
+    except (OSError, ProcessLookupError) as e:
+        logger.info(f"Failed to forward {sig_name} to child pid={child_pid}: {e}")
+        return
+
+    logger.info(f"Waiting up to {CHILD_SIGNAL_TIMEOUT}s for child pid={child_pid} to exit ...")
+    try:
+        _child_process.wait(timeout=CHILD_SIGNAL_TIMEOUT)
+        logger.info(f"Child pid={child_pid} exited after {sig_name}")
+    except subprocess.TimeoutExpired:
+        logger.warning(
+            f"Child pid={child_pid} did not exit within {CHILD_SIGNAL_TIMEOUT}s after {sig_name}"
+        )
+
 
 def _forward_signal_and_exit(sig, exit_code):
+    global _signals_forwarded
+
     sig_name = signal.Signals(sig).name
     child_pid = _child_process.pid if _child_process else None
     child_alive = _child_process.poll() is None if _child_process else False
@@ -58,25 +94,22 @@ def _forward_signal_and_exit(sig, exit_code):
         f"Received {sig_name} in pid={os.getpid()} pgid={os.getpgrp()}, child_pid={child_pid} child_alive={child_alive}"
     )
 
-    _write_signal_file(sig_name)
+    if sig in _signals_forwarded:
+        logger.info(f"{sig_name} already forwarded, escalating to SIGTERM")
+        if _child_process and child_alive:
+            _forward_signal_to_child(child_pid, signal.SIGTERM, "SIGTERM")
+        prepare_ci.shutdown_dual_output()
+        sys.exit(exit_code)
+
+    _signals_forwarded.add(sig)
+    _write_signal_file(sig_name, exit_code)
 
     if _child_process and child_alive:
-        try:
-            _child_process.send_signal(sig)
-            logger.info(f"Forwarded {sig_name} to child pid={child_pid}")
-        except (OSError, ProcessLookupError) as e:
-            logger.info(f"Failed to forward {sig_name} to child pid={child_pid}: {e}")
-        else:
-            logger.info(
-                f"Waiting up to {CHILD_SIGNAL_TIMEOUT}s for child pid={child_pid} to exit ..."
-            )
-            try:
-                _child_process.wait(timeout=CHILD_SIGNAL_TIMEOUT)
-                logger.info(f"Child pid={child_pid} exited after {sig_name}")
-            except subprocess.TimeoutExpired:
-                logger.warning(
-                    f"Child pid={child_pid} did not exit within {CHILD_SIGNAL_TIMEOUT}s after {sig_name}"
-                )
+        _forward_signal_to_child(child_pid, sig, sig_name)
+
+        if _child_process.poll() is None:
+            logger.info(f"Child still alive after {sig_name}, escalating to SIGTERM")
+            _forward_signal_to_child(child_pid, signal.SIGTERM, "SIGTERM")
     else:
         logger.info(f"No child to forward {sig_name} to")
 
@@ -97,6 +130,7 @@ def signal_handler_sigterm(sig, frame):
 def setup_signal_handlers():
     """Set up signal handlers for graceful interruption."""
     try:
+        logger.info(f"Installing parent signal handlers for pid={os.getpid()} pgid={os.getpgrp()}")
         signal.signal(signal.SIGINT, signal_handler_sigint)
         signal.signal(signal.SIGTERM, signal_handler_sigterm)
         # SIGPIPE handling for broken pipes
@@ -456,8 +490,12 @@ def execute_project_operation(
 
         logger.info(f"Parent pid={os.getpid()} pgid={os.getpgrp()}, child pid={_child_process.pid}")
 
-        # Wait for process to complete
-        result_code = _child_process.wait()
+        # Poll instead of blocking wait: Python's blocking waitpid uses
+        # SA_RESTART, which prevents signal handlers from firing. Polling
+        # with sleep allows SIGINT/SIGTERM handlers to run between checks.
+        while _child_process.poll() is None:
+            time.sleep(1)
+        result_code = _child_process.returncode
 
         # Create result object similar to subprocess.run()
         class Result:

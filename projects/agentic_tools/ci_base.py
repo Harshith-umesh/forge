@@ -100,13 +100,15 @@ class CIApp:
         run.register_signal_callback(self._signal_callback)
         config.init(self.config_dir)
 
-    def _signal_callback(self, sig, frame):
+    def _signal_callback(self, sig, frame, log_file):
         env.reset_artifact_dir()
 
         sig_name = signal.Signals(sig).name
         logger.info(f"Signal callback: received {sig_name}")
-        sig_file = env.BASE_ARTIFACT_DIR / f"{sig_name}_interrupted"
-        with sig_file.open("a") as f:
+        if not log_file:
+            return
+
+        with log_file.open("a") as f:
             f.write(
                 f"{datetime.now()}: {__name__}.{type(self).__name__}.{self._signal_callback.__name__} {sig_name} handler\n"
             )
