@@ -9,7 +9,9 @@ building your own projects.
 
 import logging
 import pathlib
+import signal
 import types
+from datetime import datetime
 
 import click
 import prepare_skeleton
@@ -34,7 +36,20 @@ logger = logging.getLogger(__name__)
 def init():
     env.init()
     run.init()
+    run.register_signal_callback(_signal_callback)
     config.init(pathlib.Path(__file__).parent)
+
+
+def _signal_callback(sig, frame):
+    env.reset_artifact_dir()
+
+    sig_name = signal.Signals(sig).name
+    logger.info(f"Signal callback: received {sig_name}")
+    sig_file = env.BASE_ARTIFACT_DIR / f"{sig_name}_interrupted"
+    with sig_file.open("a") as f:
+        f.write(
+            f"{datetime.now()}: {__name__}.{_signal_callback.__qualname__} {sig_name} handler\n"
+        )
 
 
 @click.group(cls=ci_lib.HelpfulGroup)
