@@ -345,7 +345,7 @@ cpt-rhaiis-3.6-mi355x:
       __workloads: [profile1, profile4, profile5, profile7, profile6]
       rhaiis.engines.vllm.args.tensor-parallel-size: 8
   __workloads: [profile1, profile4, profile7, profile6]
-  rhaiis.profiler.enabled: false
+  rhaiis.profiler.enabled: true
   tests.rhaiis.run_benchmark: true
   caliper.postprocess.csv_dashboard.enabled: true
   tests.rhaiis.slack_notify_always: true
