@@ -16,6 +16,16 @@ logger = logging.getLogger(__name__)
 
 _K8S_NAME_MAX = 63
 _warnings: list[str] = []
+_PYTORCH_PROFILING_EXCLUDED_WORKLOADS = frozenset({"profile5"})
+
+
+def _profiler_workload_keys(workload_keys: list[str]) -> list[str]:
+    """Return workload keys eligible for PyTorch profiling.
+
+    Profile 5 is intentionally excluded because its ultra-long context workload
+    should follow the normal benchmark path without an extra profiler pass.
+    """
+    return [key for key in workload_keys if key not in _PYTORCH_PROFILING_EXCLUDED_WORKLOADS]
 
 
 def _write_manifest(manifest: dict, path: Path) -> None:
@@ -171,7 +181,16 @@ def _run_test(
     from projects.core.library import config
 
     profiler_cfg = runtime_config.get_profiler_config()
-    profiler_enabled = profiler_cfg.get("enabled", False)
+    profiler_requested = profiler_cfg.get("enabled", False)
+    profiler_workload_keys = _profiler_workload_keys(workload_keys)
+    profiler_enabled = profiler_requested and bool(profiler_workload_keys)
+    skipped_profiler_workloads = [key for key in workload_keys if key not in profiler_workload_keys]
+    if profiler_requested and skipped_profiler_workloads:
+        logger.info(
+            "Skipping PyTorch profiling for workload(s) %s; "
+            "their normal benchmark path is unchanged",
+            skipped_profiler_workloads,
+        )
     run_benchmark = config.project.get_config("tests.rhaiis.run_benchmark", True)
 
     # Standalone analysis only — no deployment needed
@@ -269,11 +288,7 @@ def _run_test(
             f"http://{deployment_name}-predictor.{namespace}.svc.cluster.local:{engine_port}"
         )
 
-        warmup_enabled = (
-            config.project.get_config("tests.rhaiis.warmup", True)
-            and run_benchmark
-            and not profiler_enabled
-        )
+        warmup_enabled = config.project.get_config("tests.rhaiis.warmup", True) and run_benchmark
 
         logger.info(
             "Running %d workload(s): %s",
@@ -293,7 +308,7 @@ def _run_test(
                 workload_key=wl_key,
                 benchmark_timeout=benchmark_timeout,
             )
-            if profiler_enabled:
+            if profiler_enabled and wl_key in profiler_workload_keys:
                 logger.info("Running profiler for workload=%s", wl_key)
                 _run_profiler_step(**step_kwargs)
             elif warmup_enabled:
