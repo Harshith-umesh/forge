@@ -28,6 +28,13 @@ def _profiler_workload_keys(workload_keys: list[str]) -> list[str]:
     return [key for key in workload_keys if key not in _PYTORCH_PROFILING_EXCLUDED_WORKLOADS]
 
 
+def _warmup_workload_keys(workload_keys: list[str], profiler_requested: bool) -> list[str]:
+    """Exclude Profile 5 from warmup when profiler mode is requested."""
+    if not profiler_requested:
+        return workload_keys
+    return [key for key in workload_keys if key not in _PYTORCH_PROFILING_EXCLUDED_WORKLOADS]
+
+
 def _write_manifest(manifest: dict, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
@@ -183,11 +190,12 @@ def _run_test(
     profiler_cfg = runtime_config.get_profiler_config()
     profiler_requested = profiler_cfg.get("enabled", False)
     profiler_workload_keys = _profiler_workload_keys(workload_keys)
+    warmup_workload_keys = _warmup_workload_keys(workload_keys, profiler_requested)
     profiler_enabled = profiler_requested and bool(profiler_workload_keys)
     skipped_profiler_workloads = [key for key in workload_keys if key not in profiler_workload_keys]
     if profiler_requested and skipped_profiler_workloads:
         logger.info(
-            "Skipping PyTorch profiling for workload(s) %s; "
+            "Skipping PyTorch profiling and warmup for workload(s) %s; "
             "their normal benchmark path is unchanged",
             skipped_profiler_workloads,
         )
@@ -288,7 +296,11 @@ def _run_test(
             f"http://{deployment_name}-predictor.{namespace}.svc.cluster.local:{engine_port}"
         )
 
-        warmup_enabled = config.project.get_config("tests.rhaiis.warmup", True) and run_benchmark
+        warmup_enabled = (
+            config.project.get_config("tests.rhaiis.warmup", True)
+            and run_benchmark
+            and not profiler_enabled
+        )
 
         logger.info(
             "Running %d workload(s): %s",
@@ -311,7 +323,7 @@ def _run_test(
             if profiler_enabled and wl_key in profiler_workload_keys:
                 logger.info("Running profiler for workload=%s", wl_key)
                 _run_profiler_step(**step_kwargs)
-            elif warmup_enabled:
+            elif warmup_enabled and wl_key in warmup_workload_keys:
                 logger.info("Running warmup for workload=%s", wl_key)
                 _run_warmup_step(**step_kwargs)
 
