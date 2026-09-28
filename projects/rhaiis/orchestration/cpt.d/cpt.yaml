@@ -15,6 +15,7 @@ __cpt: true
 cpt-vllm-release:
   __description: "vLLM Release CPT — Tier 1 models across all workload profiles"
   __engine: vllm
+  rhaiis.engines.vllm.args.enable-prefix-caching: true
   __models:
     llama-70b/tp4:
     llama-70b/tp2:
@@ -45,6 +46,7 @@ cpt-vllm-release:
 cpt-sglang-competitive:
   __description: "SGLang Release CPT — Tier 1 models across all workload profiles"
   __engine: sglang
+  rhaiis.engines.sglang.args.disable-radix-cache: false
   __models:
     llama-70b/tp4:
     llama-70b-bf16/tp4:
@@ -70,6 +72,7 @@ cpt-sglang-competitive:
 cpt-trtllm-competitive:
   __description: "TensorRT-LLM Release CPT — supported NVIDIA models across all workload profiles"
   __engine: trtllm
+  rhaiis.engines.trtllm.trtllm_config.kv_cache_config.enable_block_reuse: true
   __accelerator: nvidia
   __models:
     llama-70b/tp4:
@@ -92,6 +95,7 @@ cpt-trtllm-competitive:
 cpt-vllm-competitive:
   __description: "vLLM Competitive CPT — wide model coverage for cross-engine comparison"
   __engine: vllm
+  rhaiis.engines.vllm.args.enable-prefix-caching: true
   __models:
     llama-70b/tp4:
     llama-70b-bf16/tp4:
@@ -122,6 +126,7 @@ cpt-vllm-competitive:
 cpt-rhaiis-3.6-h200:
   __description: "RHAIIS 3.6 release regression — H200 model matrix"
   __engine: vllm
+  rhaiis.engines.vllm.args.enable-prefix-caching: true
   __accelerator: nvidia
   __gpu_type: h200
   __clusters:
@@ -226,6 +231,7 @@ cpt-rhaiis-3.6-h200:
 cpt-rhaiis-3.6-b200:
   __description: "RHAIIS 3.6 release regression — B200 model matrix"
   __engine: vllm
+  rhaiis.engines.vllm.args.enable-prefix-caching: true
   __accelerator: nvidia
   __gpu_type: b200
   __clusters: [b200]
@@ -295,6 +301,7 @@ cpt-rhaiis-3.6-b200:
 cpt-rhaiis-3.6-mi355x:
   __description: "RHAIIS 3.6 release regression — MI355X model matrix"
   __engine: vllm
+  rhaiis.engines.vllm.args.enable-prefix-caching: true
   __accelerator: amd
   __gpu_type: mi355x
   __clusters: [mi355x]
