@@ -5,6 +5,16 @@ import subprocess
 
 logger = logging.getLogger(__name__)
 
+_signal_callbacks = {signal.SIGINT: [], signal.SIGTERM: []}
+
+
+def register_signal_callback(fn, *, sig=None):
+    if sig is None:
+        for callbacks in _signal_callbacks.values():
+            callbacks.append(fn)
+    else:
+        _signal_callbacks[sig].append(fn)
+
 
 def init():
     signal.signal(signal.SIGINT, raise_signal)
@@ -30,6 +40,23 @@ class SignalInterrupt(SystemExit):
 
 
 def raise_signal(sig, frame):
+    logger.info(f"Raising signal {sig}")
+
+    for cb in _signal_callbacks.get(sig, []):
+        try:
+            cb(sig, frame)
+        except Exception:
+            logger.exception(f"Signal callback {cb} failed")
+
+    from datetime import datetime
+
+    from projects.core.library import env
+
+    sig_name = signal.Signals(sig).name
+    sig_file = env.BASE_ARTIFACT_DIR / f"{sig_name}_interrupted"
+    with sig_file.open("a") as f:
+        f.write(f"{datetime.now()}: {__name__}.{raise_signal.__qualname__} {sig_name} handler\n")
+
     raise SignalInterrupt(sig, frame)
 
 
