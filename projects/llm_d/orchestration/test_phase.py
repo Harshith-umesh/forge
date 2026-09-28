@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import shutil
-import signal
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -45,30 +44,6 @@ from projects.llm_d.orchestration.utils import write_yaml
 from projects.llm_d.toolbox.cleanup_test_resources import main as cleanup_test_resources_command
 
 logger = logging.getLogger(__name__)
-
-
-def _signal_handler_sigint(sig, frame):
-    """Sample SIGINT signal handler for skeleton project."""
-    env.reset_artifact_dir()
-    logger.error("Sigint received.")
-    (env.ARTIFACT_DIR / "SIGINT").touch()
-
-
-def _signal_handler_sigterm(sig, frame):
-    """Sample SIGTERM signal handler for skeleton project."""
-    env.reset_artifact_dir()
-    logger.error("Sigterm received.")
-    (env.ARTIFACT_DIR / "SIGTERM").touch()
-
-
-def _setup_sample_signal_handlers():
-    """Set up sample signal handlers for demonstration."""
-    try:
-        signal.signal(signal.SIGINT, _signal_handler_sigint)
-        signal.signal(signal.SIGTERM, _signal_handler_sigterm)
-        logger.debug("Sample signal handlers installed")
-    except Exception as e:
-        logger.warning(f"Failed to set up sample signal handlers: {e}")
 
 
 def _delete_resources_by_type(resource_type: str, namespace: str, description: str) -> None:
