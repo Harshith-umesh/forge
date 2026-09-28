@@ -35,40 +35,63 @@ EXTRA_PACKAGES = []
 _child_process = None
 
 
-def signal_handler_sigint(sig, frame):
-    """Handle SIGINT (Ctrl+C) gracefully."""
-    logger.info("🚫 Received SIGINT (Ctrl+C) - Interrupting operation...")
+CHILD_SIGNAL_TIMEOUT = 30
 
-    # Forward signal to child process first
-    if _child_process and _child_process.poll() is None:  # Child is still running
-        logger.info("📡 Forwarding SIGINT to child process...")
+
+def _write_signal_file(sig_name):
+    from datetime import datetime
+
+    artifact_dir = os.environ.get("ARTIFACT_DIR")
+    if not artifact_dir:
+        return
+    sig_file = Path(artifact_dir) / f"{sig_name}_interrupted"
+    with sig_file.open("a") as f:
+        f.write(f"{datetime.now()}: {__name__}._forward_signal_and_exit {sig_name} handler\n")
+
+
+def _forward_signal_and_exit(sig, exit_code):
+    sig_name = signal.Signals(sig).name
+    child_pid = _child_process.pid if _child_process else None
+    child_alive = _child_process.poll() is None if _child_process else False
+
+    logger.info(
+        f"Received {sig_name} in pid={os.getpid()} pgid={os.getpgrp()}, child_pid={child_pid} child_alive={child_alive}"
+    )
+
+    _write_signal_file(sig_name)
+
+    if _child_process and child_alive:
         try:
-            _child_process.send_signal(signal.SIGINT)
-        except (OSError, ProcessLookupError):
-            pass  # Child may have already terminated
+            _child_process.send_signal(sig)
+            logger.info(f"Forwarded {sig_name} to child pid={child_pid}")
+        except (OSError, ProcessLookupError) as e:
+            logger.info(f"Failed to forward {sig_name} to child pid={child_pid}: {e}")
+        else:
+            logger.info(
+                f"Waiting up to {CHILD_SIGNAL_TIMEOUT}s for child pid={child_pid} to exit ..."
+            )
+            try:
+                _child_process.wait(timeout=CHILD_SIGNAL_TIMEOUT)
+                logger.info(f"Child pid={child_pid} exited after {sig_name}")
+            except subprocess.TimeoutExpired:
+                logger.warning(
+                    f"Child pid={child_pid} did not exit within {CHILD_SIGNAL_TIMEOUT}s after {sig_name}"
+                )
+    else:
+        logger.info(f"No child to forward {sig_name} to")
 
     # Emergency cleanup of dual output
     prepare_ci.shutdown_dual_output()
 
-    sys.exit(130)  # Standard exit code for SIGINT
+    sys.exit(exit_code)
+
+
+def signal_handler_sigint(sig, frame):
+    _forward_signal_and_exit(sig, 130)
 
 
 def signal_handler_sigterm(sig, frame):
-    """Handle SIGTERM gracefully."""
-    logger.info("🛑 Received SIGTERM - Terminating operation...")
-
-    # Forward signal to child process first
-    if _child_process and _child_process.poll() is None:  # Child is still running
-        logger.info("📡 Forwarding SIGTERM to child process...")
-        try:
-            _child_process.send_signal(signal.SIGTERM)
-        except (OSError, ProcessLookupError):
-            pass  # Child may have already terminated
-
-    # Emergency cleanup of dual output
-    prepare_ci.shutdown_dual_output()
-
-    sys.exit(143)  # Standard exit code for SIGTERM
+    _forward_signal_and_exit(sig, 143)
 
 
 def setup_signal_handlers():
@@ -430,6 +453,8 @@ def execute_project_operation(
             stdout=None,  # Inherit stdout for pdb/debugging
             stderr=None,  # Inherit stderr for pdb/debugging
         )
+
+        logger.info(f"Parent pid={os.getpid()} pgid={os.getpgrp()}, child pid={_child_process.pid}")
 
         # Wait for process to complete
         result_code = _child_process.wait()
