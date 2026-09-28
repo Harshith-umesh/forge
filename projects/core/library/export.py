@@ -557,6 +557,7 @@ def _update_artifacts(
 
     for fpath in [
         artifact_dir_path / "run.log",
+        artifact_dir_path / "status.yaml",
         artifact_dir_path / "COMPLETION-NOTIFICATION.md",
         artifact_dir_path / "000__ci_metadata" / "fournos_fjob.yaml",
     ]:
