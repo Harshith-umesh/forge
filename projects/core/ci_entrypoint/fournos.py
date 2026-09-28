@@ -189,24 +189,23 @@ def transform_fournos_config_to_variable_overrides(fjob: dict) -> dict:
 
     fjob_engine = fjob_spec.get("executionEngine")
     forge_config = fjob_engine.get(FJOB_FORGE_ENGINE_NAME)
-    if forge_config:
-        # Process forge configuration
-        # Transform project -> project.name
-        if "project" in forge_config:
-            variable_overrides["project.name"] = forge_config["project"]
-
-        # Transform args -> project.args
-        if "args" in forge_config:
-            variable_overrides["project.args"] = forge_config["args"]
-
-        # Add all configOverrides entries directly (flatten them)
-        config_overrides = forge_config.get("configOverrides", {})
-        variable_overrides.update(config_overrides)
-
-    else:
+    if not forge_config:
         raise ValueError(
             f"Forge received an invalid fjob: spec.executionEngine.{FJOB_FORGE_ENGINE_NAME} not defined. Got {', '.join(fjob_engine.keys())}."
         )
+
+    # Process forge configuration
+    # Transform project -> project.name
+    if "project" in forge_config:
+        variable_overrides["project.name"] = forge_config["project"]
+
+    # Transform args -> project.args
+    if "args" in forge_config:
+        variable_overrides["project.args"] = forge_config["args"]
+
+    # Add all configOverrides entries directly (flatten them)
+    config_overrides = forge_config.get("configOverrides", {})
+    variable_overrides.update(config_overrides)
 
     # Add ci_job mappings from spec
     if "exclusive" in fjob_spec:
