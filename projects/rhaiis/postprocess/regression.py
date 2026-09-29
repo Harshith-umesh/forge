@@ -13,8 +13,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-
 import projects.core.notifications.slack.api as slack_api
 from projects.core.library import vault
 
@@ -86,6 +84,8 @@ class RegressionResult:
 
 
 def geometric_mean(values) -> float | None:
+    import numpy as np
+
     positive = (
         values[values > 0].values if hasattr(values, "values") else [v for v in values if v > 0]
     )

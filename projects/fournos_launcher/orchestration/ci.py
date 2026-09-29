@@ -4,8 +4,8 @@ FOURNOS launcher project CI Operations
 
 """
 
-import json
 import logging
+import os
 import types
 
 import click
@@ -22,38 +22,29 @@ logger = logging.getLogger(__name__)
 
 def _set_job_owner_from_trigger() -> None:
     """
-    Set job owner from the /test commenter, falling back to the PR author.
+    Set job owner from the authorized /test commenter.
 
     The authorized /test comment author's GitHub login is stored beside the
-    existing trigger-comment metadata. Older runs without that file use
-    pull_request.json's author.
+    existing trigger-comment metadata. GitHub PR runs must have this metadata;
+    non-PR runs retain the configured owner when it is absent.
     """
     metadata_dir = env.ARTIFACT_DIR / CI_METADATA_DIRNAME
     trigger_author_file = metadata_dir / PR_TRIGGER_COMMENT_AUTHOR_FILENAME
-    if trigger_author_file.exists():
-        trigger_author = trigger_author_file.read_text(encoding="utf-8").strip()
-        if not trigger_author:
-            raise ValueError(f"Trigger comment author file is empty: {trigger_author_file}")
-        config.project.set_config("fournos.job.owner", trigger_author)
-        logger.info(f"Set job owner from /test comment: {trigger_author}")
+    if not trigger_author_file.exists():
+        pull_number = os.environ.get("PULL_NUMBER")
+        if pull_number:
+            raise FileNotFoundError(
+                f"Missing authorized /test commenter metadata for GitHub PR #{pull_number}: "
+                f"{trigger_author_file}"
+            )
+        logger.debug("No /test commenter metadata found outside a GitHub PR")
         return
 
-    pull_request_file = metadata_dir / "pull_request.json"
-
-    if not pull_request_file.exists():
-        logger.debug("No pull request metadata found")
-        return
-
-    with open(pull_request_file) as f:
-        pr_data = json.load(f)
-
-    user_login = pr_data.get("user", {}).get("login")
-    if not user_login:
-        raise ValueError(f"No user.login found in pull request metadata: {pull_request_file}")
-
-    # Set the job owner
-    config.project.set_config("fournos.job.owner", user_login)
-    logger.info(f"Set job owner from pull request: {user_login}")
+    trigger_author = trigger_author_file.read_text(encoding="utf-8").strip()
+    if not trigger_author:
+        raise ValueError(f"Trigger comment author file is empty: {trigger_author_file}")
+    config.project.set_config("fournos.job.owner", trigger_author)
+    logger.info(f"Set job owner from /test comment: {trigger_author}")
 
 
 @click.group(cls=ci_lib.HelpfulGroup)
