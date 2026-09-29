@@ -309,6 +309,7 @@ cpt-rhaiis-3.6-mi355x:
     gpt-oss-120b/tp1:
       rhaiis.engines.vllm.args.tensor-parallel-size: 1
     gemma-4-26b-fp8/tp1:
+      rhaiis.accelerator_env_vars.amd.VLLM_ROCM_USE_AITER_MOE: "0"
       rhaiis.engines.vllm.args.tensor-parallel-size: 1
       rhaiis.engines.vllm.args.kv-cache-dtype: fp8
       rhaiis.engines.vllm.args.reasoning-parser: gemma4
