@@ -367,6 +367,7 @@ cpt-rhaiis-3.6-mi355x:
       benchmarks.guidellm.args.tokenizer: '{"kind":"huggingface_auto","model":"moonshotai/Kimi-K3","load_kwargs":{"trust_remote_code":true}}'
   __workloads: [profile1, profile4, profile7, profile6]
   rhaiis.profiler.enabled: true
+  rhaiis.optional_phase.excluded_workloads: [profile5, profile6]
   tests.rhaiis.run_benchmark: true
   caliper.postprocess.csv_dashboard.enabled: true
   tests.rhaiis.slack_notify_always: true

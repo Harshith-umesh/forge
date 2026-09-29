@@ -83,7 +83,6 @@ warmup:
 optional_phase:
   excluded_workloads:
     - profile5
-    - profile6
 
 profiler:
   enabled: false
