@@ -28,6 +28,9 @@ from projects.core.library.postprocess import (
 )
 from projects.core.library.run import SignalInterrupt
 from projects.core.orchestration.utils.k8s import ensure_namespace
+from projects.gpu_operator.toolbox.validate_gpu_operator_dcgm import (
+    main as validate_gpu_operator_dcgm,
+)
 from projects.guidellm.library import benchconf as benchconf_lib  # noqa: F401
 from projects.guidellm.toolbox.run_guidellm_benchmark import build_guidellm_args
 from projects.guidellm.toolbox.run_guidellm_benchmark import main as run_guidellm_benchmark_command
@@ -386,6 +389,7 @@ def do_test() -> int:
         # validate before prepare: fail_if_not_enabled is a safeguard against
         # accidentally enabling UWM, so it must run before prepare gets a chance to.
         validate_user_workload_monitoring()
+        validate_gpu_operator_dcgm.run()
         prepare_user_workload_monitoring(during="test")
     endpoint_url: str | None = None
     benchmark_times: tuple[datetime, datetime] | None = None
