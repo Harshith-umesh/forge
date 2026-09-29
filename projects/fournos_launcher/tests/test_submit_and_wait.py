@@ -65,9 +65,7 @@ def test_resolve_raises_on_not_found(monkeypatch):
     )
 
     with pytest.raises(FournosJobFailureError):
-        wait_for_job_to_resolve(
-            _args(namespace="fournos-jobs"), _ctx(final_job_name="test-job")
-        )
+        wait_for_job_to_resolve(_args(namespace="fournos-jobs"), _ctx(final_job_name="test-job"))
 
 
 def test_resolve_raises_on_stopping(monkeypatch):
@@ -80,9 +78,7 @@ def test_resolve_raises_on_stopping(monkeypatch):
     )
 
     with pytest.raises(FournosJobFailureError):
-        wait_for_job_to_resolve(
-            _args(namespace="fournos-jobs"), _ctx(final_job_name="test-job")
-        )
+        wait_for_job_to_resolve(_args(namespace="fournos-jobs"), _ctx(final_job_name="test-job"))
 
 
 def test_resolve_succeeds_immediately_when_already_running(monkeypatch):
@@ -122,8 +118,6 @@ def test_check_early_return_noop_when_wait_true():
     """check_early_return returns a plain string (no EarlyReturn) when wait=True."""
     from projects.fournos_launcher.toolbox.submit_and_wait.main import check_early_return
 
-    result = check_early_return(
-        _args(wait=True), _ctx(final_job_name="test-job")
-    )
+    result = check_early_return(_args(wait=True), _ctx(final_job_name="test-job"))
     assert result
     assert not isinstance(result, EarlyReturn)
