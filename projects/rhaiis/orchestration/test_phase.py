@@ -16,25 +16,14 @@ logger = logging.getLogger(__name__)
 
 _K8S_NAME_MAX = 63
 _warnings: list[str] = []
-_OPTIONAL_PHASE_EXCLUDED_WORKLOADS = frozenset({"profile5"})
 
 
-def _profiler_workload_keys(workload_keys: list[str]) -> list[str]:
-    """Return workload keys eligible for PyTorch profiling.
-
-    Profile 5 is intentionally excluded because its ultra-long context workload
-    should follow the normal benchmark path without an extra profiler pass.
-    """
-    return [key for key in workload_keys if key not in _OPTIONAL_PHASE_EXCLUDED_WORKLOADS]
-
-
-def _warmup_workload_keys(workload_keys: list[str]) -> list[str]:
-    """Return workload keys eligible for warmup.
-
-    Profile 5 is excluded because its ultra-long context workload should not
-    receive warmup requests, regardless of whether PyTorch profiling is enabled.
-    """
-    return [key for key in workload_keys if key not in _OPTIONAL_PHASE_EXCLUDED_WORKLOADS]
+def _optional_phase_workload_keys(
+    workload_keys: list[str], excluded_workloads: list[str]
+) -> list[str]:
+    """Return workload keys eligible for optional warmup and profiling phases."""
+    excluded = set(excluded_workloads)
+    return [key for key in workload_keys if key not in excluded]
 
 
 def _write_manifest(manifest: dict, path: Path) -> None:
@@ -191,15 +180,21 @@ def _run_test(
 
     profiler_cfg = runtime_config.get_profiler_config()
     profiler_requested = profiler_cfg.get("enabled", False)
-    profiler_workload_keys = _profiler_workload_keys(workload_keys)
-    warmup_workload_keys = _warmup_workload_keys(workload_keys)
-    profiler_enabled = profiler_requested and bool(profiler_workload_keys)
-    skipped_profiler_workloads = [key for key in workload_keys if key not in profiler_workload_keys]
-    if profiler_requested and skipped_profiler_workloads:
+    excluded_optional_phase_workloads = config.project.get_config(
+        "rhaiis.optional_phase.excluded_workloads", []
+    )
+    optional_phase_workload_keys = _optional_phase_workload_keys(
+        workload_keys, excluded_optional_phase_workloads
+    )
+    profiler_enabled = profiler_requested and bool(optional_phase_workload_keys)
+    skipped_optional_phase_workloads = [
+        key for key in workload_keys if key not in optional_phase_workload_keys
+    ]
+    if skipped_optional_phase_workloads:
         logger.info(
-            "Skipping PyTorch profiling and warmup for workload(s) %s; "
-            "their normal benchmark path is unchanged",
-            skipped_profiler_workloads,
+            "Configured to exclude workload(s) %s from optional warmup and profiling phases "
+            "via rhaiis.optional_phase.excluded_workloads; their normal benchmark path is unchanged",
+            skipped_optional_phase_workloads,
         )
     run_benchmark = config.project.get_config("tests.rhaiis.run_benchmark", True)
 
@@ -323,10 +318,10 @@ def _run_test(
                 workload_key=wl_key,
                 benchmark_timeout=benchmark_timeout,
             )
-            if profiler_enabled and wl_key in profiler_workload_keys:
+            if profiler_enabled and wl_key in optional_phase_workload_keys:
                 logger.info("Running profiler for workload=%s", wl_key)
                 _run_profiler_step(**step_kwargs)
-            elif warmup_enabled and wl_key in warmup_workload_keys:
+            elif warmup_enabled and wl_key in optional_phase_workload_keys:
                 logger.info("Running warmup for workload=%s", wl_key)
                 _run_warmup_step(**step_kwargs)
 

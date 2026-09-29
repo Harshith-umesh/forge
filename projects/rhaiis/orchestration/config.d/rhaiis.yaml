@@ -80,6 +80,10 @@ warmup:
   rate: 200
   max_seconds: 60
 
+optional_phase:
+  excluded_workloads:
+    - profile5
+
 profiler:
   enabled: false
   ranges: "500-503"
