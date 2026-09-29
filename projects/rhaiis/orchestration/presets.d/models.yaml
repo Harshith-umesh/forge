@@ -190,6 +190,9 @@ deepseek-v3:
 deepseek-v4-pro:
   tests.rhaiis.model_key: deepseek-v4-pro
 
+deepseek-v4-pro-redhat:
+  tests.rhaiis.model_key: deepseek-v4-pro-redhat
+
 # Phi-4 quants
 phi-4-w4a16:
   tests.rhaiis.model_key: phi-4-w4a16
@@ -235,6 +238,10 @@ infomaniak-translategemma:
 # Kimi-K2.5
 kimi-k2-5:
   tests.rhaiis.model_key: kimi-k2-5-nvfp4
+
+# Kimi-K2.6 FP8
+kimi-k2-6-fp8:
+  tests.rhaiis.model_key: kimi-k2-6-fp8
 
 # GLM-5.2
 glm-5-2:

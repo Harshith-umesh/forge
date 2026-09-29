@@ -535,6 +535,12 @@ deepseek-v4-pro:
   vllm_args:
     tensor-parallel-size: 8
 
+deepseek-v4-pro-redhat:
+  name: DeepSeek-V4-Pro
+  hf_model_id: RedHatAI/DeepSeek-V4-Pro
+  vllm_args:
+    tensor-parallel-size: 8
+
 deepseek-v4-pro-nvfp4:
   name: DeepSeek-V4-Pro-NVFP4-FP8
   hf_model_id: RedHatAI/DeepSeek-V4-Pro-NVFP4-FP8
@@ -581,6 +587,13 @@ kimi-k2-5-nvfp4:
   hf_model_id: nvidia/Kimi-K2.5-NVFP4
   vllm_args:
     tensor-parallel-size: 4
+
+# Kimi K2.6 FP8
+kimi-k2-6-fp8:
+  name: Kimi-K2.6-FP8
+  hf_model_id: RedHatAI/Kimi-K2.6-FP8-BLOCK
+  vllm_args:
+    tensor-parallel-size: 8
 
 # Kimi K3
 kimi-k3:
