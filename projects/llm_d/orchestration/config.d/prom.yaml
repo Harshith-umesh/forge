@@ -45,3 +45,11 @@ capture:
         params:
           llmisvc_namespace: "{llmisvc_namespace}"
           llmisvc_name: "{llmisvc_name}"
+      gpu:
+        enabled: true
+        files: [gpu]
+
+        step_seconds: 15
+        params:
+          namespace: "{llmisvc_namespace}"
+          pod_name: "{llmisvc_name}-.*"
