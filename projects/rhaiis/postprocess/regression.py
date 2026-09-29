@@ -38,6 +38,11 @@ def _format_slack_user_line(slack_user: str) -> str:
     return f"*Triggered by:* {slack_user}\n"
 
 
+def _format_owner_line(owner: str) -> str:
+    """Build the owner line for RHAIIS Slack notifications."""
+    return f"*Owner:* {owner}\n" if owner else ""
+
+
 def _send_via_topsail_bot(
     message: str, *, notification_vault: str | None = None, channel_id: str | None = None
 ) -> bool:
@@ -410,6 +415,7 @@ def send_regression_notification(
     accelerator: str = "",
     job_id: str = "",
     slack_user: str = "",
+    owner: str = "",
     notification_vault: str | None = None,
     dry_run: bool = False,
     report_url: str = "",
@@ -424,6 +430,7 @@ def send_regression_notification(
         accelerator: Accelerator name for display
         job_id: Job identifier
         slack_user: Slack user ID (e.g. U01ABC123) to @-mention, or display name
+        owner: Fournos job owner
         notification_vault: Vault containing topsail-bot.slack-token
         dry_run: Log only, don't send
         report_url: Optional presigned URL to an agent analysis report
@@ -491,6 +498,7 @@ def send_regression_notification(
     details = "\n".join(detail_lines)
 
     user_line = _format_slack_user_line(slack_user)
+    owner_line = _format_owner_line(owner)
 
     report_line = f"*Agent Analysis:* <{report_url}|View Report>\n" if report_url else ""
 
@@ -519,6 +527,7 @@ def send_regression_notification(
     message = (
         f"{icon} *{headline}*\n"
         f"{user_line}"
+        f"{owner_line}"
         f"*Job:* `{job_id}`\n"
         f"*Model:* {model}\n"
         f"*Accelerator:* {accelerator}\n"
@@ -545,6 +554,7 @@ def send_success_notification(
     accelerator: str = "",
     job_id: str = "",
     slack_user: str = "",
+    owner: str = "",
     notification_vault: str | None = None,
     dry_run: bool = False,
     tp: str = "",
@@ -556,10 +566,14 @@ def send_success_notification(
 ) -> bool:
     """Send a Slack notification when the RHAIIS pipeline succeeds with no regressions.
 
+    Args:
+        owner: Fournos job owner
+
     Returns:
         True if notification sent successfully
     """
     user_line = _format_slack_user_line(slack_user)
+    owner_line = _format_owner_line(owner)
 
     parallelism_parts = []
     if tp:
@@ -600,6 +614,7 @@ def send_success_notification(
     message = (
         f":white_check_mark: *RHAIIS Pipeline Succeeded*\n"
         f"{user_line}"
+        f"{owner_line}"
         f"*Job:* `{job_id}`\n"
         f"*Model:* {model}\n"
         f"*Accelerator:* {accelerator}\n"
@@ -628,6 +643,7 @@ def send_failure_notification(
     accelerator: str = "",
     job_id: str = "",
     slack_user: str = "",
+    owner: str = "",
     notification_vault: str | None = None,
     dry_run: bool = False,
     tp: str = "",
@@ -645,6 +661,7 @@ def send_failure_notification(
         accelerator: Accelerator name for display
         job_id: FournosJob name
         slack_user: Slack user ID to @-mention
+        owner: Fournos job owner
         notification_vault: Vault containing topsail-bot.slack-token
         dry_run: Log only, don't send
         tp: Tensor parallelism size
@@ -657,6 +674,7 @@ def send_failure_notification(
         True if notification sent successfully
     """
     user_line = _format_slack_user_line(slack_user)
+    owner_line = _format_owner_line(owner)
 
     parallelism_parts = []
     if tp:
@@ -683,6 +701,7 @@ def send_failure_notification(
     message = (
         f":x: *RHAIIS Pipeline Failed*\n"
         f"{user_line}"
+        f"{owner_line}"
         f"*Job:* `{job_id}`\n"
         f"*Model:* {model}\n"
         f"*Accelerator:* {accelerator}\n"
