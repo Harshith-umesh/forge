@@ -272,6 +272,7 @@ def _run_test(
             storage_pvc=deploy_cfg.get("storage_pvc", ""),
             model_id=model_cfg["hf_model_id"],
             service_account_name=deploy_cfg.get("service_account_name", ""),
+            supplemental_groups=deploy_cfg.get("supplemental_groups"),
             labels=isvc_labels,
             profiler_ranges=profiler_ranges,
         )

@@ -18,6 +18,7 @@ mi355x:
   rhaiis.cluster_tag: "mi355x"
   rhaiis.gpu_types.amd: "mi355x"
   rhaiis.deploy.image_pull_secrets: ["npalaska-image-pull"]
+  rhaiis.deploy.supplemental_groups: [1000790000]
   benchmarks.guidellm.fs_group: 0
 
 b200:
