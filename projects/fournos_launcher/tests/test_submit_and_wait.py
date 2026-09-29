@@ -202,22 +202,11 @@ def test_resolve_succeeds_immediately_when_already_running(monkeypatch):
 
 def test_wait_for_job_completion_retry_config():
     """wait_for_job_completion should have 3000 attempts and 30s delay (not 10s)."""
-    import inspect
-
     from projects.fournos_launcher.toolbox.submit_and_wait import main as m
 
-    # Find the retry decorator config on wait_for_job_completion
-    fn = m.wait_for_job_completion
-    # The retry decorator stores config on the task wrapper
-    retry_cfg = getattr(fn, "_retry_config", None)
-    if retry_cfg is None:
-        # Fallback: check function source for the delay value
-        src = inspect.getsource(m.wait_for_job_completion)
-        assert "delay=30" in src, "wait_for_job_completion should use delay=30 (was 10)"
-        assert "attempts=3000" in src, "wait_for_job_completion should have 3000 attempts"
-    else:
-        assert retry_cfg["delay"] == 30
-        assert retry_cfg["attempts"] == 3000
+    retry_cfg = m.wait_for_job_completion._retry_config
+    assert retry_cfg["delay"] == 30
+    assert retry_cfg["attempts"] == 3000
 
 
 # ---------------------------------------------------------------------------
@@ -226,28 +215,22 @@ def test_wait_for_job_completion_retry_config():
 
 
 def test_check_early_return_noop_when_wait_true():
-    """check_early_return is a no-op (returns a plain string) when wait=True."""
+    """check_early_return passes through (no EarlyReturn) when wait=True."""
     reset_script_manager()
+
+    from projects.fournos_launcher.toolbox.submit_and_wait.main import (
+        check_early_return,
+    )
 
     ran = []
 
     @task
     def setup(args, ctx):
         ctx.final_job_name = "test-job"
-        ran.append("setup")
-
-    @task
-    def check(args, ctx):
-        # Mirrors check_early_return logic
-        if not args.wait:
-            return EarlyReturn(f"launched: {ctx.final_job_name} (wait=False)")
-        ran.append("check_passed")
-        return f"launched: {ctx.final_job_name}"
 
     @task
     def after(args, ctx):
         ran.append("after")
 
-    execute_tasks({"wait": True, "setup": setup, "check": check, "after": after})
-    assert "check_passed" in ran
+    execute_tasks({"wait": True, "setup": setup, "check_early_return": check_early_return, "after": after})
     assert "after" in ran
