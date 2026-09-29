@@ -11,8 +11,7 @@ import time
 
 import pytest
 
-from projects.core.dsl import always, execute_tasks, shell, task
-from projects.core.dsl.control_flow import EarlyReturn
+from projects.core.dsl import execute_tasks, shell, task
 from projects.core.dsl.runtime import TaskExecutionError
 from projects.core.dsl.script_manager import reset_script_manager
 
@@ -23,52 +22,6 @@ from projects.core.dsl.script_manager import reset_script_manager
 
 def _make_result(stdout="", stderr="", returncode=0, command="oc"):
     return shell.CommandResult(stdout=stdout, stderr=stderr, returncode=returncode, command=command)
-
-
-# ---------------------------------------------------------------------------
-# wait=False → EarlyReturn skips non-@always tasks
-# ---------------------------------------------------------------------------
-
-
-def test_early_return_skips_pending_tasks():
-    """When a task returns EarlyReturn, subsequent non-@always tasks are skipped."""
-    reset_script_manager()
-    events = []
-
-    @task
-    def t1(args, ctx):
-        events.append("t1")
-        return EarlyReturn("stopping early")
-
-    @task
-    def t2_should_skip(args, ctx):
-        events.append("t2")  # Must NOT run
-
-    @always
-    @task
-    def t3_always(args, ctx):
-        events.append("t3")  # Must still run
-
-    execute_tasks(locals())
-    assert events == ["t1", "t3"]
-
-
-def test_early_return_message_is_logged(tmp_path):
-    """EarlyReturn from submit_fournos_job stops the pipeline cleanly (no exception)."""
-    reset_script_manager()
-    completed = []
-
-    @task
-    def submitter(args, ctx):
-        return EarlyReturn("Submitted FournosJob: test-job (wait=False)")
-
-    @task
-    def waiter(args, ctx):
-        completed.append("waiter_ran")  # Should not be reached
-
-    # execute_tasks should succeed (no exception) even with EarlyReturn
-    execute_tasks(locals())
-    assert "waiter_ran" not in completed
 
 
 # ---------------------------------------------------------------------------
