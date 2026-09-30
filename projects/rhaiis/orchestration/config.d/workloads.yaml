@@ -41,7 +41,7 @@ profile5:
   samples: 10
 
 profile6:
-  data: "prompt_tokens=128,output_tokens=128,turns=5,prefix_buckets[0].bucket_weight=100,prefix_buckets[0].prefix_count=10000,prefix_buckets[0].prefix_tokens=512"
+  data: "prompt_tokens=128,output_tokens=128,turns=5,prefix_buckets[0].prefix_count=10000,prefix_buckets[0].prefix_tokens=512"
   rates: [1, 32, 64, 128, 256, 512]
   max_seconds: 275
   rampup: 35
