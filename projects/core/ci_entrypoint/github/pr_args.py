@@ -24,7 +24,6 @@ from .directive_parser import create_help_directive_handler, parse_directives_ge
 
 # Avoid circular import - define locally
 CI_METADATA_DIRNAME = "000__ci_metadata"
-PR_TRIGGER_COMMENT_AUTHOR_FILENAME = "pr_trigger_comment_author.txt"
 
 logger = logging.getLogger(__name__)
 
@@ -329,7 +328,6 @@ def parse_directives(
     text: str,
     artifact_path: Path | None = None,
     last_comment: str | None = None,
-    last_comment_author: str | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """
     Parse all directives from the given text using handler mapping.
@@ -341,7 +339,6 @@ def parse_directives(
         text: Text containing directives (PR body + comments)
         artifact_path: Artifact directory path for saving last comment
         last_comment: Last comment text to save
-        last_comment_author: GitHub login of the user who wrote the last comment
 
     Returns:
         Tuple of (configuration dictionary, list of found directive lines)
@@ -357,11 +354,6 @@ def parse_directives(
         with open(comment_file, "w") as f:
             f.write(last_comment)
         logger.info(f"Saved last comment to {comment_file}")
-
-        if last_comment_author:
-            author_file = metadata_dir / PR_TRIGGER_COMMENT_AUTHOR_FILENAME
-            author_file.write_text(last_comment_author, encoding="utf-8")
-            logger.info(f"Saved last comment author to {author_file}")
 
     directive_handlers = get_directive_handlers()
 
@@ -517,8 +509,12 @@ def parse_pr_arguments(
         combined_text,
         artifact_path,
         last_user_test_comment,
-        last_user_test_comment_author,
     )
+
+    # The Fournos launcher consumes this existing config value when setting
+    # spec.owner on the submitted job.
+    if test_name == "fournos":
+        config["fournos.job.owner"] = last_user_test_comment_author
 
     return config, found_directives
 

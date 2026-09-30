@@ -49,7 +49,7 @@ def test_handle_var_directive_rejects_non_mapping_yaml() -> None:
         pr_args.handle_var_directive("/var false")
 
 
-def test_parse_pr_arguments_saves_author_of_selected_test_comment(tmp_path, monkeypatch) -> None:
+def test_parse_pr_arguments_sets_owner_from_selected_test_comment(tmp_path, monkeypatch) -> None:
     pull_request = {
         "comments": 2,
         "user": {"login": "pr-author"},
@@ -72,7 +72,26 @@ def test_parse_pr_arguments_saves_author_of_selected_test_comment(tmp_path, monk
     )
 
     assert config["ci_job.args"] == ["current"]
-    author_file = (
-        tmp_path / pr_args.CI_METADATA_DIRNAME / pr_args.PR_TRIGGER_COMMENT_AUTHOR_FILENAME
+    assert config["fournos.job.owner"] == "reviewer"
+
+
+def test_parse_pr_arguments_does_not_set_fournos_owner_for_other_tests(monkeypatch) -> None:
+    pull_request = {
+        "comments": 1,
+        "user": {"login": "pr-author"},
+        "body": "",
+    }
+    comments = [{"user": {"login": "reviewer"}, "body": "/test jump-ci current"}]
+    responses = iter([pull_request, comments])
+    monkeypatch.setattr(pr_args, "fetch_url", lambda _url: next(responses))
+    monkeypatch.setattr(
+        pr_args,
+        "load_owners_file",
+        lambda: {"approvers": [], "reviewers": ["reviewer"], "testers": []},
     )
-    assert author_file.read_text(encoding="utf-8") == "reviewer"
+
+    config, _directives = pr_args.parse_pr_arguments(
+        "openshift-psap", "forge", 123, test_name="jump-ci"
+    )
+
+    assert "fournos.job.owner" not in config
