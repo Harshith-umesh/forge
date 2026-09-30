@@ -9,6 +9,7 @@ from pathlib import Path
 import yaml
 
 from projects.core.library import env
+from projects.core.library.fournos_status import patch_fjob_relevant_deployments
 from projects.core.library.postprocess import create_test_metadata, run_and_postprocess
 from projects.rhaiis.orchestration import runtime_config
 
@@ -282,6 +283,19 @@ def _run_test(
             inferenceservice_file=str(isvc_file),
         )
 
+        if fjob_name:
+            _update_fjob_inference_reference(
+                fjob_name,
+                fjob_ns,
+                {
+                    "apiVersion": "serving.kserve.io/v1beta1",
+                    "kind": "InferenceService",
+                    "name": deployment_name,
+                    "namespace": namespace,
+                    "runUUID": run_uuid,
+                },
+            )
+
         logger.info("Waiting for InferenceService to be ready")
         wait_isvc_ready(
             name=deployment_name,
@@ -376,6 +390,8 @@ def _run_test(
             logger.warning("Setting MLflow metadata failed; continuing", exc_info=True)
     finally:
         _capture_and_cleanup(deployment_name, namespace)
+        if fjob_name:
+            _update_fjob_inference_reference(fjob_name, fjob_ns, None)
 
     try:
         _upload_predictor_log(run_uuid)
@@ -933,7 +949,25 @@ def _upload_profiler_traces(
     logger.info("Profiler trace upload result: %s", result)
 
 
-def _capture_and_cleanup(deployment_name: str, namespace: str) -> None:
+def _update_fjob_inference_reference(job_name: str, namespace: str, reference: dict | None) -> None:
+    """Keep live-log status failures visible without failing the benchmark."""
+    try:
+        patch_fjob_relevant_deployments(job_name, namespace, reference)
+    except Exception:
+        action = "clear" if reference is None else "publish"
+        logger.exception(
+            "Could not %s active inference reference on FournosJob %s", action, job_name
+        )
+        from projects.core.library.ci import add_notification_file
+
+        add_notification_file(
+            "rhaiis-inference-reference",
+            f"Could not {action} the active InferenceService reference on FournosJob "
+            f"{job_name}; check Forge test logs.",
+        )
+
+
+def _capture_and_cleanup(deployment_name: str, namespace: str) -> bool:
     from projects.rhaiis.toolbox.capture_isvc_state.main import run as capture_isvc_state
 
     logger.info("Capturing state")
@@ -947,5 +981,7 @@ def _capture_and_cleanup(deployment_name: str, namespace: str) -> None:
     logger.info("Cleaning up")
     try:
         cleanup_isvc(name=deployment_name, namespace=namespace)
+        return True
     except Exception:
         logger.warning("Cleanup failed", exc_info=True)
+        return False
