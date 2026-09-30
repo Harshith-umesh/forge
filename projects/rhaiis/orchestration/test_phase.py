@@ -326,11 +326,7 @@ def _run_test(
                 _run_warmup_step(**step_kwargs)
 
         if profiler_enabled:
-            try:
-                _upload_profiler_traces(model_cfg, gpu_type, engine_args, profiler_cfg)
-            except Exception:
-                logger.exception("Profiler trace upload failed")
-                _warnings.append("Profiler trace upload failed")
+            _upload_profiler_traces(model_cfg, gpu_type, engine_args, profiler_cfg)
 
         # Phase 2: benchmark + post-processing for ALL workloads
         trtllm_cfg = runtime_config.get_trtllm_config() if engine == "trtllm" else None
@@ -840,10 +836,7 @@ def _run_profiler_step(
             )
 
     logger.info("Copying profiler traces from pod")
-    try:
-        copy_profiler_traces(name=deployment_name, namespace=namespace)
-    except Exception:
-        logger.warning("Failed to copy profiler traces", exc_info=True)
+    copy_profiler_traces(name=deployment_name, namespace=namespace)
 
 
 def _derive_profiler_label(workload: dict) -> str:
@@ -892,15 +885,13 @@ def _upload_profiler_traces(
         Path(env.ARTIFACT_DIR).glob("*__copy_profiler_traces/artifacts/traces/trace_*")
     )
     if not trace_files:
-        logger.info("No rank-0 profiler traces to upload")
-        return
+        raise RuntimeError("No rank-0 profiler traces found to upload")
 
     logger.info("Found %d rank-0 profiler trace files across profiler captures", len(trace_files))
 
     version = config.project.get_config("tests.rhaiis.version", "")
     if not version:
-        logger.info("No version configured, skipping profiler trace upload")
-        return
+        raise ValueError("tests.rhaiis.version is required to upload profiler traces")
 
     profile_labels = profiler_cfg.get("labels", [])
     if not profile_labels:
@@ -927,6 +918,13 @@ def _upload_profiler_traces(
         dry_run=config.project.get_config("caliper.export.dry_run", False),
     )
     logger.info("Profiler trace upload result: %s", result)
+    if result.get("status") != "success":
+        raise RuntimeError("Profiler trace upload did not complete successfully")
+    if not result.get("dry_run") and result.get("uploaded") != len(trace_files):
+        raise RuntimeError(
+            f"Profiler trace upload incomplete: {result.get('uploaded', 0)} "
+            f"of {len(trace_files)} files uploaded"
+        )
 
 
 def _capture_and_cleanup(deployment_name: str, namespace: str) -> None:
