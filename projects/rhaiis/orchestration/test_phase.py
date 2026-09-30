@@ -11,6 +11,7 @@ import yaml
 from projects.core.library import env
 from projects.core.library.postprocess import create_test_metadata, run_and_postprocess
 from projects.rhaiis.orchestration import runtime_config
+from projects.rhaiis.orchestration.fournos_status import patch_fjob_relevant_deployments
 
 logger = logging.getLogger(__name__)
 
@@ -282,6 +283,19 @@ def _run_test(
             inferenceservice_file=str(isvc_file),
         )
 
+        if fjob_name:
+            patch_fjob_relevant_deployments(
+                fjob_name,
+                fjob_ns,
+                {
+                    "apiVersion": "serving.kserve.io/v1beta1",
+                    "kind": "InferenceService",
+                    "name": deployment_name,
+                    "namespace": namespace,
+                    "runUUID": run_uuid,
+                },
+            )
+
         logger.info("Waiting for InferenceService to be ready")
         wait_isvc_ready(
             name=deployment_name,
@@ -375,7 +389,8 @@ def _run_test(
         except Exception:
             logger.warning("Setting MLflow metadata failed; continuing", exc_info=True)
     finally:
-        _capture_and_cleanup(deployment_name, namespace)
+        if _capture_and_cleanup(deployment_name, namespace) and fjob_name:
+            patch_fjob_relevant_deployments(fjob_name, fjob_ns, None)
 
     try:
         _upload_predictor_log(run_uuid)
@@ -933,7 +948,7 @@ def _upload_profiler_traces(
     logger.info("Profiler trace upload result: %s", result)
 
 
-def _capture_and_cleanup(deployment_name: str, namespace: str) -> None:
+def _capture_and_cleanup(deployment_name: str, namespace: str) -> bool:
     from projects.rhaiis.toolbox.capture_isvc_state.main import run as capture_isvc_state
 
     logger.info("Capturing state")
@@ -947,5 +962,7 @@ def _capture_and_cleanup(deployment_name: str, namespace: str) -> None:
     logger.info("Cleaning up")
     try:
         cleanup_isvc(name=deployment_name, namespace=namespace)
+        return True
     except Exception:
         logger.warning("Cleanup failed", exc_info=True)
+        return False
