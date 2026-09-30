@@ -7,6 +7,8 @@ import logging
 import os
 import subprocess
 
+from projects.core.library import env
+
 logger = logging.getLogger(__name__)
 
 
@@ -30,6 +32,9 @@ def patch_fjob_relevant_deployments(
     reference: dict | None,
 ) -> None:
     """Patch only the Forge deployment reference in FournosJob status."""
+    if not env.running_inside_fournos():
+        return
+
     if not job_name:
         raise ValueError("FournosJob name is required")
 
