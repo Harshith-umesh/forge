@@ -282,6 +282,14 @@ def _extract_dashboard_metrics(node: BaseTestNode) -> tuple[dict[str, Any], dict
                 tokens = parsed_data
         except json.JSONDecodeError:
             tokens = dict(re.findall(r"(\w+)=([\d.]+)", data_text))
+    token_data = tokens
+    prefix_buckets = tokens.get("prefix_buckets")
+    if (
+        isinstance(prefix_buckets, list)
+        and len(prefix_buckets) == 1
+        and isinstance(prefix_buckets[0], dict)
+    ):
+        token_data = {**tokens, **prefix_buckets[0]}
     starts = [
         b.get("scheduler_metrics", {}).get("start_time", b.get("start_time")) for b in benchmarks
     ]
@@ -298,8 +306,12 @@ def _extract_dashboard_metrics(node: BaseTestNode) -> tuple[dict[str, Any], dict
         "prompt_toks": int(float(tokens["prompt_tokens"])) if "prompt_tokens" in tokens else "",
         "output_toks": int(float(tokens["output_tokens"])) if "output_tokens" in tokens else "",
         "turns": int(float(tokens["turns"])) if "turns" in tokens else "",
-        "prefix_tokens": int(float(tokens["prefix_tokens"])) if "prefix_tokens" in tokens else "",
-        "prefix_count": int(float(tokens["prefix_count"])) if "prefix_count" in tokens else "",
+        "prefix_tokens": (
+            int(float(token_data["prefix_tokens"])) if "prefix_tokens" in token_data else ""
+        ),
+        "prefix_count": (
+            int(float(token_data["prefix_count"])) if "prefix_count" in token_data else ""
+        ),
         "request_type": request_type,
         "guidellm_start_time_ms": int(min(starts) * 1000) if starts else "",
         "guidellm_end_time_ms": int(max(ends) * 1000) if ends else "",
