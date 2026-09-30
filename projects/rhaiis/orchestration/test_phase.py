@@ -701,6 +701,7 @@ def _maybe_send_success_notification(model_key: str, workload_keys: list[str]) -
         accelerator=accelerator,
         job_id=os.environ.get("FJOB_NAME", ""),
         slack_user=config.project.get_config("tests.rhaiis.slack_user", ""),
+        owner=config.project.get_config("ci_job.owner", "") or "",
         notification_vault="psap-forge-notifications",
         tp=str(tp),
         dp=str(dp),

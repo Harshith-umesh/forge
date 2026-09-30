@@ -79,6 +79,7 @@ def _check_pipeline_failure_and_notify() -> None:
             accelerator=accelerator_key,
             job_id=os.environ.get("FJOB_NAME", ""),
             slack_user=_cfg.project.get_config("tests.rhaiis.slack_user", ""),
+            owner=_cfg.project.get_config("ci_job.owner", "") or "",
             notification_vault="psap-forge-notifications",
             version=_cfg.project.get_config("tests.rhaiis.version", ""),
             cluster=cluster_tag,
