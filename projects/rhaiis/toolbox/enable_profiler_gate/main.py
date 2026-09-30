@@ -59,8 +59,7 @@ def toggle_profiler_gate(args, context):
 
     if args.clear_traces:
         shell.run(
-            f"oc exec {context.pod_name} -n {args.namespace} "
-            "-- sh -c 'rm -f /tmp/trace_*.json*'",
+            f"oc exec {context.pod_name} -n {args.namespace} -- sh -c 'rm -f /tmp/trace_*.json*'",
         )
 
     shell.run(
