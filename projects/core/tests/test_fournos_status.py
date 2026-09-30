@@ -1,4 +1,5 @@
 import json
+import shlex
 from types import SimpleNamespace
 
 import pytest
@@ -41,7 +42,7 @@ def test_patch_fjob_status_uses_status_subresource_and_management_context(monkey
         return SimpleNamespace(returncode=0, stderr="")
 
     monkeypatch.setenv("KUBECONFIG", "/tmp/target-cluster-config")
-    monkeypatch.setattr(fournos_status.subprocess, "run", fake_run)
+    monkeypatch.setattr(fournos_status.run, "run", fake_run)
 
     reference = {
         "apiVersion": "serving.kserve.io/v1beta1",
@@ -52,12 +53,14 @@ def test_patch_fjob_status_uses_status_subresource_and_management_context(monkey
     }
     fournos_status.patch_fjob_relevant_deployments("rhaiis-job", "psap-automation", reference)
 
-    command = captured["command"]
+    command = shlex.split(captured["command"])
     assert "--subresource=status" in command
     assert "--type=merge" in command
     patch_json = command[command.index("-p") + 1]
     assert json.loads(patch_json) == relevant_deployments_status_patch(reference)
     assert "KUBECONFIG" not in captured["kwargs"]["env"]
+    assert captured["kwargs"]["capture_stderr"] is True
+    assert captured["kwargs"]["timeout"] == 10
 
 
 def test_patch_fjob_status_reports_command_failure(monkeypatch) -> None:
@@ -66,7 +69,7 @@ def test_patch_fjob_status_reports_command_failure(monkeypatch) -> None:
     def fake_run(command, **kwargs):
         return SimpleNamespace(returncode=1, stderr="forbidden")
 
-    monkeypatch.setattr(fournos_status.subprocess, "run", fake_run)
+    monkeypatch.setattr(fournos_status.run, "run", fake_run)
 
     with pytest.raises(RuntimeError, match="forbidden"):
         fournos_status.patch_fjob_relevant_deployments("rhaiis-job", "psap-automation", None)
@@ -78,6 +81,6 @@ def test_patch_fjob_status_is_skipped_outside_fournos(monkeypatch) -> None:
     def fail_if_called(*args, **kwargs):
         raise AssertionError("oc patch must not run outside Fournos")
 
-    monkeypatch.setattr(fournos_status.subprocess, "run", fail_if_called)
+    monkeypatch.setattr(fournos_status.run, "run", fail_if_called)
 
     fournos_status.patch_fjob_relevant_deployments("", "psap-automation", None)

@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import logging
 import os
-import subprocess
+import shlex
 
-from projects.core.library import env
+from projects.core.library import env, run
 
 logger = logging.getLogger(__name__)
 
@@ -52,11 +52,10 @@ def patch_fjob_relevant_deployments(
     ]
     management_env = {key: value for key, value in os.environ.items() if key != "KUBECONFIG"}
     action = "clear" if reference is None else "publish"
-    result = subprocess.run(
-        command,
+    result = run.run(
+        shlex.join(command),
         check=False,
-        capture_output=True,
-        text=True,
+        capture_stderr=True,
         timeout=10,
         env=management_env,
     )

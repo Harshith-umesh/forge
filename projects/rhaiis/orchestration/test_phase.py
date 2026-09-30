@@ -389,7 +389,8 @@ def _run_test(
         except Exception:
             logger.warning("Setting MLflow metadata failed; continuing", exc_info=True)
     finally:
-        if _capture_and_cleanup(deployment_name, namespace) and fjob_name:
+        _capture_and_cleanup(deployment_name, namespace)
+        if fjob_name:
             _update_fjob_inference_reference(fjob_name, fjob_ns, None)
 
     try:
