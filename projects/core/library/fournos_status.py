@@ -1,4 +1,4 @@
-"""Publish the active RHAIIS inference resource on its FournosJob."""
+"""Publish active deployment references on FournosJob status."""
 
 from __future__ import annotations
 
@@ -28,10 +28,10 @@ def patch_fjob_relevant_deployments(
     job_name: str,
     namespace: str,
     reference: dict | None,
-) -> bool:
-    """Best-effort status-subresource merge patch; never replaces sibling status."""
+) -> None:
+    """Patch only the Forge deployment reference in FournosJob status."""
     if not job_name:
-        return True
+        raise ValueError("FournosJob name is required")
 
     command = [
         "oc",
@@ -47,33 +47,19 @@ def patch_fjob_relevant_deployments(
     ]
     management_env = {key: value for key, value in os.environ.items() if key != "KUBECONFIG"}
     action = "clear" if reference is None else "publish"
-    try:
-        result = subprocess.run(
-            command,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=10,
-            env=management_env,
-        )
-    except Exception:
-        logger.warning(
-            "Failed to %s active inference-service reference on FournosJob %s",
-            action,
-            job_name,
-            exc_info=True,
-        )
-        return False
+    result = subprocess.run(
+        command,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env=management_env,
+    )
 
     if result.returncode != 0:
-        logger.warning(
-            "Could not %s active inference-service reference on FournosJob %s (exit=%d): %s",
-            action,
-            job_name,
-            result.returncode,
-            (result.stderr or "").strip()[:500],
+        raise RuntimeError(
+            f"Could not {action} deployment reference on FournosJob {job_name} "
+            f"(exit={result.returncode}): {(result.stderr or '').strip()[:500]}"
         )
-        return False
 
-    logger.info("%s active inference-service reference on FournosJob %s", action.title(), job_name)
-    return True
+    logger.info("%s deployment reference on FournosJob %s", action.title(), job_name)

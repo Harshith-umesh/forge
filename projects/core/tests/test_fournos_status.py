@@ -1,8 +1,10 @@
 import json
 from types import SimpleNamespace
 
-from projects.rhaiis.orchestration import fournos_status
-from projects.rhaiis.orchestration.fournos_status import relevant_deployments_status_patch
+import pytest
+
+from projects.core.library import fournos_status
+from projects.core.library.fournos_status import relevant_deployments_status_patch
 
 
 def test_relevant_deployment_status_patch_sets_reference() -> None:
@@ -43,9 +45,7 @@ def test_patch_fjob_status_uses_status_subresource_and_management_context(monkey
         "namespace": "rhaiis",
         "runUUID": "run-1",
     }
-    assert fournos_status.patch_fjob_relevant_deployments(
-        "rhaiis-job", "psap-automation", reference
-    )
+    fournos_status.patch_fjob_relevant_deployments("rhaiis-job", "psap-automation", reference)
 
     command = captured["command"]
     assert "--subresource=status" in command
@@ -53,3 +53,13 @@ def test_patch_fjob_status_uses_status_subresource_and_management_context(monkey
     patch_json = command[command.index("-p") + 1]
     assert json.loads(patch_json) == relevant_deployments_status_patch(reference)
     assert "KUBECONFIG" not in captured["kwargs"]["env"]
+
+
+def test_patch_fjob_status_reports_command_failure(monkeypatch) -> None:
+    def fake_run(command, **kwargs):
+        return SimpleNamespace(returncode=1, stderr="forbidden")
+
+    monkeypatch.setattr(fournos_status.subprocess, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="forbidden"):
+        fournos_status.patch_fjob_relevant_deployments("rhaiis-job", "psap-automation", None)

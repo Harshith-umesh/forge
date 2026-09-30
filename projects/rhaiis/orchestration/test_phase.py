@@ -9,9 +9,9 @@ from pathlib import Path
 import yaml
 
 from projects.core.library import env
+from projects.core.library.fournos_status import patch_fjob_relevant_deployments
 from projects.core.library.postprocess import create_test_metadata, run_and_postprocess
 from projects.rhaiis.orchestration import runtime_config
-from projects.rhaiis.orchestration.fournos_status import patch_fjob_relevant_deployments
 
 logger = logging.getLogger(__name__)
 
@@ -284,7 +284,7 @@ def _run_test(
         )
 
         if fjob_name:
-            patch_fjob_relevant_deployments(
+            _update_fjob_inference_reference(
                 fjob_name,
                 fjob_ns,
                 {
@@ -390,7 +390,7 @@ def _run_test(
             logger.warning("Setting MLflow metadata failed; continuing", exc_info=True)
     finally:
         if _capture_and_cleanup(deployment_name, namespace) and fjob_name:
-            patch_fjob_relevant_deployments(fjob_name, fjob_ns, None)
+            _update_fjob_inference_reference(fjob_name, fjob_ns, None)
 
     try:
         _upload_predictor_log(run_uuid)
@@ -946,6 +946,24 @@ def _upload_profiler_traces(
         dry_run=config.project.get_config("caliper.export.dry_run", False),
     )
     logger.info("Profiler trace upload result: %s", result)
+
+
+def _update_fjob_inference_reference(job_name: str, namespace: str, reference: dict | None) -> None:
+    """Keep live-log status failures visible without failing the benchmark."""
+    try:
+        patch_fjob_relevant_deployments(job_name, namespace, reference)
+    except Exception:
+        action = "clear" if reference is None else "publish"
+        logger.exception(
+            "Could not %s active inference reference on FournosJob %s", action, job_name
+        )
+        from projects.core.library.ci import add_notification_file
+
+        add_notification_file(
+            "rhaiis-inference-reference",
+            f"Could not {action} the active InferenceService reference on FournosJob "
+            f"{job_name}; check Forge test logs.",
+        )
 
 
 def _capture_and_cleanup(deployment_name: str, namespace: str) -> bool:
