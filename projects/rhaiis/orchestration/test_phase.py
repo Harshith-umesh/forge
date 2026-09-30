@@ -800,7 +800,7 @@ def _run_profiler_step(
 
     profiler_max_seconds = profiler_cfg.get("max_seconds", 60)
 
-    for label in labels:
+    for label_index, label in enumerate(labels):
         logger.info("Profiling label=%s", label)
 
         gate_value = label if isinstance(label, str) else str(label)
@@ -808,6 +808,7 @@ def _run_profiler_step(
             name=deployment_name,
             namespace=namespace,
             gate_value=gate_value,
+            clear_traces=label_index == 0,
         )
 
         profiler_rates = profiler_cfg.get("rates", [1])
@@ -882,24 +883,19 @@ def _upload_profiler_traces(
     from pathlib import Path
 
     from projects.core.library import config
-    from projects.rhaiis.postprocess.s3_dashboard import upload_profiler_traces_to_s3
+    from projects.rhaiis.postprocess.s3_dashboard import (
+        select_rank0_profiler_traces,
+        upload_profiler_traces_to_s3,
+    )
 
-    trace_files = sorted(
+    trace_files = select_rank0_profiler_traces(
         Path(env.ARTIFACT_DIR).glob("*__copy_profiler_traces/artifacts/traces/trace_*")
     )
     if not trace_files:
-        logger.info("No profiler traces to upload")
+        logger.info("No rank-0 profiler traces to upload")
         return
 
-    traces_dir = trace_files[0].parent
-    if len({f.parent for f in trace_files}) > 1:
-        traces_dir = Path(env.ARTIFACT_DIR) / "artifacts" / "traces_combined"
-        traces_dir.mkdir(parents=True, exist_ok=True)
-        for f in trace_files:
-            import shutil
-
-            shutil.copy2(f, traces_dir / f.name)
-    logger.info("Found %d profiler trace files in %s", len(trace_files), traces_dir)
+    logger.info("Found %d rank-0 profiler trace files across profiler captures", len(trace_files))
 
     version = config.project.get_config("tests.rhaiis.version", "")
     if not version:
@@ -913,7 +909,7 @@ def _upload_profiler_traces(
 
     s3_cfg = config.project.get_config("rhaiis.s3", {})
     result = upload_profiler_traces_to_s3(
-        traces_dir,
+        trace_files,
         model_name=model_cfg.get("hf_model_id", ""),
         accelerator=accelerator,
         tp_size=int(
