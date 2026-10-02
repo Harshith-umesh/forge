@@ -332,7 +332,7 @@ def caliper_export_entrypoint(
             "No artifact directory found. Please set --artifact-dir parameter, "
             "caliper.export.from config, ARTIFACT_DIR, or ARTIFACT_BASE_DIR environment variable."
         )
-        return 1
+        return 1, ExitCategory.CONFIG_ERROR, "No artifact directory found"
 
     # Normalize artifact_dir to a pathlib.Path after precedence resolution
     artifact_dir = Path(artifact_dir)
