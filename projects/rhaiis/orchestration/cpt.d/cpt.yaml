@@ -354,6 +354,7 @@ cpt-rhaiis-3.6-mi355x:
     kimi-k2-6-fp8/tp8:
       __workloads: [profile1, profile4, profile5, profile7, profile6]
       rhaiis.engines.vllm.args.tensor-parallel-size: 8
+      rhaiis.engines.vllm.args.kv-cache-dtype: fp8
       rhaiis.engines.vllm.args.trust-remote-code: true
       rhaiis.engines.vllm.args.mm-encoder-tp-mode: data
       rhaiis.engines.vllm.args.tool-call-parser: kimi_k2
