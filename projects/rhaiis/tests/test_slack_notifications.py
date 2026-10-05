@@ -9,9 +9,9 @@ from projects.rhaiis.postprocess import regression
 def _capture_slack_messages(monkeypatch) -> list[str]:
     messages: list[str] = []
 
-    def capture(message: str, **_kwargs) -> bool:
+    def capture(message: str, **_kwargs) -> tuple[str | None, bool]:
         messages.append(message)
-        return True
+        return None, True
 
     monkeypatch.setattr(regression, "_send_via_topsail_bot", capture)
     monkeypatch.setattr(regression, "_build_mlflow_run_url", lambda: "")
@@ -22,12 +22,13 @@ def _capture_slack_messages(monkeypatch) -> list[str]:
 def test_failure_notification_includes_owner(monkeypatch) -> None:
     messages = _capture_slack_messages(monkeypatch)
 
-    assert regression.send_failure_notification(
+    _ts, ok = regression.send_failure_notification(
         error="test failure",
         job_id="rhaiis-run-123",
         slack_user="U01234567",
         owner="nmiriyal",
     )
+    assert ok
 
     assert len(messages) == 1
     assert "*Triggered by:* <@U01234567>\n*Owner:* nmiriyal\n" in messages[0]

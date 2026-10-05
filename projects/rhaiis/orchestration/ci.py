@@ -22,6 +22,43 @@ from projects.rhaiis.orchestration import runtime_config
 logger = logging.getLogger(__name__)
 
 
+def _post_notification_files_as_thread(
+    base_dir: Path, thread_ts: str, notification_vault: str
+) -> None:
+    """Post notification files from all pipeline steps as Slack thread replies."""
+    from projects.core.library.ci import get_ci_metadata_dir
+    from projects.rhaiis.postprocess.regression import (
+        RHAIIS_SLACK_CHANNEL_ID,
+        _send_via_topsail_bot,
+    )
+
+    for step_dir in sorted(base_dir.iterdir()):
+        if not step_dir.is_dir():
+            continue
+
+        try:
+            meta_dir = get_ci_metadata_dir(step_dir)
+        except ValueError:
+            continue
+
+        notifications_dir = meta_dir / "notifications"
+        if not notifications_dir.is_dir():
+            continue
+
+        for nf in sorted(notifications_dir.glob("*.txt")):
+            content = nf.read_text().strip()
+            if not content:
+                continue
+
+            message = f"*[{step_dir.name}]* {nf.stem}\n```{content[:1500]}```"
+            _send_via_topsail_bot(
+                message,
+                notification_vault=notification_vault,
+                channel_id=RHAIIS_SLACK_CHANNEL_ID,
+                thread_ts=thread_ts,
+            )
+
+
 def _check_pipeline_failure_and_notify() -> None:
     """Detect early pipeline failures (e.g. image pull errors) and send a Slack alert.
 
@@ -36,11 +73,14 @@ def _check_pipeline_failure_and_notify() -> None:
         if not base_dir.is_dir():
             return
 
-        test_dir = base_dir / "03__test"
-        test_ran = test_dir.exists()
+        test_dirs = [d for d in base_dir.glob("*__test") if d.is_dir()]
+        test_ran = any(test_dirs)
+        test_dir_names = {d.name for d in test_dirs}
 
         # Skip steps already handled by do_test's exception handler
-        failure_files = sorted(f for f in base_dir.glob("*/FAILURE") if f.parent.name != "03__test")
+        failure_files = sorted(
+            f for f in base_dir.glob("*/FAILURE.txt") if f.parent.name not in test_dir_names
+        )
 
         if not failure_files and test_ran:
             return
@@ -72,17 +112,22 @@ def _check_pipeline_failure_and_notify() -> None:
         accelerator = runtime_config.get_accelerator()
         cluster_tag = _cfg.project.get_config("rhaiis.cluster_tag", "")
 
-        send_failure_notification(
+        notification_vault = "psap-forge-notifications"
+        thread_ts, ok = send_failure_notification(
             error=error_text,
             model=model_name,
             accelerator=accelerator,
             job_id=os.environ.get("FJOB_NAME", ""),
             slack_user=_cfg.project.get_config("tests.rhaiis.slack_user", ""),
             owner=_cfg.project.get_config("ci_job.owner", "") or "",
-            notification_vault="psap-forge-notifications",
+            notification_vault=notification_vault,
             version=_cfg.project.get_config("tests.rhaiis.version", ""),
             cluster=cluster_tag,
         )
+
+        if ok and thread_ts:
+            _post_notification_files_as_thread(base_dir, thread_ts, notification_vault)
+
     except Exception:
         logger.warning("Failed to check/send pipeline failure notification", exc_info=True)
 
