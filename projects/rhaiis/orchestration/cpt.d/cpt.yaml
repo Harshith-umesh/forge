@@ -133,7 +133,7 @@ cpt-rhaiis-3.6-h200:
     - hera
     - zeus
     - old-zeus
-    - athena
+    - athena-fire
     - janus
   __models:
     qwen3-vl-30b/tp1:
