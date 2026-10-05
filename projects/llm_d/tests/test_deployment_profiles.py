@@ -73,6 +73,7 @@ def _test_preset_generates_expected_llmisvc(preset: str, tmp_path: Path):
     env_vars = os.environ.copy()
     env_vars["ARTIFACT_DIR"] = str(artifact_dir)
     env_vars.pop("KUBECONFIG", None)
+    env_vars["FORGE_SKIP_CLUSTER_CHECK"] = "1"
 
     # Run the CI script with the preset
     ci_script = PROJECT_ROOT / "projects" / "llm_d" / "orchestration" / "ci.py"
