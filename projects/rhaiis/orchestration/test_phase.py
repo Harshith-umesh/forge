@@ -269,7 +269,6 @@ def _run_test(
             model_id=model_cfg["hf_model_id"],
             service_account_name=deploy_cfg.get("service_account_name", ""),
             supplemental_groups=deploy_cfg.get("supplemental_groups"),
-            tolerations=deploy_cfg.get("tolerations"),
             labels=isvc_labels,
             profiler_ranges=profiler_ranges,
         )
