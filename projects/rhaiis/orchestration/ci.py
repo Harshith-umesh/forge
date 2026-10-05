@@ -14,6 +14,7 @@ from projects.core.agentic.config_review import trigger_config_review_for_ci
 from projects.core.agentic.on_failure import agent_review_on_failure
 from projects.core.ci_entrypoint.fournos_resolve import create_fournos_resolve_entrypoint
 from projects.core.library import ci as ci_lib
+from projects.core.library import config as _cfg
 from projects.core.library import env, vault
 from projects.core.library.ci import ensure_kubeconfig_works
 from projects.core.library.export import caliper_export_entrypoint
@@ -65,12 +66,19 @@ def _check_pipeline_failure_and_notify() -> None:
     Runs in the post-cleanup finally step. Checks whether prior steps
     produced FAILURE artifacts or the test step was skipped entirely.
     """
+
+    if not _cfg.project.get_config("caliper.export.notifications.enabled", False):
+        logging.info("Notifications not enabled, nothing to do")
+        return
+
     try:
         base_dir_env = os.environ.get("ARTIFACT_BASE_DIR", "")
         if not base_dir_env:
+            logging.warning("ARTIFACT_BASE_DIR not set, cannot send notification.")
             return
         base_dir = Path(base_dir_env)
         if not base_dir.is_dir():
+            logging.warning("ARTIFACT_BASE_DIR isn't a directory, cannot send notification.")
             return
 
         test_dirs = [d for d in base_dir.glob("*__test") if d.is_dir()]
@@ -83,6 +91,7 @@ def _check_pipeline_failure_and_notify() -> None:
         )
 
         if not failure_files and test_ran:
+            logging.info("No failure file, and test didn't run. No notification to send.")
             return
 
         errors = []
@@ -99,7 +108,6 @@ def _check_pipeline_failure_and_notify() -> None:
 
         error_text = "\n".join(errors)
 
-        from projects.core.library import config as _cfg
         from projects.rhaiis.postprocess.regression import send_failure_notification
 
         model_key = _cfg.project.get_config("tests.rhaiis.model_key", "unknown")
@@ -112,7 +120,7 @@ def _check_pipeline_failure_and_notify() -> None:
         accelerator = runtime_config.get_accelerator()
         cluster_tag = _cfg.project.get_config("rhaiis.cluster_tag", "")
 
-        notification_vault = "psap-forge-notifications"
+        notification_vault = _cfg.project.get_config("caliper.export.notifications")
         thread_ts, ok = send_failure_notification(
             error=error_text,
             model=model_name,
@@ -178,7 +186,9 @@ def main(ctx):
     vault.init(runtime_config.get_vaults())
     ensure_mlflow_destination_marker()
 
-    if ctx.invoked_subcommand != "export-artifacts":
+    if ctx.invoked_subcommand == "export-artifacts":
+        _check_pipeline_failure_and_notify()
+    else:
         ensure_kubeconfig_works()
 
 
@@ -213,7 +223,6 @@ def pre_cleanup(ctx):
 @ci_lib.safe_ci_entrypoint
 def post_cleanup(ctx):
     """Post-cleanup phase - Clean up resources after test."""
-    _check_pipeline_failure_and_notify()
     return prepare_rhaiis.cleanup()
 
 
