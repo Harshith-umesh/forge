@@ -19,7 +19,7 @@ from projects.core.agentic.on_failure import agent_review_on_failure
 from projects.core.ci_entrypoint.fournos_resolve import create_fournos_resolve_entrypoint
 from projects.core.library import ci as ci_lib
 from projects.core.library import config, env, run, vault
-from projects.core.library.ci import ExitCategory
+from projects.core.library.ci import ExitCategory, ensure_kubeconfig_works
 from projects.core.library.export import (
     caliper_agentic_list_vaults,
     caliper_export_entrypoint,
@@ -105,6 +105,9 @@ def main(ctx, preset):
 
     init_vaults_for_phase(ctx.invoked_subcommand)
     ensure_mlflow_destination_marker()
+
+    if ctx.invoked_subcommand != "export-artifacts":
+        ensure_kubeconfig_works()
 
 
 @main.command()

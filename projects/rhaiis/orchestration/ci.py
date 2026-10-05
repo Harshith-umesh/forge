@@ -15,6 +15,7 @@ from projects.core.agentic.on_failure import agent_review_on_failure
 from projects.core.ci_entrypoint.fournos_resolve import create_fournos_resolve_entrypoint
 from projects.core.library import ci as ci_lib
 from projects.core.library import env, vault
+from projects.core.library.ci import ensure_kubeconfig_works
 from projects.core.library.export import caliper_export_entrypoint
 from projects.rhaiis.orchestration import runtime_config
 
@@ -131,6 +132,9 @@ def main(ctx):
 
     vault.init(runtime_config.get_vaults())
     ensure_mlflow_destination_marker()
+
+    if ctx.invoked_subcommand != "export-artifacts":
+        ensure_kubeconfig_works()
 
 
 @main.command()
