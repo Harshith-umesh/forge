@@ -32,6 +32,10 @@ b200:
 athena:
   rhaiis.cluster_tag: "athena"
   rhaiis.deploy.image_pull_secrets: ["npalaska-image-pull"]
+  rhaiis.deploy.tolerations:
+    - key: "benchmark.llm-d.ai/test-gpu-amd64"
+      value: "true"
+      effect: "NoSchedule"
   benchmarks.guidellm.fs_group: 0
 
 janus:
