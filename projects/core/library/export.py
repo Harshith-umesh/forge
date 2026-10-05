@@ -24,6 +24,7 @@ from projects.caliper.orchestration.export import (
 from projects.caliper.orchestration.postprocess import POSTPROCESS_STATUS_FILENAME
 from projects.core.library import ci as ci_lib
 from projects.core.library import config, env, run
+from projects.core.library.ci import ExitCategory
 from projects.core.library.export_notifications import (
     BackendResult,
     CaliperArtifactsExport,
@@ -446,18 +447,15 @@ def caliper_export_entrypoint(
             logger.info("Skipping final artifacts upload due to --disable-file-export flag")
 
     if export_failed or notification_failed:
-        return 1, "failed"
+        return 1, ExitCategory.INTERNAL_ERROR, "Export or notification failed"
 
-    # Check if censoring occurred and return exit code 1 if so (unless disabled)
     if status and status.censoring_occurred:
         if DISABLE_CENSORING_TEST_FAILURE:
             logger.info(
                 "Censoring occurred but test failure disabled via DISABLE_CENSORING_TEST_FAILURE"
             )
         else:
-            return 1, "censoring_occurred"
-
-    return 0
+            return 1, ExitCategory.INTERNAL_ERROR, "Censoring occurred in exported artifacts"
 
 
 def _update_final_artifacts(artifact_dir, export_status: ExportStatus | None) -> None:
