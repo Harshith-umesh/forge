@@ -673,10 +673,6 @@ def _maybe_send_success_notification(model_key: str, workload_keys: list[str]) -
     """Send a Slack success notification if slack_notify_always is set and no regression check."""
     from projects.core.library import config
 
-    compare_version = config.project.get_config("tests.rhaiis.compare_version", "")
-    if compare_version:
-        return
-
     if not config.project.get_config("tests.rhaiis.slack_notify_always", False):
         return
 
