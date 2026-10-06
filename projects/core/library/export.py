@@ -557,6 +557,7 @@ def _update_artifacts(
         artifact_dir_path / "run.log",
         artifact_dir_path / "status.yaml",
         artifact_dir_path / "COMPLETION-NOTIFICATION.md",
+        artifact_dir_path / "SLACK-NOTIFICATION.txt",
         artifact_dir_path / "000__ci_metadata" / "fournos_fjob.yaml",
     ]:
         if fpath.is_file():

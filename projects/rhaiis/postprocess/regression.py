@@ -19,8 +19,11 @@ from projects.core.library import vault
 logger = logging.getLogger(__name__)
 
 
-RHAIIS_SLACK_CHANNEL_ID = "C0B9T6JUW74"
-CHAI_BOT_USER_ID = "U0AKNPBBVT7"  # Chai Bot — automated failure triage
+def _get_slack_channel_id() -> str:
+    from projects.core.library import config
+
+    return config.project.get_config("tests.rhaiis.slack_channel_id", "")
+
 
 _SLACK_USER_RE = re.compile(r"^[UW][A-Z0-9]+$")
 _SLACK_GROUP_RE = re.compile(r"^S[A-Z0-9]+$")
@@ -43,38 +46,28 @@ def _format_owner_line(owner: str) -> str:
 
 
 def _send_via_topsail_bot(
-    message: str,
-    *,
-    notification_vault: str | None = None,
-    channel_id: str | None = None,
-    thread_ts: str | None = None,
-) -> tuple[str | None, bool]:
-    """Send a Slack message using the topsail bot token from the forge notifications vault.
-
-    Returns:
-        (thread_ts, success) — thread_ts of the posted message, or None on failure.
-    """
+    message: str, *, notification_vault: str | None = None, channel_id: str | None = None
+) -> bool:
+    """Send a Slack message using the topsail bot token from the forge notifications vault."""
     vault_name = notification_vault or "psap-forge-notifications"
     try:
         token_path = vault.get_vault_content_path(vault_name, "topsail-bot.slack-token")
     except Exception:
         logger.warning("Cannot resolve topsail bot token from vault %s", vault_name)
-        return None, False
+        return False
 
     if not token_path or not token_path.exists():
         logger.warning("topsail-bot.slack-token not found in vault %s", vault_name)
-        return None, False
+        return False
 
     token = token_path.read_text().strip()
     client = slack_api.init_client(token)
     if not client:
         logger.error("Failed to init Slack client with topsail bot token")
-        return None, False
+        return False
 
-    ts, ok = slack_api.send_message(
-        client, message=message, main_ts=thread_ts, channel_id=channel_id
-    )
-    return ts, ok
+    _, ok = slack_api.send_message(client, message=message, channel_id=channel_id)
+    return ok
 
 
 # ---------------------------------------------------------------------------
@@ -555,169 +548,6 @@ def send_regression_notification(
         logger.info("DRY RUN regression notification:\n%s", message)
         return True
 
-    _, ok = _send_via_topsail_bot(
-        message, notification_vault=notification_vault, channel_id=RHAIIS_SLACK_CHANNEL_ID
-    )
-    return ok
-
-
-def send_success_notification(
-    *,
-    model: str = "",
-    accelerator: str = "",
-    job_id: str = "",
-    slack_user: str = "",
-    owner: str = "",
-    notification_vault: str | None = None,
-    dry_run: bool = False,
-    tp: str = "",
-    dp: str = "",
-    version: str = "",
-    workload_keys: list[str] | None = None,
-    cluster: str = "",
-    engine: str = "",
-) -> bool:
-    """Send a Slack notification when the RHAIIS pipeline succeeds with no regressions.
-
-    Args:
-        owner: Fournos job owner
-
-    Returns:
-        True if notification sent successfully
-    """
-    user_line = _format_slack_user_line(slack_user)
-    owner_line = _format_owner_line(owner)
-
-    parallelism_parts = []
-    if tp:
-        parallelism_parts.append(f"TP={tp}")
-    if dp:
-        parallelism_parts.append(f"DP={dp}")
-    parallelism_line = (
-        f"*Parallelism:* {', '.join(parallelism_parts)}\n" if parallelism_parts else ""
-    )
-
-    profiles_line = ""
-    if workload_keys:
-        profiles_line = f"*Workloads:* {', '.join(workload_keys)}\n"
-
-    cluster_line = f"*Cluster:* {cluster}\n" if cluster else ""
-    version_line = f"*Version:* {version}\n" if version else ""
-    engine_line = f"*Engine:* {engine}\n" if engine else ""
-
-    dashboard_line = ""
-    try:
-        from projects.core.library import config
-
-        if config.project.get_config("caliper.postprocess.csv_dashboard.enabled", False):
-            dashboard_url = _build_dashboard_url(
-                model=model,
-                accelerator=accelerator,
-                current_version=version,
-                profiles=workload_keys,
-                tp=tp,
-            )
-            dashboard_line = f"*Dashboard:* <{dashboard_url}|View Dashboard>\n"
-    except Exception:
-        logger.warning("Failed to build dashboard URL for notification", exc_info=True)
-
-    mlflow_url = _build_mlflow_run_url()
-    mlflow_line = f"*MLflow:* <{mlflow_url}|View Run>\n" if mlflow_url else ""
-
-    message = (
-        f":white_check_mark: *RHAIIS Pipeline Succeeded*\n"
-        f"{user_line}"
-        f"{owner_line}"
-        f"*Job:* `{job_id}`\n"
-        f"*Model:* {model}\n"
-        f"*Accelerator:* {accelerator}\n"
-        f"{parallelism_line}"
-        f"{engine_line}"
-        f"{version_line}"
-        f"{cluster_line}"
-        f"{profiles_line}"
-        f"{dashboard_line}"
-        f"{mlflow_line}"
-    )
-
-    if dry_run:
-        logger.info("DRY RUN success notification:\n%s", message)
-        return True
-
-    _, ok = _send_via_topsail_bot(
-        message, notification_vault=notification_vault, channel_id=RHAIIS_SLACK_CHANNEL_ID
-    )
-    return ok
-
-
-def send_failure_notification(
-    *,
-    error: str,
-    model: str = "",
-    accelerator: str = "",
-    job_id: str = "",
-    slack_user: str = "",
-    owner: str = "",
-    notification_vault: str | None = None,
-    dry_run: bool = False,
-    tp: str = "",
-    dp: str = "",
-    version: str = "",
-    workload_keys: list[str] | None = None,
-    cluster: str = "",
-    engine: str = "",
-) -> tuple[str | None, bool]:
-    """Send a Slack alert when the RHAIIS pipeline fails.
-
-    Returns:
-        (thread_ts, success) — thread_ts of the posted message for thread replies.
-    """
-    user_line = _format_slack_user_line(slack_user)
-    owner_line = _format_owner_line(owner)
-
-    parallelism_parts = []
-    if tp:
-        parallelism_parts.append(f"TP={tp}")
-    if dp:
-        parallelism_parts.append(f"DP={dp}")
-    parallelism_line = (
-        f"*Parallelism:* {', '.join(parallelism_parts)}\n" if parallelism_parts else ""
-    )
-
-    profiles_line = ""
-    if workload_keys:
-        profiles_line = f"*Workloads:* {', '.join(workload_keys)}\n"
-
-    cluster_line = f"*Cluster:* {cluster}\n" if cluster else ""
-    version_line = f"*Version:* {version}\n" if version else ""
-    engine_line = f"*Engine:* {engine}\n" if engine else ""
-
-    error_text = error if len(error) <= 500 else error[:500] + "..."
-
-    mlflow_url = _build_mlflow_run_url()
-    mlflow_line = f"*MLflow:* <{mlflow_url}|View Run>\n" if mlflow_url else ""
-
-    message = (
-        f":x: *RHAIIS Pipeline Failed*\n"
-        f"{user_line}"
-        f"{owner_line}"
-        f"*Job:* `{job_id}`\n"
-        f"*Model:* {model}\n"
-        f"*Accelerator:* {accelerator}\n"
-        f"{parallelism_line}"
-        f"{engine_line}"
-        f"{version_line}"
-        f"{cluster_line}"
-        f"{profiles_line}"
-        f"{mlflow_line}"
-        f"*Error:*\n```{error_text}```"
-        f"\n<@{CHAI_BOT_USER_ID}>"
-    )
-
-    if dry_run:
-        logger.info("DRY RUN failure notification:\n%s", message)
-        return None, True
-
     return _send_via_topsail_bot(
-        message, notification_vault=notification_vault, channel_id=RHAIIS_SLACK_CHANNEL_ID
+        message, notification_vault=notification_vault, channel_id=_get_slack_channel_id()
     )
