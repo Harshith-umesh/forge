@@ -302,6 +302,7 @@ cpt-rhaiis-3.6-mi355x:
   __description: "RHAIIS 3.6 release regression — MI355X model matrix"
   __engine: vllm
   rhaiis.engines.vllm.args.enable-prefix-caching: true
+  rhaiis.profiler.ranges: "100-103"
   __accelerator: amd
   __gpu_type: mi355x
   __clusters: [mi355x]
