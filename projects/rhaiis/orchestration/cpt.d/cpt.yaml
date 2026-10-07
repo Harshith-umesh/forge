@@ -374,6 +374,8 @@ cpt-rhaiis-3.6-mi355x:
       rhaiis.env_vars.VLLM_ROCM_USE_AITER_LINEAR: "0"
       rhaiis.env_vars.MIOPEN_CUSTOM_CACHE_DIR: /tmp/.cache/miopen
       rhaiis.env_vars.MIOPEN_USER_DB_PATH: /tmp/.config/miopen
+      rhaiis.env_vars.NUMBA_NUM_THREADS: 16
+      rhaiis.env_vars.OPENBLAS_NUM_THREADS: 32
       benchmarks.guidellm.args.tokenizer: '{"kind":"huggingface_auto","model":"RedHatAI/Kimi-K2.6-FP8-BLOCK","load_kwargs":{"trust_remote_code":true}}'
     kimi-k3/tp8:
       __workloads: [profile1, profile4, profile5, profile7, profile6]
