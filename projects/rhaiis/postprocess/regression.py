@@ -25,6 +25,15 @@ def _get_slack_channel_id() -> str:
     return config.project.get_config("tests.rhaiis.slack_channel_id", "")
 
 
+def _get_bot_mention() -> str:
+    from projects.core.library import config
+
+    bot_user_id = config.project.get_config("tests.rhaiis.slack_bot_user_id", "", print=False)
+    if not bot_user_id:
+        return ""
+    return f"\n<@{bot_user_id}>"
+
+
 _SLACK_USER_RE = re.compile(r"^[UW][A-Z0-9]+$")
 _SLACK_GROUP_RE = re.compile(r"^S[A-Z0-9]+$")
 
@@ -541,7 +550,7 @@ def send_regression_notification(
         f"{dashboard_line}"
         f"{mlflow_line}"
         f"*Changes:*\n{details}"
-        f"\n<@{CHAI_BOT_USER_ID}>"
+        f"{_get_bot_mention()}"
     )
 
     if dry_run:
