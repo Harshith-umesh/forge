@@ -104,6 +104,22 @@ class SlackNotificationProvider(ABC):
         return True
 
     # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _save_message_to_file(message: str, context: NotificationContext) -> None:
+        """Persist the formatted Slack message to the artifact directory."""
+        if not context.artifact_dir:
+            return
+        try:
+            notification_file = context.artifact_dir / "SLACK-NOTIFICATION.txt"
+            notification_file.write_text(message + "\n")
+            logger.info("Wrote Slack notification to %s", notification_file)
+        except Exception:
+            logger.warning("Failed to save Slack notification to file", exc_info=True)
+
+    # ------------------------------------------------------------------
     # Dispatch (not meant to be overridden in most cases)
     # ------------------------------------------------------------------
 
@@ -123,6 +139,7 @@ class SlackNotificationProvider(ABC):
 
         channel_id = self.get_channel_id()
         message = self.format_message(context)
+        self._save_message_to_file(message, context)
 
         if context.extra.get("_skip_notification"):
             logger.info("Provider %s: _skip_notification set, skipping", type(self).__name__)
