@@ -390,7 +390,9 @@ def _send_slack_provider_notification(
             status=censored_status,
             finish_reason=str(finish_reason),
             project_name=project or "unknown",
-            pr_number=os.environ.get("PULL_NUMBER"),
+            pr_number=str(pr_num)
+            if (pr_num := config.project.get_config("ci_job.gh.pr.num", None, print=False))
+            else None,
             job_type=os.environ.get("JOB_TYPE"),
             artifact_dir=artifact_dir,
         )

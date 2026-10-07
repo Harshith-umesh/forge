@@ -80,6 +80,25 @@ class SlackNotificationProvider(ABC):
             return f"Thread for {context.project_name} periodic `{job_name}`"
         return f"Thread for {context.project_name} run"
 
+    def get_thread_channel_message(self, context: NotificationContext, anchor: str) -> str:
+        """Return the channel message that creates the thread.
+
+        The anchor is used for searching; this message is what gets posted.
+        Override to add extra info (e.g. PR title) to the visible message.
+        """
+        BASE_ANCHOR = f"🧵 {anchor}"
+
+        if not context.pr_number:
+            return BASE_ANCHOR
+
+        from projects.core.library import config
+
+        title = config.project.get_config("ci_job.gh.pr.title", None, print=False)
+        if not title:
+            return BASE_ANCHOR
+
+        return f"{BASE_ANCHOR}\n```{title}```"
+
     def should_notify(self, context: NotificationContext) -> bool:
         """Return True if notification should be sent. Default: always notify."""
         return True
@@ -119,7 +138,7 @@ class SlackNotificationProvider(ABC):
         channel_msg_ts, _ = slack_api.search_channel_message(client, anchor, channel_id=channel_id)
 
         if not channel_msg_ts:
-            channel_message = f"🧵 {anchor}"
+            channel_message = self.get_thread_channel_message(context, anchor)
             if dry_run:
                 logger.info("Would post channel message: %s", channel_message)
             else:
