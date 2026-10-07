@@ -387,13 +387,10 @@ def ci_banner(project: str, operation: str, args: list[str]):
     try:
         run.run("git fetch --quiet origin main --deepen=20", check=False, timeout=30)
 
-        result = run.run(
-            f"git show --quiet --oneline {base_sha}..{pull_sha} | head -20",
-            check=False,
+        run.run(
+            f"git show --quiet --oneline {base_sha}..{pull_sha} -n 20",
             timeout=30,
         )
-        if result.returncode != 0:
-            logger.warning("Could not access git history (main..) ...")
     except subprocess.TimeoutExpired:
         logger.warning("Git banner commands timed out after 30s, continuing CI setup")
     except Exception as e:
