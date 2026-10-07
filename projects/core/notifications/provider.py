@@ -103,6 +103,10 @@ class SlackNotificationProvider(ABC):
         """Return True if notification should be sent. Default: always notify."""
         return True
 
+    def reply_broadcast(self, context: NotificationContext) -> bool:
+        """Return True to also post the thread reply in the channel. Default: False."""
+        return False
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -170,6 +174,10 @@ class SlackNotificationProvider(ABC):
             return True
 
         _, ok = slack_api.send_message(
-            client, message=message, main_ts=channel_msg_ts, channel_id=channel_id
+            client,
+            message=message,
+            main_ts=channel_msg_ts,
+            channel_id=channel_id,
+            reply_broadcast=self.reply_broadcast(context),
         )
         return ok
