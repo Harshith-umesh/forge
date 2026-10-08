@@ -80,9 +80,48 @@ class SlackNotificationProvider(ABC):
             return f"Thread for {context.project_name} periodic `{job_name}`"
         return f"Thread for {context.project_name} run"
 
+    def get_thread_channel_message(self, context: NotificationContext, anchor: str) -> str:
+        """Return the channel message that creates the thread.
+
+        The anchor is used for searching; this message is what gets posted.
+        Override to add extra info (e.g. PR title) to the visible message.
+        """
+        BASE_ANCHOR = f"🧵 {anchor}"
+
+        if not context.pr_number:
+            return BASE_ANCHOR
+
+        from projects.core.library import config
+
+        title = config.project.get_config("ci_job.gh.pr.title", None, print=False)
+        if not title:
+            return BASE_ANCHOR
+
+        return f"{BASE_ANCHOR}\n```{title}```"
+
     def should_notify(self, context: NotificationContext) -> bool:
         """Return True if notification should be sent. Default: always notify."""
         return True
+
+    def reply_broadcast(self, context: NotificationContext) -> bool:
+        """Return True to also post the thread reply in the channel. Default: False."""
+        return False
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _save_message_to_file(message: str, context: NotificationContext) -> None:
+        """Persist the formatted Slack message to the artifact directory."""
+        if not context.artifact_dir:
+            return
+        try:
+            notification_file = context.artifact_dir / "SLACK-NOTIFICATION.txt"
+            notification_file.write_text(message + "\n")
+            logger.info("Wrote Slack notification to %s", notification_file)
+        except Exception:
+            logger.warning("Failed to save Slack notification to file", exc_info=True)
 
     # ------------------------------------------------------------------
     # Dispatch (not meant to be overridden in most cases)
@@ -104,6 +143,7 @@ class SlackNotificationProvider(ABC):
 
         channel_id = self.get_channel_id()
         message = self.format_message(context)
+        self._save_message_to_file(message, context)
 
         if context.extra.get("_skip_notification"):
             logger.info("Provider %s: _skip_notification set, skipping", type(self).__name__)
@@ -119,7 +159,7 @@ class SlackNotificationProvider(ABC):
         channel_msg_ts, _ = slack_api.search_channel_message(client, anchor, channel_id=channel_id)
 
         if not channel_msg_ts:
-            channel_message = f"🧵 {anchor}"
+            channel_message = self.get_thread_channel_message(context, anchor)
             if dry_run:
                 logger.info("Would post channel message: %s", channel_message)
             else:
@@ -134,6 +174,10 @@ class SlackNotificationProvider(ABC):
             return True
 
         _, ok = slack_api.send_message(
-            client, message=message, main_ts=channel_msg_ts, channel_id=channel_id
+            client,
+            message=message,
+            main_ts=channel_msg_ts,
+            channel_id=channel_id,
+            reply_broadcast=self.reply_broadcast(context),
         )
         return ok

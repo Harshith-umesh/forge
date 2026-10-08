@@ -200,22 +200,6 @@ def run_regression_check(
                 tp=str(tp),
                 dp=str(dp),
             )
-        elif config.project.get_config("tests.rhaiis.slack_notify_always", False):
-            from projects.rhaiis.postprocess.regression import send_success_notification
-
-            send_success_notification(
-                model=model_cfg.get("hf_model_id", ""),
-                accelerator=accelerator,
-                job_id=run_uuid,
-                slack_user=slack_user,
-                owner=owner,
-                notification_vault="psap-forge-notifications",
-                tp=str(tp),
-                dp=str(dp),
-                version=current_version,
-                workload_keys=config.project.get_config("tests.rhaiis.workload_keys", []),
-                cluster=config.project.get_config("rhaiis.cluster_tag", ""),
-            )
     except Exception:
         logger.warning("Regression analysis failed; continuing", exc_info=True)
     finally:
