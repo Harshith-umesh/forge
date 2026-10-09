@@ -11,6 +11,8 @@ from datetime import UTC
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
+import markdown as md_lib
+
 logger = logging.getLogger(__name__)
 
 AGENT_TIMEOUT_SECONDS = 600
@@ -266,14 +268,7 @@ def markdown_to_html(
     compare_version: str,
 ) -> str:
     """Convert markdown analysis to a self-contained HTML page."""
-    try:
-        import markdown as md_lib
-
-        body = md_lib.markdown(md_text, extensions=["tables", "fenced_code"])
-    except ImportError:
-        import html as html_lib
-
-        body = f"<pre>{html_lib.escape(md_text)}</pre>"
+    body = md_lib.markdown(md_text, extensions=["tables", "fenced_code"])
 
     from datetime import datetime
 
