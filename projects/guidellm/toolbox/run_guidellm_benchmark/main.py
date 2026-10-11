@@ -519,17 +519,38 @@ def extract_results_from_copy_pod(args, ctx, results_dir: Path):
         # Save compressed version to temp file first
         temp_gz_path = local_path.with_suffix(".json.gz")
 
+        remote_gz_path = f"{remote_path}.gz"
+
+        compress_result = oc(
+            "exec",
+            "-n",
+            ctx.target_namespace,
+            f"{ctx.benchmark_name}-copy",
+            "--",
+            "gzip",
+            "-kf",
+            remote_path,
+            check=False,
+            timeout_seconds=1800,
+        )
+        if compress_result.returncode != 0:
+            raise RuntimeError(
+                f"Failed to create compressed results for {ctx.benchmark_name} run {run.label}"
+            )
+
         result = oc(
             "cp",
             "-n",
             ctx.target_namespace,
-            f"{ctx.benchmark_name}-copy:{remote_path}",
-            str(local_path),
+            f"{ctx.benchmark_name}-copy:{remote_gz_path}",
+            str(temp_gz_path),
             check=False,
             timeout_seconds=1800,
         )
-        if result.returncode != 0:
-            raise RuntimeError(f"No results found for {ctx.benchmark_name} run {run.label}")
+        if result.returncode != 0 or not temp_gz_path.exists() or temp_gz_path.stat().st_size == 0:
+            raise RuntimeError(
+                f"Failed to copy compressed results for {ctx.benchmark_name} run {run.label}"
+            )
 
         # Extract and parse JSON from local compressed file
         logger.info(f"Extracting compressed benchmark file for {run.label}...")
@@ -610,19 +631,42 @@ def extract_results_from_sidecar(args, ctx, results_dir: Path):
         # Save compressed version to temp file first
         temp_gz_path = local_path.with_suffix(".json.gz")
 
+        remote_gz_path = f"{remote_path}.gz"
+
+        compress_result = oc(
+            "exec",
+            "-n",
+            ctx.target_namespace,
+            pod_name,
+            "-c",
+            "guidellm-sidecar",
+            "--",
+            "gzip",
+            "-kf",
+            remote_path,
+            check=False,
+            timeout_seconds=1800,
+        )
+        if compress_result.returncode != 0:
+            raise RuntimeError(
+                f"Failed to create compressed results for {ctx.benchmark_name} run {run.label}"
+            )
+
         result = oc(
             "cp",
             "-n",
             ctx.target_namespace,
             "-c",
             "guidellm-sidecar",
-            f"{pod_name}:{remote_path}",
-            str(local_path),
+            f"{pod_name}:{remote_gz_path}",
+            str(temp_gz_path),
             check=False,
             timeout_seconds=1800,
         )
-        if result.returncode != 0:
-            raise RuntimeError(f"No results found for {ctx.benchmark_name} run {run.label}")
+        if result.returncode != 0 or not temp_gz_path.exists() or temp_gz_path.stat().st_size == 0:
+            raise RuntimeError(
+                f"Failed to copy compressed results for {ctx.benchmark_name} run {run.label}"
+            )
 
         # Extract and parse JSON from local compressed file
         logger.info(f"Extracting compressed benchmark file for {run.label}...")
