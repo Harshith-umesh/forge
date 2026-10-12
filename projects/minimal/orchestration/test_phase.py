@@ -86,6 +86,22 @@ def test():
     return run_and_postprocess(do_test)
 
 
+def extract_kpi_labels_from_config() -> dict[str, str]:
+    kpi_labels = {}
+    kpi_labels.update(config.project.get_config("cpt.kpi.labels"))
+
+    for k, v in list(kpi_labels.items()):
+        if v is None:
+            del kpi_labels[k]
+
+    model_name = get_model_name()
+    if not model_name:
+        raise ValueError("model_name is required but not configured")
+    kpi_labels["model_name"] = model_name
+
+    return kpi_labels
+
+
 def create_custom_test_metadata():
     model_name = get_model_name()
     benchmark_key = get_benchmark_key()
@@ -95,9 +111,12 @@ def create_custom_test_metadata():
     }
     if benchmark_key:
         labels["benchmark_key"] = benchmark_key
+        labels["guidellm_loadshape"] = benchmark_key
+
+    kpi_labels = extract_kpi_labels_from_config()
 
     test_dir = env.ARTIFACT_DIR
-    create_test_metadata(test_dir, labels)
+    create_test_metadata(test_dir, labels, kpi_labels=kpi_labels)
     return test_dir
 
 
