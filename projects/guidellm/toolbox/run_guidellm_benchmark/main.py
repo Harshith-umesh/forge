@@ -78,7 +78,7 @@ def run(
     endpoint_url: str,
     name: str = "guidellm-benchmark",
     namespace: str = "",
-    image: str = "ghcr.io/vllm-project/guidellm:v0.7.4",
+    image: str = "ghcr.io/vllm-project/guidellm:v0.8.1",
     timeout: int = 900,
     pvc_size: str = "1Gi",
     pvc_storage_class: str | None = None,
