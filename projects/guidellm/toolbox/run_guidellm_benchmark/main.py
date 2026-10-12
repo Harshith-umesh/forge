@@ -38,6 +38,24 @@ logger = logging.getLogger(__name__)
 WAIT_POLL_INTERVAL_SECONDS = 10
 JOB_COMPLETION_GRACE_SECONDS = 60
 
+# Script template for trimming benchmark JSON on remote pod (removes 'requests' field)
+# Use REMOTE_TRIM_SCRIPT.format(file_path=...) to generate the script
+REMOTE_TRIM_SCRIPT = """
+import json
+
+def trim(obj):
+    if isinstance(obj, dict):
+        return {{k: trim(v) for k, v in obj.items() if k != 'requests'}}
+    if isinstance(obj, list):
+        return [trim(i) for i in obj]
+    return obj
+
+with open('{file_path}') as f:
+    data = json.load(f)
+with open('{file_path}', 'w') as f:
+    json.dump(trim(data), f, separators=(',', ':'))
+""".strip()
+
 
 _REQUEST_BULK_FIELDS = {"request_args", "output", "reasoning_output"}
 
@@ -574,6 +592,27 @@ def extract_results_from_copy_pod(args, ctx, results_dir: Path):
 
         remote_gz_path = f"{remote_path}.gz"
 
+        # Trim on copy pod before compression if we don't need to keep the full file
+        # This dramatically reduces file size (1GB+ → ~40MB) before transfer
+        if not args.keep_full_benchmark_file:
+            logger.info(f"Trimming benchmark file on copy pod for {run.label}...")
+            trim_result = oc(
+                "exec",
+                "-n",
+                ctx.target_namespace,
+                f"{ctx.benchmark_name}-copy",
+                "--",
+                "python3",
+                "-c",
+                REMOTE_TRIM_SCRIPT.format(file_path=remote_path),
+                check=False,
+                timeout_seconds=1800,
+            )
+            if trim_result.returncode != 0:
+                logger.warning(
+                    f"Failed to trim on copy pod for {run.label}, will trim locally: {trim_result.stderr}"
+                )
+
         compress_result = oc(
             "exec",
             "-n",
@@ -685,6 +724,29 @@ def extract_results_from_sidecar(args, ctx, results_dir: Path):
         temp_gz_path = local_path.with_suffix(".json.gz")
 
         remote_gz_path = f"{remote_path}.gz"
+
+        # Trim on sidecar before compression if we don't need to keep the full file
+        # This dramatically reduces file size (1GB+ → ~40MB) before transfer
+        if not args.keep_full_benchmark_file:
+            logger.info(f"Trimming benchmark file on sidecar for {run.label}...")
+            trim_result = oc(
+                "exec",
+                "-n",
+                ctx.target_namespace,
+                pod_name,
+                "-c",
+                "guidellm-sidecar",
+                "--",
+                "python3",
+                "-c",
+                REMOTE_TRIM_SCRIPT.format(file_path=remote_path),
+                check=False,
+                timeout_seconds=1800,
+            )
+            if trim_result.returncode != 0:
+                logger.warning(
+                    f"Failed to trim on sidecar for {run.label}, will trim locally: {trim_result.stderr}"
+                )
 
         compress_result = oc(
             "exec",
