@@ -17,6 +17,7 @@ from projects.guidellm.library import benchconf as benchconf_lib
 from projects.guidellm.toolbox.run_guidellm_benchmark import build_guidellm_args
 from projects.guidellm.toolbox.run_guidellm_benchmark import main as run_guidellm_benchmark_command
 from projects.guidellm.toolbox.run_smoke_request import main as run_smoke_request_command
+from projects.kserve.toolbox.capture_sim_state import main as capture_sim_state_command
 from projects.kserve.toolbox.deploy_k8s_vllm_sim import main as deploy_sim_command
 from projects.minimal.orchestration.prepare_phase import (
     get_model_name,
@@ -160,9 +161,16 @@ def do_test():
             update_test_labels_with_status(test_dir, False, f"Test failed: {str(e)}")
             raise
         finally:
-            update_test_labels_with_timing(test_dir, "test", "end")
+            try:
+                update_test_labels_with_timing(test_dir, "test", "end")
 
-            cleanup_sim(namespace=namespace, name=sim_name)
+                with env.NextArtifactDir("capture_sim_state"):
+                    capture_sim_state_command.run(
+                        namespace=namespace,
+                        name=sim_name,
+                    )
+            finally:
+                cleanup_sim(namespace=namespace, name=sim_name)
 
     update_test_labels_with_status(test_dir, True, "Test completed successfully")
     return 0
