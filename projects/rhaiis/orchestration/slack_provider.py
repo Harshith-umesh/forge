@@ -45,6 +45,7 @@ class RhaiisSlackProvider(SlackNotificationProvider):
             _build_mlflow_run_url,
             _format_owner_line,
             _format_slack_user_line,
+            _get_bot_mention,
         )
 
         status = context.status or {}
@@ -103,9 +104,11 @@ class RhaiisSlackProvider(SlackNotificationProvider):
         if failed or not success:
             emoji = ":x:"
             title = "RHAIIS Pipeline Failed"
+            bot_mention = _get_bot_mention()
         else:
             emoji = ":white_check_mark:"
             title = "RHAIIS Pipeline Succeeded"
+            bot_mention = ""
 
         test_desc, _regular_notifs, _failure_reviews = collect_notification_files(
             env.BASE_ARTIFACT_DIR.parent
@@ -138,6 +141,7 @@ class RhaiisSlackProvider(SlackNotificationProvider):
             f"{workloads_line}"
             f"{dashboard_line}"
             f"{mlflow_line}"
+            f"{bot_mention}"
         )
 
         return "\n".join(parts).rstrip("\n")
