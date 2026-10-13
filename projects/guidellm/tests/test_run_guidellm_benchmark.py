@@ -155,9 +155,13 @@ def test_render_guidellm_job_from_parts_keeps_plain_rates_as_single_guidellm_run
     assert args[0] == "run"
     assert "--backend=kind=openai_http,target=https://example.test/llm-d" in args
     assert "--data=kind=synthetic_text,prompt_tokens=1000,output_tokens=1000" in args
-    profile_arg = next(a for a in args if a.startswith("--profile="))
-    assert '"kind": "concurrent"' in profile_arg
-    assert "[300, 200, 100]" in profile_arg
+    assert "--profile=kind=concurrent" in args
+    override_index = args.index("--override")
+    assert args[override_index : override_index + 3] == [
+        "--override",
+        "profile.streams",
+        "300,200,100",
+    ]
     assert "--constraint=kind=max_duration,seconds=600" in args
 
 
@@ -266,9 +270,12 @@ class TestBuildRunArgs:
             "http://model:8000",
             ["--rate-type=concurrent", "--rate=0.5,1.5"],
         )
-        profile_arg = next(a for a in args if a.startswith("--profile="))
-        assert "0.5" in profile_arg
-        assert "1.5" in profile_arg
+        override_index = args.index("--override")
+        assert args[override_index : override_index + 3] == [
+            "--override",
+            "profile.streams",
+            "0.5,1.5",
+        ]
 
     def test_model_included_in_backend(self) -> None:
         args = self._build(

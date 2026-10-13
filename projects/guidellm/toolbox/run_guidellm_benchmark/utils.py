@@ -268,17 +268,17 @@ def _build_run_args(endpoint_url: str, old_args: list[str]) -> list[str]:
             for r in rate_values:
                 f = float(r)
                 parsed_rates.append(int(f) if f == int(f) else f)
-            profile_dict: dict = {
-                "kind": rate_type,
-                rate_key: parsed_rates,
-            }
+            profile_spec = f"kind={rate_type}"
             if warmup:
                 f = float(warmup)
-                profile_dict["warmup"] = int(f) if f == int(f) else f
+                profile_spec += f",warmup={int(f) if f == int(f) else f}"
             if rampup:
                 f = float(rampup)
-                profile_dict["rampup_duration"] = int(f) if f == int(f) else f
-            new_args.append(f"--profile={_json.dumps(profile_dict)}")
+                profile_spec += f",rampup_duration={int(f) if f == int(f) else f}"
+            new_args.append(f"--profile={profile_spec}")
+            new_args.extend(
+                ["--override", f"profile.{rate_key}", ",".join(map(str, parsed_rates))]
+            )
     else:
         profile_spec = f"kind={rate_type}"
         if warmup:
