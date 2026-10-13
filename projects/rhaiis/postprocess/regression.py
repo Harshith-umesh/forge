@@ -550,7 +550,6 @@ def send_regression_notification(
         f"{dashboard_line}"
         f"{mlflow_line}"
         f"*Changes:*\n{details}"
-        f"{_get_bot_mention()}"
     )
 
     if dry_run:
