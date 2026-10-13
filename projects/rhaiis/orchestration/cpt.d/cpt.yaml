@@ -216,7 +216,6 @@ cpt-rhaiis-3.6-h200:
       rhaiis.engines.vllm.args.tool-call-parser: qwen3_xml
       rhaiis.engines.vllm.args.reasoning-parser: qwen3
       rhaiis.engines.vllm.args.mm-encoder-tp-mode: data
-      rhaiis.engines.vllm.args.speculative-config: '{"model":"RedHatAI/Qwen3.8-27B-speculator.dspark","num_speculative_tokens":8,"method":"dspark"}'
     qwen3-8-27b-bf16/tp1:
       rhaiis.engines.vllm.args.tensor-parallel-size: 1
       rhaiis.engines.vllm.args.reasoning-parser: qwen3
