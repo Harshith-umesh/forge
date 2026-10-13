@@ -26,12 +26,15 @@ class GuideLLMKpiHandler:
     REQUIRED_LABELS = {
         "model_name",
         "product_version",
-        "deployment_profile",
         "guidellm_loadshape",
-        "gpu_type",
         "platform",
         "test_harness",
         "benchmark_key",
+    }
+
+    LLM_D_REQUIRED_LABELS = REQUIRED_LABELS | {
+        "deployment_profile",
+        "gpu_type",
     }
 
     # Define custom label extractor for GuideLLM with fallbacks for missing kpi_labels
@@ -60,10 +63,12 @@ class GuideLLMKpiHandler:
 
         return labels
 
-    @staticmethod
-    def _validate_required_labels(labels: dict[str, Any]) -> set[str]:
+    def __init__(self, *, required_labels: set[str] | None = None):
+        self._required_labels = required_labels or self.REQUIRED_LABELS
+
+    def _validate_required_labels(self, labels: dict[str, Any]) -> set[str]:
         """Validate required labels and return any missing labels."""
-        return GuideLLMKpiHandler.REQUIRED_LABELS - labels.keys()
+        return self._required_labels - labels.keys()
 
     LABEL_EXTRACTOR = type("TestLabelExtractor", (), {"extract": _extract_labels})()
 
@@ -90,8 +95,8 @@ class GuideLLMKpiHandler:
 
         return build_catalog_from_functions(guidellm_kpis)
 
-    @staticmethod
     def compute_kpis(
+        self,
         model: UnifiedRunModel,
     ) -> tuple[list[KpiRecord], KpiComputationStatus]:
         """
@@ -144,11 +149,11 @@ class GuideLLMKpiHandler:
         # Check for missing required labels in records
         invalid_label_records = []
         logger.info(f"🔍 Validating required labels for {len(valid_records)} records...")
-        logger.info(f"   Required labels: {sorted(GuideLLMKpiHandler.REQUIRED_LABELS)}")
+        logger.info(f"   Required labels: {sorted(self._required_labels)}")
 
         for r in valid_records:
             test_condition_labels = GuideLLMKpiHandler.LABEL_EXTRACTOR.extract(r)
-            missing_labels = GuideLLMKpiHandler._validate_required_labels(test_condition_labels)
+            missing_labels = self._validate_required_labels(test_condition_labels)
 
             logger.debug(f"   Record {r.test_base_path}:")
             logger.debug(f"      Available: {sorted(test_condition_labels.keys())}")
@@ -181,7 +186,7 @@ class GuideLLMKpiHandler:
             test_condition_labels = GuideLLMKpiHandler.LABEL_EXTRACTOR.extract(r)
 
             # Skip records with missing required labels
-            missing_labels = GuideLLMKpiHandler._validate_required_labels(test_condition_labels)
+            missing_labels = self._validate_required_labels(test_condition_labels)
             if missing_labels:
                 continue
 
@@ -235,7 +240,7 @@ class GuideLLMKpiHandler:
             kpi_labels = GuideLLMKpiHandler.LABEL_EXTRACTOR.extract(r)
 
             # Skip records with missing required labels
-            missing_labels = GuideLLMKpiHandler._validate_required_labels(kpi_labels)
+            missing_labels = self._validate_required_labels(kpi_labels)
             if missing_labels:
                 continue
 

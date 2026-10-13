@@ -63,7 +63,7 @@ class TestGuideLLMKpiHandler(unittest.TestCase):
                 mock_is_curve_kpi.return_value = True
 
                 # Call the compute_kpis method
-                kpi_records, status = GuideLLMKpiHandler.compute_kpis(model)
+                kpi_records, status = GuideLLMKpiHandler().compute_kpis(model)
 
         # Verify we got a KPI record
         assert len(kpi_records) == 1
@@ -149,7 +149,7 @@ class TestGuideLLMKpiHandler(unittest.TestCase):
                 mock_get_kpi_functions.return_value = mock_kpi_functions
                 mock_is_curve_kpi.return_value = True
 
-                kpi_records, status = GuideLLMKpiHandler.compute_kpis(model)
+                kpi_records, status = GuideLLMKpiHandler().compute_kpis(model)
 
         # Empty values should result in no KPI records being created
         assert len(kpi_records) == 0
@@ -197,7 +197,7 @@ class TestGuideLLMKpiHandler(unittest.TestCase):
                 mock_get_kpi_functions.return_value = mock_kpi_functions
                 mock_is_curve_kpi.return_value = True
 
-                kpi_records, status = GuideLLMKpiHandler.compute_kpis(model)
+                kpi_records, status = GuideLLMKpiHandler().compute_kpis(model)
 
         assert len(kpi_records) == 1
         values = kpi_records[0].values

@@ -23,6 +23,7 @@ from projects.guidellm.postprocess.guidellm.dashboard import (
 from projects.guidellm.postprocess.guidellm.plugin import GuideLLMPlugin
 from projects.llm_d.orchestration.render_inference_service import _build_vllm_args
 from projects.llm_d.orchestration.runtime_config import deep_merge
+from projects.llm_d.postprocess.llm_d.parsing.kpis import GuideLLMKpiHandler
 
 # Analysis configuration for KPI regression testing
 analysis_config = AnalysisConfig(
@@ -47,6 +48,9 @@ class LlmDGuideLLMPlugin(GuideLLMPlugin):
 
     def __init__(self):
         super().__init__()
+        self.kpi_handler = GuideLLMKpiHandler(
+            required_labels=GuideLLMKpiHandler.LLM_D_REQUIRED_LABELS,
+        )
 
     def parse(self, nodes: list[BaseTestNode]) -> ParseResult:
         parsed = enrich_guidellm_parse_result(super().parse(nodes), nodes)
