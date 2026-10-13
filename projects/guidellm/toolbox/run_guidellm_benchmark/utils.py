@@ -276,9 +276,7 @@ def _build_run_args(endpoint_url: str, old_args: list[str]) -> list[str]:
                 f = float(rampup)
                 profile_spec += f",rampup_duration={int(f) if f == int(f) else f}"
             new_args.append(f"--profile={profile_spec}")
-            new_args.extend(
-                ["--override", f"profile.{rate_key}", ",".join(map(str, parsed_rates))]
-            )
+            new_args.extend(["--override", f"profile.{rate_key}", ",".join(map(str, parsed_rates))])
     else:
         profile_spec = f"kind={rate_type}"
         if warmup:
