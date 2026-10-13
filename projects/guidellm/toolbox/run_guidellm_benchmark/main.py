@@ -178,6 +178,28 @@ def cleanup_previous_guidellm_resources_task(args, ctx):
     return f"Deleted previous GuideLLM resources for {ctx.benchmark_name} ({mode} mode)"
 
 
+@retry(attempts=60, delay=10, backoff=1.0)
+@task
+def wait_old_pods_gone(args, ctx):
+    """Wait for old GuideLLM benchmark pods to disappear."""
+    result = oc(
+        "get",
+        "pods",
+        "-n",
+        ctx.target_namespace,
+        "-l",
+        f"job-name={ctx.benchmark_name}",
+        "--ignore-not-found=true",
+        "--no-headers",
+        check=False,
+    )
+
+    if result.stdout.strip():
+        return False
+
+    return f"Old pods gone for {ctx.benchmark_name}"
+
+
 def _best_effort_delete(description: str, *oc_args: str) -> None:
     try:
         oc(*oc_args, check=False, timeout_seconds=60)
@@ -303,17 +325,31 @@ def _handle_benchmark_wait_failure(args, ctx, exception):
 @retry(attempts=1080, delay=WAIT_POLL_INTERVAL_SECONDS, backoff=1.0)
 @task
 def wait_guidellm_benchmark_task(args, ctx):
-    """Wait for the GuideLLM benchmark to complete"""
+    """Wait for the GuideLLM benchmark to finish running"""
 
     if args.use_pvc:
-        return wait_job_completion(args, ctx)
+        return _poll_job_active(args, ctx)
     else:
-        return wait_main_container_completion(args, ctx)
+        return _poll_main_container_running(args, ctx)
 
 
-def wait_job_completion(args, ctx):
-    """Wait for the entire job to complete (PVC mode)"""
-    # Check if job is still active first
+@task
+def check_guidellm_benchmark_result(args, ctx):
+    """Check whether the completed benchmark succeeded or failed"""
+
+    if args.use_pvc:
+        return _check_job_outcome(args, ctx)
+    else:
+        return _check_main_container_outcome(args, ctx)
+
+
+def _poll_job_active(args, ctx):
+    """Poll until the job is no longer active (PVC mode)."""
+    if time.monotonic() >= ctx.wait_deadline:
+        raise TimeoutError(
+            f"GuideLLM benchmark {ctx.benchmark_name} did not complete within {args.timeout}s"
+        )
+
     active_result = oc(
         "get",
         "job",
@@ -327,28 +363,26 @@ def wait_job_completion(args, ctx):
 
     active = active_result.stdout.strip() == "1" if active_result.returncode == 0 else False
 
-    if active:
-        if time.monotonic() >= ctx.wait_deadline:
-            raise TimeoutError(
-                f"GuideLLM benchmark {ctx.benchmark_name} did not complete within {args.timeout}s"
-            )
+    if not active:
+        return f"Job {ctx.benchmark_name} is no longer active"
 
-        # Show pod status while waiting
-        oc(
-            "get",
-            "pods",
-            "-n",
-            ctx.target_namespace,
-            "-l",
-            f"job-name={ctx.benchmark_name}",
-            "-o",
-            "wide",
-        )
+    oc(
+        "get",
+        "pods",
+        "-n",
+        ctx.target_namespace,
+        "-l",
+        f"job-name={ctx.benchmark_name}",
+        "-o",
+        "wide",
+    )
 
-        logger.info("Job %s is still active, retrying...", ctx.benchmark_name)
-        return False  # Retry immediately
+    logger.info("Job %s is still active, retrying...", ctx.benchmark_name)
+    return False
 
-    # Job is not active, check final status
+
+def _check_job_outcome(args, ctx):
+    """Inspect the final status of a completed job (PVC mode)."""
     succeeded_result = oc(
         "get",
         "job",
@@ -358,6 +392,7 @@ def wait_job_completion(args, ctx):
         "-o",
         "jsonpath={.status.succeeded}",
         check=False,
+        log_stdout=True,
     )
     failed_result = oc(
         "get",
@@ -368,6 +403,7 @@ def wait_job_completion(args, ctx):
         "-o",
         "jsonpath={.status.failed}",
         check=False,
+        log_stdout=True,
     )
 
     succeeded = (
@@ -380,38 +416,34 @@ def wait_job_completion(args, ctx):
     )
 
     if succeeded:
-        return f"GuideLLM benchmark {ctx.benchmark_name} completed"
+        return f"GuideLLM benchmark {ctx.benchmark_name} succeeded"
+
+    failure_file = args.artifact_dir / "FAILURE.txt"
     if failed:
-        # Write failure file
-        failure_file = args.artifact_dir / "FAILURE.txt"
         failure_message = f"""GuideLLM benchmark job '{ctx.benchmark_name}' failed.
 
 Check the job logs for detailed error information:
   artifacts/guidellm_benchmark_job.log
 """
         write_text(failure_file, failure_message)
-        logger.error(
-            "GuideLLM job %s failed. Failure details written to %s",
-            ctx.benchmark_name,
-            failure_file,
-        )
-
         raise RuntimeError(f"GuideLLM job {ctx.benchmark_name} failed")
+
+    failure_message = f"""GuideLLM benchmark job '{ctx.benchmark_name}' ended with unknown status (not succeeded, not failed).
+
+Check the job logs for detailed error information:
+  artifacts/guidellm_benchmark_job.log
+"""
+    write_text(failure_file, failure_message)
+    raise RuntimeError(f"GuideLLM job {ctx.benchmark_name} ended with unknown status")
+
+
+def _poll_main_container_running(args, ctx):
+    """Poll until the main container terminates (shared volume mode)."""
     if time.monotonic() >= ctx.wait_deadline:
         raise TimeoutError(
             f"GuideLLM benchmark {ctx.benchmark_name} did not complete within {args.timeout}s"
         )
-    return False  # Retry
 
-
-def wait_main_container_completion(args, ctx):
-    """Wait for the main container to complete (shared volume mode)"""
-    if time.monotonic() >= ctx.wait_deadline:
-        raise TimeoutError(
-            f"GuideLLM benchmark {ctx.benchmark_name} did not complete within {args.timeout}s"
-        )
-
-    # Get pod information
     pod_result = oc(
         "get",
         "pods",
@@ -426,11 +458,10 @@ def wait_main_container_completion(args, ctx):
 
     if pod_result.returncode != 0 or not pod_result.stdout.strip():
         logger.info("Pod for job %s not ready yet, retrying...", ctx.benchmark_name)
-        return False  # Retry
+        return False
 
     pod_name = pod_result.stdout.strip()
 
-    # Check main container status
     main_status_result = oc(
         "get",
         "pod",
@@ -444,43 +475,39 @@ def wait_main_container_completion(args, ctx):
 
     if main_status_result.returncode != 0:
         logger.info("Could not get main container status, retrying...")
-        return False  # Retry
+        return False
 
     try:
-        import json
-
         container_state = json.loads(main_status_result.stdout.strip())
     except (json.JSONDecodeError, AttributeError):
         logger.info("Main container state not available yet, retrying...")
-        return False  # Retry
+        return False
 
-    # Check if main container has terminated
     if "terminated" in container_state:
-        terminated_info = container_state["terminated"]
-        exit_code = terminated_info.get("exitCode", 0)
+        ctx.main_container_exit_code = container_state["terminated"].get("exitCode", 0)
+        return f"Main container for {ctx.benchmark_name} terminated (exit code {ctx.main_container_exit_code})"
 
-        if exit_code == 0:
-            logger.info("Main container completed successfully")
-            return f"GuideLLM benchmark main container {ctx.benchmark_name} completed successfully"
-        else:
-            # Main container failed
-            failure_file = args.artifact_dir / "FAILURE.txt"
-            failure_message = f"""GuideLLM benchmark main container '{ctx.benchmark_name}' failed with exit code {exit_code}.
+    logger.info("Main container for job %s still running, retrying...", ctx.benchmark_name)
+    return False
+
+
+def _check_main_container_outcome(args, ctx):
+    """Inspect the exit code of the terminated main container (shared volume mode)."""
+    exit_code = ctx.main_container_exit_code
+
+    if exit_code == 0:
+        return f"GuideLLM benchmark main container {ctx.benchmark_name} succeeded"
+
+    failure_file = args.artifact_dir / "FAILURE.txt"
+    failure_message = f"""GuideLLM benchmark main container '{ctx.benchmark_name}' failed with exit code {exit_code}.
 
 Check the job logs for detailed error information:
   artifacts/guidellm_benchmark_job.log
 """
-            write_text(failure_file, failure_message)
-            logger.error(
-                "GuideLLM main container %s failed with exit code %s",
-                ctx.benchmark_name,
-                exit_code,
-            )
-            raise RuntimeError(f"GuideLLM main container {ctx.benchmark_name} failed")
-
-    # Main container still running
-    logger.info("Main container for job %s still running, retrying...", ctx.benchmark_name)
-    return False  # Retry
+    write_text(failure_file, failure_message)
+    raise RuntimeError(
+        f"GuideLLM main container {ctx.benchmark_name} failed with exit code {exit_code}"
+    )
 
 
 @always
