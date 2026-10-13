@@ -470,7 +470,7 @@ def _run_workload_benchmark(
         else:
             logger.info("Running benchmark at rates=%s for workload=%s", rates, workload_key)
 
-            benchmark_image = benchmark_cfg.get("image", "ghcr.io/vllm-project/guidellm:v0.7.4")
+            benchmark_image = benchmark_cfg.get("image", "ghcr.io/vllm-project/guidellm:v0.8.1")
 
             guidellm_args = runtime_config.build_guidellm_args(
                 benchmark_cfg=benchmark_cfg,
@@ -558,7 +558,7 @@ def _set_mlflow_metadata(
     from projects.core.library import config
 
     image_name, image_tag = runtime_config.split_image_tag(serving_image)
-    guidellm_image = benchmark_cfg.get("image", "ghcr.io/vllm-project/guidellm:v0.7.4")
+    guidellm_image = benchmark_cfg.get("image", "ghcr.io/vllm-project/guidellm:v0.8.1")
     benchmark_args = benchmark_cfg.get("args", {})
     tp = (
         engine_args.get("tensor-parallel-size")
@@ -720,7 +720,7 @@ def _run_warmup_step(
             endpoint_url=f"{endpoint_url}/v1",
             name=_guidellm_job_name("guidellm-warmup", workload_key, deployment_name),
             namespace=namespace,
-            image=benchmark_cfg.get("image", "ghcr.io/vllm-project/guidellm:v0.7.4"),
+            image=benchmark_cfg.get("image", "ghcr.io/vllm-project/guidellm:v0.8.1"),
             timeout=benchmark_timeout,
             pvc_size=benchmark_cfg.get("pvc_size", "5Gi"),
             guidellm_args=guidellm_args,
@@ -787,7 +787,7 @@ def _run_profiler_step(
                 endpoint_url=f"{endpoint_url}/v1",
                 name=_guidellm_job_name("guidellm-profiler", workload_key, deployment_name),
                 namespace=namespace,
-                image=benchmark_cfg.get("image", "ghcr.io/vllm-project/guidellm:v0.7.4"),
+                image=benchmark_cfg.get("image", "ghcr.io/vllm-project/guidellm:v0.8.1"),
                 timeout=benchmark_timeout,
                 pvc_size=benchmark_cfg.get("pvc_size", "5Gi"),
                 guidellm_args=guidellm_args,
