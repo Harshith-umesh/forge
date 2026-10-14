@@ -123,7 +123,6 @@ def run_regression_check(
     accelerator: str,
     *,
     run_uuid: str = "",
-    notification_job_id: str = "",
     restrict_profiles: list[str] | None = None,
     engine_args: dict | None = None,
 ) -> None:
@@ -193,7 +192,7 @@ def run_regression_check(
                 analysis,
                 model=model_cfg.get("hf_model_id", ""),
                 accelerator=accelerator,
-                job_id=notification_job_id or run_uuid,
+                job_id=run_uuid,
                 slack_user=slack_user,
                 owner=owner,
                 notification_vault="psap-forge-notifications",
