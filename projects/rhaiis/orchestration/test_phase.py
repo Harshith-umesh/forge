@@ -660,8 +660,9 @@ def _sync_postprocessed_dashboard_csv(model_key: str, workload_keys: list[str]) 
             accelerator,
             run_uuid=(
                 config.project.get_config("tests.rhaiis.run_uuid", "", warn=False)
-                or os.environ.get("FJOB_NAME", "")
+                or str(_uuid_mod.uuid4())
             ),
+            notification_job_id=os.environ.get("FJOB_NAME", ""),
             engine_args=ea,
         )
 
