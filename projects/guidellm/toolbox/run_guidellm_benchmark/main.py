@@ -40,12 +40,23 @@ JOB_COMPLETION_GRACE_SECONDS = 60
 
 # Script template for trimming benchmark JSON on remote pod (removes 'requests' field)
 # Use REMOTE_TRIM_SCRIPT.format(file_path=...) to generate the script
+# Removes bulky text fields (request_args, output, reasoning_output) from request
+# entries while preserving per-request metrics like token counts, latencies, etc.
 REMOTE_TRIM_SCRIPT = """
 import json
 
+BULK_FIELDS = {{"request_args", "output", "reasoning_output"}}
+
+def trim_entry(obj):
+    if isinstance(obj, dict):
+        return {{k: trim_entry(v) for k, v in obj.items() if k not in BULK_FIELDS}}
+    if isinstance(obj, list):
+        return [trim_entry(i) for i in obj]
+    return obj
+
 def trim(obj):
     if isinstance(obj, dict):
-        return {{k: trim(v) for k, v in obj.items() if k != 'requests'}}
+        return {{k: trim_entry(v) if k == "requests" else trim(v) for k, v in obj.items()}}
     if isinstance(obj, list):
         return [trim(i) for i in obj]
     return obj
