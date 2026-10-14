@@ -17,9 +17,7 @@ metadata:
 {% endif %}
 spec:
   runtime: llm-d-sim-runtime
-{% if skip_router %}
-  router: {}
-{% else %}
+{% if not skip_router %}
   router:
     route:
       http: {}
