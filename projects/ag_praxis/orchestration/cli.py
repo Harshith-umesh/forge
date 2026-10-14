@@ -53,6 +53,22 @@ def test(ctx):
     sys.exit(exit_code)
 
 
+@main.command()
+@click.argument("flavor")
+@click.option("--benchmark", is_flag=True, default=False, help="Enable benchmarking")
+@click.pass_context
+@safe_cli_command
+def run_flavor(ctx, flavor, benchmark):
+    """Run a single flavor with skip_cleanup enabled."""
+    config.project.set_config("test.flavors", [flavor])
+    config.project.set_config("test.skip_cleanup", True)
+    config.project.set_config("test.run_benchmark", benchmark)
+    config.project.set_config("caliper.postprocess.enabled", False)
+
+    exit_code = test_phase.test()
+    sys.exit(exit_code)
+
+
 main.add_command(postprocess_command)
 
 
