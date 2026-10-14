@@ -202,7 +202,7 @@ def _run_test(
                 model_cfg,
                 accelerator_key,
                 engine_args,
-                run_uuid=run_uuid,
+                run_uuid=_cfg.project.get_config("ci_job.fjob_name", ""),
                 restrict_profiles=workload_keys or None,
             )
         except Exception:
@@ -465,7 +465,7 @@ def _run_workload_benchmark(
                     model_cfg,
                     accelerator_key,
                     engine_args,
-                    run_uuid=run_uuid,
+                    run_uuid=config.project.get_config("ci_job.fjob_name", ""),
                     restrict_profiles=[workload_key],
                 )
             except Exception:
