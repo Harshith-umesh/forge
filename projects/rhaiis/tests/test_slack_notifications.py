@@ -47,3 +47,43 @@ def test_regression_notification_includes_owner(monkeypatch) -> None:
 
     assert len(messages) == 1
     assert "*Owner:* nmiriyal\n" in messages[0]
+
+
+def test_regression_notification_skipped(monkeypatch) -> None:
+    messages = _capture_slack_messages(monkeypatch)
+    analysis_result = {
+        "status": "skipped",
+        "reason": "No baseline data for 0.9 with model=m, accelerator=nvidia, TP=1",
+        "current_version": "1.0",
+        "compare_version": "0.9",
+    }
+
+    assert regression.send_regression_notification(
+        analysis_result,
+        job_id="rhaiis-run-123",
+    )
+
+    assert len(messages) == 1
+    assert "*Performance comparison skipped*" in messages[0]
+    assert "*Reason:* No baseline data for 0.9 with model=m, accelerator=nvidia, TP=1\n" in messages[0]
+    assert "*Versions:* 1.0 vs 0.9 (baseline)\n" in messages[0]
+
+
+def test_regression_notification_no_changes(monkeypatch) -> None:
+    messages = _capture_slack_messages(monkeypatch)
+    analysis_result = {
+        "status": "completed",
+        "regressions": [],
+        "improvements": [],
+        "current_version": "1.0",
+        "compare_version": "0.9",
+    }
+
+    assert regression.send_regression_notification(
+        analysis_result,
+        job_id="rhaiis-run-123",
+    )
+
+    assert len(messages) == 1
+    assert "*No performance changes detected*" in messages[0]
+    assert "*Versions:* 1.0 vs 0.9 (baseline)\n" in messages[0]

@@ -84,6 +84,28 @@ def run_standalone_analysis(
                 accelerator,
                 tp,
             )
+            from projects.rhaiis.postprocess.regression import send_regression_notification
+
+            dp = str(
+                engine_args.get("data-parallel-size") or engine_args.get("dp-size") or ""
+            )
+            send_regression_notification(
+                {
+                    "status": "skipped",
+                    "reason": f"No data in consolidated CSV for version={version}, "
+                    f"model={model_id}, accelerator={accelerator}, TP={tp}",
+                    "current_version": version,
+                    "compare_version": compare_version,
+                },
+                model=model_id,
+                accelerator=accelerator,
+                job_id=run_uuid,
+                slack_user=config.project.get_config("tests.rhaiis.slack_user", ""),
+                owner=config.project.get_config("ci_job.owner", "") or "",
+                notification_vault="psap-forge-notifications",
+                tp=tp,
+                dp=dp,
+            )
             return
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as tmp:
@@ -166,8 +188,8 @@ def run_regression_check(
         dp = _ea.get("data-parallel-size") or _ea.get("dp-size") or ""
         slack_user = config.project.get_config("tests.rhaiis.slack_user", "")
 
+        report_url = ""
         if analysis.get("regression_count", 0) > 0 or analysis.get("improvement_count", 0) > 0:
-            report_url = ""
             agent_cfg = config.project.get_config("rhaiis.agent_analysis", {})
             if agent_cfg.get("enabled", False):
                 report_url = run_agent_analysis(
@@ -181,20 +203,20 @@ def run_regression_check(
                     engine_args=engine_args,
                 )
 
-            from projects.rhaiis.postprocess.regression import send_regression_notification
+        from projects.rhaiis.postprocess.regression import send_regression_notification
 
-            send_regression_notification(
-                analysis,
-                model=model_cfg.get("hf_model_id", ""),
-                accelerator=accelerator,
-                job_id=run_uuid,
-                slack_user=slack_user,
-                owner=owner,
-                notification_vault="psap-forge-notifications",
-                report_url=report_url,
-                tp=str(tp),
-                dp=str(dp),
-            )
+        send_regression_notification(
+            analysis,
+            model=model_cfg.get("hf_model_id", ""),
+            accelerator=accelerator,
+            job_id=run_uuid,
+            slack_user=slack_user,
+            owner=owner,
+            notification_vault="psap-forge-notifications",
+            report_url=report_url,
+            tp=str(tp),
+            dp=str(dp),
+        )
     except Exception:
         logger.warning("Regression analysis failed; continuing", exc_info=True)
     finally:
