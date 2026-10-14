@@ -3,8 +3,18 @@ kind: LLMInferenceService
 metadata:
   name: {{ name }}
   namespace: {{ namespace }}
+{% if maas_gateway_label %}
+  labels:
+    maas.io/gateway-name: {{ maas_gateway_label }}
+{% endif %}
   annotations:
+{% if maas_gateway_label %}
+    security.opendatahub.io/enable-auth: "true"
+    maas.io/enabled: "true"
+    serving.kserve.io/enable-external-route: "true"
+{% else %}
     security.opendatahub.io/enable-auth: "false"
+{% endif %}
 spec:
   runtime: llm-d-sim-runtime
 {% if skip_router %}

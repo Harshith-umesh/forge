@@ -40,6 +40,7 @@ def run(
     mode: str = "random",
     deploy_monitor: bool = True,
     skip_router: bool = False,
+    maas_gateway_label: str = "",
 ) -> str:
     """Build and deploy an llm-d simulator LLMInferenceService.
 
@@ -58,6 +59,7 @@ def run(
         mode: Simulator response mode.
         deploy_monitor: If True, deploy ServiceMonitor for monitoring.
         skip_router: If True, set spec.router to empty (no scheduler, no gateway routing).
+        maas_gateway_label: MaaS gateway label value. When set, adds MaaS labels and annotations.
     """
     ctx = execute_tasks(locals())
 
@@ -86,6 +88,7 @@ def build_manifest(args, ctx):
                 "inter_token_latency": args.inter_token_latency,
                 "mode": args.mode,
                 "skip_router": args.skip_router,
+                "maas_gateway_label": args.maas_gateway_label,
             },
         )
     )
