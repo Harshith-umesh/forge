@@ -22,6 +22,10 @@ filter_chains:
       - filter: load_balancer
         clusters:
           - name: rhoai_model
+{% if use_tls %}
+            tls:
+              sni: "{{ model_host }}"
+{% endif %}
             trusted_private_endpoints:
               - "{{ model_host }}"
             endpoints:

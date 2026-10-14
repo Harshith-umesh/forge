@@ -108,7 +108,10 @@ def apply_configmap(args, ctx):
     from urllib.parse import urlparse
 
     parsed = urlparse(args.model_endpoint)
-    host_port = f"{parsed.hostname}:{parsed.port or 8000}"
+    default_ports = {"https": 443, "http": 80}
+    port = parsed.port or default_ports.get(parsed.scheme, 8000)
+    host_port = f"{parsed.hostname}:{port}"
+    use_tls = parsed.scheme == "https"
 
     deployment_uid = _get_deployment_uid(args.namespace)
 
@@ -117,6 +120,7 @@ def apply_configmap(args, ctx):
         context={
             "model_endpoint": host_port,
             "model_host": parsed.hostname,
+            "use_tls": use_tls,
         },
     )
 
