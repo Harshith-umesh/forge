@@ -1,7 +1,7 @@
 import logging
 
 from projects.ag_praxis.toolbox.deploy_praxis import main as deploy_praxis_command
-from projects.core.library import config, env
+from projects.core.library import config, env, run
 from projects.core.library.postprocess import (
     create_test_metadata,
     run_and_postprocess,
@@ -10,9 +10,6 @@ from projects.core.library.postprocess import (
 )
 
 logger = logging.getLogger(__name__)
-
-SIM_LLMISVC_NAME = "sim-llm"
-SIM_MODEL_NAME = "simulated-llama-3"
 
 
 def test_maas():
@@ -204,7 +201,7 @@ def _deploy_sim_llmisvc(test_namespace):
 
     endpoint = deploy_sim_llmisvc_command.run(
         namespace=test_namespace,
-        name=SIM_LLMISVC_NAME,
+        name=sim_cfg["llmisvc_name"],
         gateway_name="",
         gateway_namespace="",
         gateway_status_address_name=None,
@@ -222,7 +219,7 @@ def _build_gateway_endpoint(gateway_cfg, test_namespace):
     return (
         f"http://{gateway_cfg['name']}-{gateway_cfg['gateway_class_name']}"
         f".{gateway_cfg['namespace']}.svc.cluster.local"
-        f"/{test_namespace}/{SIM_LLMISVC_NAME}"
+        f"/{test_namespace}/{config.project.get_config('platform.sim.llmisvc_name')}"
     )
 
 
@@ -233,7 +230,7 @@ def _smoke_test(test_namespace, endpoint_url, suffix):
     run_smoke_request_command.run(
         namespace=test_namespace,
         endpoint_url=endpoint_url,
-        served_model_name=SIM_MODEL_NAME,
+        served_model_name=config.project.get_config("platform.sim.model_name"),
         prompt=smoke_cfg["prompt"],
         max_tokens=smoke_cfg["max_tokens"],
         temperature=smoke_cfg["temperature"],
@@ -270,11 +267,12 @@ def _prep_direct(test_namespace, gateway_cfg, sim_endpoint):
 
 
 DIRECT_GATEWAY_HTTPROUTE_NAME = "direct-gateway-route"
-SIM_LLMISVC_SVC_NAME = f"{SIM_LLMISVC_NAME}-kserve-workload-svc"
 
 
 def _prep_direct_gateway(test_namespace, gateway_cfg, sim_endpoint):
     from projects.ag_praxis.toolbox.add_gateway_route import main as add_gateway_route_command
+
+    llmisvc_name = config.project.get_config("platform.sim.llmisvc_name")
 
     logger.info("[direct-gateway] model direct endpoint: %s", sim_endpoint)
     _smoke_test(test_namespace, sim_endpoint, "sim")
@@ -285,7 +283,7 @@ def _prep_direct_gateway(test_namespace, gateway_cfg, sim_endpoint):
         name=DIRECT_GATEWAY_HTTPROUTE_NAME,
         gateway_name=gateway_cfg["name"],
         gateway_namespace=gateway_cfg["namespace"],
-        backend_service=SIM_LLMISVC_SVC_NAME,
+        backend_service=f"{llmisvc_name}-kserve-workload-svc",
         backend_port=8000,
     )
     logger.info("[direct-gateway] gateway endpoint: %s", gateway_endpoint)
@@ -339,7 +337,8 @@ def _prep_praxis_gateway(test_namespace, gateway_cfg, sim_endpoint):
 def _cleanup_llmisvc(test_namespace):
     from projects.core.dsl.utils.k8s import best_effort_oc
 
-    best_effort_oc("delete", "llminferenceservice", SIM_LLMISVC_NAME, "-n", test_namespace)
+    llmisvc_name = config.project.get_config("platform.sim.llmisvc_name")
+    best_effort_oc("delete", "llminferenceservice", llmisvc_name, "-n", test_namespace)
 
 
 def _cleanup_praxis(test_namespace):
@@ -370,7 +369,9 @@ def _cleanup_praxis_gateway(test_namespace):
 
 
 def _endpoint_direct(test_namespace, gateway_cfg):
-    return f"http://{SIM_LLMISVC_SVC_NAME}.{test_namespace}.svc.cluster.local"
+    llmisvc_name = config.project.get_config("platform.sim.llmisvc_name")
+    svc_name = f"{llmisvc_name}-kserve-workload-svc"
+    return f"http://{svc_name}.{test_namespace}.svc.cluster.local"
 
 
 def _endpoint_gateway(test_namespace, gateway_cfg):
@@ -384,11 +385,92 @@ def _endpoint_praxis(test_namespace, gateway_cfg):
     return f"http://praxis.{test_namespace}.svc:8080"
 
 
+def _resolve_maas_external_url():
+    """Resolve the external MaaS gateway URL from the cluster ingress domain."""
+    from projects.core.dsl.utils.k8s import oc
+
+    result = oc(
+        "get",
+        "ingresses.config.openshift.io",
+        "cluster",
+        "-o",
+        "jsonpath={.spec.domain}",
+        log_stdout=True,
+    )
+    cluster_domain = result.stdout.strip()
+    if not cluster_domain:
+        raise RuntimeError("Failed to resolve cluster ingress domain")
+
+    return f"https://maas.{cluster_domain}"
+
+
+def _create_maas_api_key(namespace, maas_gateway_url):
+    """Create an ephemeral MaaS API key for testing."""
+    import json
+
+    from projects.core.dsl.utils.k8s import oc
+
+    token_result = oc(
+        "create",
+        "token",
+        "default",
+        "-n",
+        namespace,
+        handled_secretly=True,
+    )
+    sa_token = token_result.stdout.strip()
+
+    import shlex
+
+    payload = json.dumps({"name": "forge-test-key", "expiresIn": "1h", "ephemeral": True})
+    curl_cmd = (
+        f"curl -sS -k -X POST {shlex.quote(maas_gateway_url + '/maas-api/v1/api-keys')}"
+        f" -H {shlex.quote('Authorization: Bearer ' + sa_token)}"
+        f" -H 'Content-Type: application/json'"
+        f" -d {shlex.quote(payload)}"
+    )
+    result = run.run(curl_cmd, capture_stdout=True, timeout=30, handled_securely=True)
+
+    response = json.loads(result.stdout)
+    api_key = response.get("key")
+    if not api_key:
+        raise RuntimeError(f"Failed to create MaaS API key: {response}")
+
+    logger.info("Created ephemeral MaaS API key: %s...", api_key[:10])
+    return api_key
+
+
+def _prep_maas_praxis(test_namespace, gateway_cfg, sim_endpoint):
+    maas_cfg = config.project.get_config("platform.maas")
+
+    maas_gateway_url = _resolve_maas_external_url()
+    _create_maas_api_key(test_namespace, maas_gateway_url)
+
+    maas_model_url = f"{maas_gateway_url}/{test_namespace}/{maas_cfg['llmisvc_name']}"
+    logger.info("[maas-praxis] MaaS model endpoint: %s", maas_model_url)
+
+    _deploy_praxis(test_namespace, maas_model_url)
+
+    praxis_url = f"http://praxis.{test_namespace}.svc:8080"
+    logger.info("[maas-praxis] praxis endpoint: %s", praxis_url)
+    _smoke_test(test_namespace, praxis_url, "maas-praxis")
+    return praxis_url
+
+
+def _cleanup_maas_praxis(test_namespace):
+    _cleanup_praxis(test_namespace)
+
+
+def _endpoint_maas_praxis(test_namespace, gateway_cfg):
+    return f"http://praxis.{test_namespace}.svc:8080"
+
+
 FLAVORS = {
     "direct": (_prep_direct, _cleanup_direct, _endpoint_direct),
     "direct-gateway": (_prep_direct_gateway, _cleanup_direct_gateway, _endpoint_gateway),
     "praxis": (_prep_praxis, _cleanup_praxis_flavor, _endpoint_praxis),
     "praxis-gateway": (_prep_praxis_gateway, _cleanup_praxis_gateway, _endpoint_gateway),
+    "maas-praxis": (_prep_maas_praxis, _cleanup_maas_praxis, _endpoint_maas_praxis),
 }
 
 
@@ -449,7 +531,7 @@ def _run_flavor_loop(test_namespace, gateway_cfg, sim_endpoint):
                 update_test_labels_with_status(test_dir, False, f"Flavor {flavor} failed: {e}")
                 if not continue_on_failure:
                     raise
-                failed_flavors.append(flavor)
+                failed_flavors.append((flavor, e))
                 continue
             finally:
                 update_test_labels_with_timing(test_dir, "test", "end")
@@ -461,7 +543,8 @@ def _run_flavor_loop(test_namespace, gateway_cfg, sim_endpoint):
             )
 
     if failed_flavors:
-        raise RuntimeError(f"Test flavors failed: {', '.join(failed_flavors)}")
+        details = "; ".join(f"{name}: {err}" for name, err in failed_flavors)
+        raise RuntimeError(f"Test flavors failed: {details}")
 
 
 def fournos_resolve_hardware_request(hardware_spec: dict):

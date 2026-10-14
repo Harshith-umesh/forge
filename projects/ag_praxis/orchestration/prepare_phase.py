@@ -105,11 +105,64 @@ def prepare():
         create_if_missing=sim_gw["create_if_missing"],
     )
 
+    _deploy_maas_sim(test_namespace, maas_cfg)
+
+
+def _deploy_maas_sim(test_namespace, maas_cfg):
+    """Deploy a sim LLMInferenceService with MaaS annotations and register it."""
+    from projects.ag_praxis.toolbox.register_maas_model import main as register_maas_model_command
+    from projects.kserve.toolbox.deploy_sim_llmisvc import main as deploy_sim_llmisvc_command
+
+    sim_cfg = config.project.get_config("platform.sim")
+
+    deploy_sim_llmisvc_command.run(
+        namespace=test_namespace,
+        name=maas_cfg["llmisvc_name"],
+        gateway_name=maas_cfg["gateway"]["name"],
+        gateway_namespace=maas_cfg["gateway"]["namespace"],
+        skip_router=False,
+        maas_gateway_label=maas_cfg["maas_gateway_label"],
+        time_to_first_token=sim_cfg["time_to_first_token"],
+        inter_token_latency=sim_cfg["inter_token_latency"],
+        mode=sim_cfg["mode"],
+        max_num_seqs=sim_cfg["max_num_seqs"],
+    )
+
+    register_maas_model_command.run(
+        model_namespace=test_namespace,
+        tenant_namespace=maas_cfg["tenant_namespace"],
+        llmisvc_name=maas_cfg["llmisvc_name"],
+    )
+
+
+def _cleanup_maas_sim(test_namespace, maas_cfg):
+    """Unregister and delete the MaaS sim LLMInferenceService."""
+    from projects.ag_praxis.toolbox.unregister_maas_model import (
+        main as unregister_maas_model_command,
+    )
+    from projects.core.dsl.utils.k8s import best_effort_oc
+
+    unregister_maas_model_command.run(
+        model_namespace=test_namespace,
+        tenant_namespace=maas_cfg["tenant_namespace"],
+        llmisvc_name=maas_cfg["llmisvc_name"],
+    )
+    best_effort_oc(
+        "delete",
+        "llminferenceservice",
+        maas_cfg["llmisvc_name"],
+        "-n",
+        test_namespace,
+    )
+
 
 def cleanup():
     logger.info("=== AG Praxis Project Cleanup Phase ===")
 
     maas_cfg = config.project.get_config("platform.maas")
+    test_namespace = config.project.get_config("test.namespace")
+
+    _cleanup_maas_sim(test_namespace, maas_cfg)
 
     cleanup_maas_command.run(
         namespace=maas_cfg["namespace"],

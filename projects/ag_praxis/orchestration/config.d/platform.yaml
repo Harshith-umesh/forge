@@ -11,11 +11,16 @@ maas:
   repo_url: https://github.com/opendatahub-io/models-as-a-service
   repo_ref: main
   operator_type: odh
+  tenant_namespace: models-as-a-service
+  maas_gateway_label: maas-gateway
+  llmisvc_name: sim-llm-maas
   gateway:
     name: maas-default-gateway
     namespace: openshift-ingress
 
 sim:
+  llmisvc_name: sim-llm
+  model_name: simulated-llama-3
   time_to_first_token: "800ms"
   inter_token_latency: "30ms"
   mode: random
