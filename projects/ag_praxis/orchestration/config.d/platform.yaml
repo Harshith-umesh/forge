@@ -33,7 +33,7 @@ sim:
     create_if_missing: true
 
 praxis:
-  version: "0.5"
+  version: "0.6"
   replicas: 1
 
 artifacts:
