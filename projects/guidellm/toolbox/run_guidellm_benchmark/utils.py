@@ -19,6 +19,7 @@ from projects.core.dsl import template
 logger = logging.getLogger(__name__)
 
 _CONFIG_FILE_PATH = "/tmp/guidellm-config.yaml"
+_API_KEY_FILE_PATH = "/secrets/auth-token/auth_token"
 
 
 @dataclass(frozen=True)
@@ -316,25 +317,75 @@ def _build_config_heredoc(config_content: str) -> str:
     return f"cat > {_CONFIG_FILE_PATH} <<'__CONFIG_EOF__'\n{config_content}__CONFIG_EOF__"
 
 
+def _shell_quote_with_expansion(arg: str) -> str:
+    """Quote a shell argument, using double quotes when variable expansion is needed."""
+    if "$" not in arg:
+        return shlex.quote(arg)
+    escaped = arg.replace("\\", "\\\\").replace('"', '\\"').replace("`", "\\`")
+    return f'"{escaped}"'
+
+
 def _build_multi_run_script(
     *,
     endpoint_url: str,
     runs: list[GuideLLMRun],
     config_content: str | None = None,
+    api_key_file: str | None = None,
+    replica_count: int = 1,
 ) -> str:
     """Shell script for multiple GuideLLM runs (rate-expression expansion)."""
+    needs_shell_vars = bool(api_key_file) or replica_count > 1
+
     lines = ["set -euxo pipefail", "mkdir -p /results"]
+
     if config_content:
         lines.append(_build_config_heredoc(config_content))
+
+    if api_key_file:
+        quoted = shlex.quote(api_key_file)
+        lines.append("set +x")
+        lines.append(f"if [ ! -r {quoted} ] || [ ! -s {quoted} ]; then")
+        lines.append(f"  echo 'ERROR: API key file {quoted} is missing, unreadable, or empty' >&2")
+        lines.append("  exit 1")
+        lines.append("fi")
+        lines.append(f"GUIDELLM_API_KEY=$(cat {quoted})")
+        lines.append("set -x")
+
     for run in runs:
         run_args = _build_run_args(endpoint_url, run.args)
         if config_content:
             run_args.append(f"--config={_CONFIG_FILE_PATH}")
-        output_path = f"/results/benchmarks-{run.label}.json"
+
+        if replica_count > 1:
+            output_path = f"/results/benchmarks-{run.label}-$JOB_COMPLETION_INDEX.json"
+        else:
+            output_path = f"/results/benchmarks-{run.label}.json"
+
         filtered = [a for a in run_args if not a.startswith("--output=")]
         filtered.append(f"--output=kind=json,path={output_path}")
+
+        if api_key_file:
+            filtered = [
+                f"{a},api_key=$GUIDELLM_API_KEY" if a.startswith("--backend=") else a
+                for a in filtered
+            ]
+
         command = ["/opt/app-root/bin/guidellm", "run", *filtered]
-        lines.append(shlex.join(command))
+
+        if needs_shell_vars:
+            cmd_str = " ".join(_shell_quote_with_expansion(a) for a in command)
+        else:
+            cmd_str = shlex.join(command)
+
+        if api_key_file:
+            safe_cmd_str = cmd_str.replace("$GUIDELLM_API_KEY", "***")
+            lines.append(f"echo '+ {safe_cmd_str}'")
+            lines.append("set +x")
+            lines.append(cmd_str)
+            lines.append("set -x")
+        else:
+            lines.append(cmd_str)
+
     return "\n".join(lines)
 
 
@@ -387,6 +438,8 @@ def render_guidellm_job_from_parts(
     hf_token_secret: str = "",
     fs_group: int | None = None,
     config_path: Path | None = None,
+    api_key_secret: str = "",
+    replica_count: int = 1,
 ) -> dict[str, Any]:
     """Render a GuideLL-M job manifest from individual components.
 
@@ -404,6 +457,9 @@ def render_guidellm_job_from_parts(
         config_path: Path to a GuideLLM config YAML file on the local filesystem.
             When set, the file is read and embedded in the container via heredoc,
             and GuideLLM is invoked with ``--config`` pointing to it.
+        api_key_secret: Name of the K8s secret containing the API key. Mounted
+            into the pod and injected into the ``--backend`` argument at runtime.
+        replica_count: Number of parallel Job replicas (completions and parallelism).
 
     Returns:
         Job manifest as dict
@@ -418,15 +474,22 @@ def render_guidellm_job_from_parts(
             "image": image,
             "hf_token_secret": hf_token_secret,
             "fs_group": fs_group,
+            "api_key_secret": api_key_secret,
+            "replica_count": replica_count,
         },
     )
     manifest = yaml.safe_load(rendered_yaml)
     manifest["spec"]["activeDeadlineSeconds"] = timeout_seconds
     container = manifest["spec"]["template"]["spec"]["containers"][0]
 
-    # Config file mode requires a shell script to write the file first.
-    # Plain single runs can invoke guidellm directly.
-    if not config_content and len(runs) == 1 and runs[0].rate is None:
+    needs_shell = (
+        config_content
+        or len(runs) > 1
+        or runs[0].rate is not None
+        or api_key_secret
+        or replica_count > 1
+    )
+    if not needs_shell:
         container["command"] = ["/opt/app-root/bin/guidellm"]
         container["args"] = [
             "run",
@@ -436,7 +499,13 @@ def render_guidellm_job_from_parts(
 
     container["command"] = ["/bin/sh", "-lc"]
     container["args"] = [
-        _build_multi_run_script(endpoint_url=endpoint_url, runs=runs, config_content=config_content)
+        _build_multi_run_script(
+            endpoint_url=endpoint_url,
+            runs=runs,
+            config_content=config_content,
+            api_key_file=_API_KEY_FILE_PATH if api_key_secret else None,
+            replica_count=replica_count,
+        )
     ]
     return manifest
 
@@ -452,6 +521,8 @@ def render_guidellm_shared_volume_job_from_parts(
     hf_token_secret: str = "",
     fs_group: int | None = None,
     config_path: Path | None = None,
+    api_key_secret: str = "",
+    replica_count: int = 1,
 ) -> dict[str, Any]:
     """Render a GuideLL-M job manifest with shared volume (main + sidecar containers).
 
@@ -467,6 +538,9 @@ def render_guidellm_shared_volume_job_from_parts(
             the shared volume is writable by both containers.
         config_path: Path to a GuideLLM config YAML file on the local filesystem.
             When set, the file is read and embedded in the container via heredoc.
+        api_key_secret: Name of the K8s secret containing the API key. Mounted
+            into the pod and injected into the ``--backend`` argument at runtime.
+        replica_count: Number of parallel Job replicas (completions and parallelism).
 
     Returns:
         Job manifest as dict with main and sidecar containers
@@ -481,13 +555,21 @@ def render_guidellm_shared_volume_job_from_parts(
             "image": image,
             "hf_token_secret": hf_token_secret,
             "fs_group": fs_group,
+            "api_key_secret": api_key_secret,
+            "replica_count": replica_count,
         },
     )
     manifest = yaml.safe_load(rendered_yaml)
     manifest["spec"]["activeDeadlineSeconds"] = timeout_seconds
 
-    # Config file mode always uses a shell script to write the file first.
-    if not config_content and len(runs) == 1 and runs[0].rate is None:
+    needs_shell = (
+        config_content
+        or len(runs) > 1
+        or runs[0].rate is not None
+        or api_key_secret
+        or replica_count > 1
+    )
+    if not needs_shell:
         run_args = _build_run_args(endpoint_url, runs[0].args)
         cmd = shlex.join(["/opt/app-root/bin/guidellm", "run", *run_args])
         main_script = "\n".join(
@@ -499,7 +581,11 @@ def render_guidellm_shared_volume_job_from_parts(
         )
     else:
         main_script = _build_multi_run_script(
-            endpoint_url=endpoint_url, runs=runs, config_content=config_content
+            endpoint_url=endpoint_url,
+            runs=runs,
+            config_content=config_content,
+            api_key_file=_API_KEY_FILE_PATH if api_key_secret else None,
+            replica_count=replica_count,
         )
 
     manifest["spec"]["template"]["spec"]["containers"][0]["command"] = ["/bin/sh", "-c"]
