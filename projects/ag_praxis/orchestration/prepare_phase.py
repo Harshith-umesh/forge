@@ -75,6 +75,10 @@ def _register_namespace_in_gateway(namespace, gateway_name, gateway_namespace):
 def prepare():
     logger.info("=== AG Praxis Project Prepare Phase ===")
 
+    from projects.cluster.library.prom.collection import prepare_user_workload_monitoring
+
+    prepare_user_workload_monitoring(during="prepare")
+
     maas_cfg = config.project.get_config("platform.maas")
 
     deploy_maas_command.run(

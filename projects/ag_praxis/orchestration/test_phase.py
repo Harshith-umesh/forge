@@ -1,4 +1,5 @@
 import logging
+from datetime import UTC
 
 from projects.ag_praxis.toolbox.deploy_praxis import main as deploy_praxis_command
 from projects.core.library import config, env, run
@@ -476,7 +477,14 @@ FLAVORS = {
 
 def do_test_praxis():
     logger.info("=== AG Praxis Project Test Phase ===")
+    from projects.cluster.library.prom.collection import (
+        prepare_user_workload_monitoring,
+        validate_user_workload_monitoring,
+    )
     from projects.core.orchestration.utils.k8s import ensure_namespace
+
+    validate_user_workload_monitoring()
+    prepare_user_workload_monitoring(during="test")
 
     test_namespace = config.project.get_config("test.namespace")
     ensure_namespace(test_namespace)
@@ -484,17 +492,26 @@ def do_test_praxis():
     sim_cfg = config.project.get_config("platform.sim")
     gateway_cfg = sim_cfg["gateway"]
 
-    sim_endpoint = _deploy_sim_llmisvc(test_namespace)
-    logger.info("Sim LLMInferenceService endpoint: %s", sim_endpoint)
+    flavors = config.project.get_config("test.flavors")
+    needs_shared_sim = any(f != "maas-praxis" for f in flavors)
+
+    sim_endpoint = None
+    if needs_shared_sim:
+        sim_endpoint = _deploy_sim_llmisvc(test_namespace)
+        logger.info("Sim LLMInferenceService endpoint: %s", sim_endpoint)
 
     try:
         _run_flavor_loop(test_namespace, gateway_cfg, sim_endpoint)
     finally:
-        if not config.project.get_config("test.skip_cleanup"):
+        if needs_shared_sim and not config.project.get_config("test.skip_cleanup"):
             _cleanup_llmisvc(test_namespace)
 
 
 def _run_flavor_loop(test_namespace, gateway_cfg, sim_endpoint):
+    from datetime import datetime
+
+    from projects.cluster.library.prom.collection import capture_prometheus
+
     flavors = config.project.get_config("test.flavors")
     continue_on_failure = config.project.get_config("test.continue_on_flavor_failure")
     failed_flavors = []
@@ -510,6 +527,8 @@ def _run_flavor_loop(test_namespace, gateway_cfg, sim_endpoint):
 
             prep_fn, cleanup_fn, endpoint_fn = flavor_fns
             logger.info("--- Running test flavor: %s ---", flavor)
+            benchmark_start = None
+            benchmark_end = None
             try:
                 update_test_labels_with_timing(test_dir, "test", "start")
 
@@ -522,7 +541,9 @@ def _run_flavor_loop(test_namespace, gateway_cfg, sim_endpoint):
 
                 if config.project.get_config("test.run_benchmark"):
                     update_test_labels_with_timing(test_dir, "benchmark", "start")
+                    benchmark_start = datetime.now(UTC)
                     _run_guidellm(test_namespace, benchmark_endpoint)
+                    benchmark_end = datetime.now(UTC)
                     update_test_labels_with_timing(test_dir, "benchmark", "end")
                 else:
                     _write_benchmark_dry_run(benchmark_endpoint)
@@ -535,6 +556,16 @@ def _run_flavor_loop(test_namespace, gateway_cfg, sim_endpoint):
                 continue
             finally:
                 update_test_labels_with_timing(test_dir, "test", "end")
+
+                if benchmark_start:
+                    if not benchmark_end:
+                        benchmark_end = datetime.now(UTC)
+                    try:
+                        with env.NextArtifactDir("prometheus_metrics"):
+                            capture_prometheus(benchmark_start, benchmark_end)
+                    except Exception:
+                        logger.exception("Prometheus capture failed for flavor %s", flavor)
+
                 if not config.project.get_config("test.skip_cleanup"):
                     cleanup_fn(test_namespace)
 
