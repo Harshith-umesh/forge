@@ -44,6 +44,7 @@ JOB_COMPLETION_GRACE_SECONDS = 60
 # entries while preserving per-request metrics like token counts, latencies, etc.
 REMOTE_TRIM_SCRIPT = """
 import json
+import os
 
 BULK_FIELDS = {{"request_args", "output", "reasoning_output"}}
 
@@ -61,10 +62,17 @@ def trim(obj):
         return [trim(i) for i in obj]
     return obj
 
+tmp_path = '{file_path}.trimtmp'
 with open('{file_path}') as f:
     data = json.load(f)
-with open('{file_path}', 'w') as f:
-    json.dump(trim(data), f, separators=(',', ':'))
+try:
+    with open(tmp_path, 'w') as f:
+        json.dump(trim(data), f, separators=(',', ':'))
+    os.replace(tmp_path, '{file_path}')
+except Exception:
+    if os.path.exists(tmp_path):
+        os.remove(tmp_path)
+    raise
 """.strip()
 
 
