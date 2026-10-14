@@ -47,7 +47,7 @@ postprocess:
   kpi:
     enabled: true
     artifacts_to_kpis:
-      enabled: false
+      enabled: true
       output: kpis/kpis.json
     dashboard_csv:
       enabled: false

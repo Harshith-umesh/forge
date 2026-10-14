@@ -12,6 +12,4 @@ continue_on_flavor_failure: true
 
 flavors:
   - direct
-  - direct-gateway
-  - praxis
-  - praxis-gateway
+  - maas-praxis

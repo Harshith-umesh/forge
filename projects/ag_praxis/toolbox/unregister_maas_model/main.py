@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 from projects.core.dsl import entrypoint, execute_tasks, task
-from projects.core.dsl.utils.k8s import best_effort_oc
+from projects.core.dsl.utils.k8s import best_effort_oc, oc
 
 logger = logging.getLogger("DSL")
 
@@ -34,6 +34,52 @@ def resolve_names(args, ctx):
     """Resolve default names from parameters."""
     ctx.model_ref_name = args.model_ref_name or args.llmisvc_name
     return f"Model ref name: {ctx.model_ref_name}"
+
+
+@task
+def capture_maas_resources(args, ctx):
+    """Capture the YAML of all MaaS resources before deletion."""
+    artifacts_dir = args.artifact_dir / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    oc(
+        "get",
+        "maasmodelref",
+        ctx.model_ref_name,
+        "-n",
+        args.model_namespace,
+        "-o",
+        "yaml",
+        check=False,
+        log_stdout=False,
+        stdout_dest=artifacts_dir / "maasmodelref.yaml",
+    )
+    oc(
+        "get",
+        "maasauthpolicy",
+        f"{ctx.model_ref_name}-access",
+        "-n",
+        args.tenant_namespace,
+        "-o",
+        "yaml",
+        check=False,
+        log_stdout=False,
+        stdout_dest=artifacts_dir / "maasauthpolicy.yaml",
+    )
+    oc(
+        "get",
+        "maassubscription",
+        f"{ctx.model_ref_name}-subscription",
+        "-n",
+        args.tenant_namespace,
+        "-o",
+        "yaml",
+        check=False,
+        log_stdout=False,
+        stdout_dest=artifacts_dir / "maassubscription.yaml",
+    )
+
+    return f"Captured MaaS resource YAMLs for {ctx.model_ref_name}"
 
 
 @task
