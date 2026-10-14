@@ -185,6 +185,7 @@ def _build_run_args(endpoint_url: str, old_args: list[str]) -> list[str]:
     request_format = None
     processor = None
     processor_args: dict | None = None
+    profile_spec: str | None = None
     passthrough: list[str] = []
     extra_backend_parts: list[str] = []
 
@@ -236,6 +237,8 @@ def _build_run_args(endpoint_url: str, old_args: list[str]) -> list[str]:
                     extra_backend_parts.append(part)
         elif key in ("--outputs", "--output-dir"):
             pass
+        elif key == "--profile":
+            profile_spec = val
         else:
             passthrough.append(arg)
 
@@ -278,7 +281,8 @@ def _build_run_args(endpoint_url: str, old_args: list[str]) -> list[str]:
             new_args.append(f"--profile={profile_spec}")
             new_args.extend(["--override", f"profile.{rate_key}", ",".join(map(str, parsed_rates))])
     else:
-        profile_spec = f"kind={rate_type}"
+        if profile_spec is None:
+            profile_spec = f"kind={rate_type}"
         if warmup:
             profile_spec += f",warmup={warmup}"
         if rampup:

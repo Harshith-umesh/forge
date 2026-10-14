@@ -38,6 +38,43 @@ logger = logging.getLogger(__name__)
 WAIT_POLL_INTERVAL_SECONDS = 10
 JOB_COMPLETION_GRACE_SECONDS = 60
 
+# Script template for trimming benchmark JSON on remote pod (removes 'requests' field)
+# Use REMOTE_TRIM_SCRIPT.format(file_path=...) to generate the script
+# Removes bulky text fields (request_args, output, reasoning_output) from request
+# entries while preserving per-request metrics like token counts, latencies, etc.
+REMOTE_TRIM_SCRIPT = """
+import json
+import os
+
+BULK_FIELDS = {{"request_args", "output", "reasoning_output"}}
+
+def trim_entry(obj):
+    if isinstance(obj, dict):
+        return {{k: trim_entry(v) for k, v in obj.items() if k not in BULK_FIELDS}}
+    if isinstance(obj, list):
+        return [trim_entry(i) for i in obj]
+    return obj
+
+def trim(obj):
+    if isinstance(obj, dict):
+        return {{k: trim_entry(v) if k == "requests" else trim(v) for k, v in obj.items()}}
+    if isinstance(obj, list):
+        return [trim(i) for i in obj]
+    return obj
+
+tmp_path = '{file_path}.trimtmp'
+with open('{file_path}') as f:
+    data = json.load(f)
+try:
+    with open(tmp_path, 'w') as f:
+        json.dump(trim(data), f, separators=(',', ':'))
+    os.replace(tmp_path, '{file_path}')
+except Exception:
+    if os.path.exists(tmp_path):
+        os.remove(tmp_path)
+    raise
+""".strip()
+
 
 _REQUEST_BULK_FIELDS = {"request_args", "output", "reasoning_output"}
 
@@ -599,22 +636,59 @@ def extract_results_from_copy_pod(args, ctx, results_dir: Path):
         # Save compressed version to temp file first
         temp_gz_path = local_path.with_suffix(".json.gz")
 
-        result = oc(
+        remote_gz_path = f"{remote_path}.gz"
+
+        # Trim on copy pod before compression if we don't need to keep the full file
+        # This dramatically reduces file size (1GB+ → ~40MB) before transfer
+        if not args.keep_full_benchmark_file:
+            logger.info(f"Trimming benchmark file on copy pod for {run.label}...")
+            trim_result = oc(
+                "exec",
+                "-n",
+                ctx.target_namespace,
+                f"{ctx.benchmark_name}-copy",
+                "--",
+                "python3",
+                "-c",
+                REMOTE_TRIM_SCRIPT.format(file_path=remote_path),
+                check=False,
+                timeout_seconds=1800,
+            )
+            if trim_result.returncode != 0:
+                logger.warning(
+                    f"Failed to trim on copy pod for {run.label}, will trim locally: {trim_result.stderr}"
+                )
+
+        compress_result = oc(
             "exec",
             "-n",
             ctx.target_namespace,
             f"{ctx.benchmark_name}-copy",
             "--",
             "gzip",
-            "-c",
+            "-kf",
             remote_path,
             check=False,
-            log_stdout=False,
-            stdout_dest=temp_gz_path,
-            text=False,
+            timeout_seconds=1800,
         )
-        if result.returncode != 0:
-            raise RuntimeError(f"No results found for {ctx.benchmark_name} run {run.label}")
+        if compress_result.returncode != 0:
+            raise RuntimeError(
+                f"Failed to create compressed results for {ctx.benchmark_name} run {run.label}"
+            )
+
+        result = oc(
+            "cp",
+            "-n",
+            ctx.target_namespace,
+            f"{ctx.benchmark_name}-copy:{remote_gz_path}",
+            str(temp_gz_path),
+            check=False,
+            timeout_seconds=1800,
+        )
+        if result.returncode != 0 or not temp_gz_path.exists() or temp_gz_path.stat().st_size == 0:
+            raise RuntimeError(
+                f"Failed to copy compressed results for {ctx.benchmark_name} run {run.label}"
+            )
 
         # Extract and parse JSON from local compressed file
         logger.info(f"Extracting compressed benchmark file for {run.label}...")
@@ -695,7 +769,32 @@ def extract_results_from_sidecar(args, ctx, results_dir: Path):
         # Save compressed version to temp file first
         temp_gz_path = local_path.with_suffix(".json.gz")
 
-        result = oc(
+        remote_gz_path = f"{remote_path}.gz"
+
+        # Trim on sidecar before compression if we don't need to keep the full file
+        # This dramatically reduces file size (1GB+ → ~40MB) before transfer
+        if not args.keep_full_benchmark_file:
+            logger.info(f"Trimming benchmark file on sidecar for {run.label}...")
+            trim_result = oc(
+                "exec",
+                "-n",
+                ctx.target_namespace,
+                pod_name,
+                "-c",
+                "guidellm-sidecar",
+                "--",
+                "python3",
+                "-c",
+                REMOTE_TRIM_SCRIPT.format(file_path=remote_path),
+                check=False,
+                timeout_seconds=1800,
+            )
+            if trim_result.returncode != 0:
+                logger.warning(
+                    f"Failed to trim on sidecar for {run.label}, will trim locally: {trim_result.stderr}"
+                )
+
+        compress_result = oc(
             "exec",
             "-n",
             ctx.target_namespace,
@@ -704,15 +803,31 @@ def extract_results_from_sidecar(args, ctx, results_dir: Path):
             "guidellm-sidecar",
             "--",
             "gzip",
-            "-c",
+            "-kf",
             remote_path,
             check=False,
-            log_stdout=False,
-            stdout_dest=temp_gz_path,
-            text=False,
+            timeout_seconds=1800,
         )
-        if result.returncode != 0:
-            raise RuntimeError(f"No results found for {ctx.benchmark_name} run {run.label}")
+        if compress_result.returncode != 0:
+            raise RuntimeError(
+                f"Failed to create compressed results for {ctx.benchmark_name} run {run.label}"
+            )
+
+        result = oc(
+            "cp",
+            "-n",
+            ctx.target_namespace,
+            "-c",
+            "guidellm-sidecar",
+            f"{pod_name}:{remote_gz_path}",
+            str(temp_gz_path),
+            check=False,
+            timeout_seconds=1800,
+        )
+        if result.returncode != 0 or not temp_gz_path.exists() or temp_gz_path.stat().st_size == 0:
+            raise RuntimeError(
+                f"Failed to copy compressed results for {ctx.benchmark_name} run {run.label}"
+            )
 
         # Extract and parse JSON from local compressed file
         logger.info(f"Extracting compressed benchmark file for {run.label}...")
