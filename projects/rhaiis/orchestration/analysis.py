@@ -24,11 +24,6 @@ def run_standalone_analysis(
     from projects.caliper.cli.s3_export import create_s3_client, get_aws_credentials
     from projects.core.library import config
 
-    agent_cfg = config.project.get_config("rhaiis.agent_analysis", {})
-    if not agent_cfg.get("enabled", False):
-        logger.info("Standalone analysis skipped: agent_analysis not enabled")
-        return
-
     version = config.project.get_config("tests.rhaiis.version", "")
     compare_version = config.project.get_config("tests.rhaiis.compare_version", "")
     if not version or not compare_version:
