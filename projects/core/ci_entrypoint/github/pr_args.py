@@ -486,12 +486,9 @@ def parse_pr_arguments(
     if not last_user_test_comment_author:
         raise ValueError(f"Selected authorized comment containing '{test_anchor}' has no author")
 
-    # Parse all directives from PR body and last comment
-    combined_text = (pr_data.get("body", "") or "") + "\n" + last_user_test_comment
-
-    # Parse directives using the modular parser
+    # Parse directives only from the selected trigger comment, not PR description examples.
     config, found_directives = parse_directives(
-        combined_text,
+        last_user_test_comment,
         artifact_path,
         last_user_test_comment,
     )
