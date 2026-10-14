@@ -432,7 +432,6 @@ def _run_workload_benchmark(
 
     from projects.core.library import config
     from projects.guidellm.toolbox.run_guidellm_benchmark.main import (
-        DEFAULT_GUIDELLM_IMAGE,
         run as run_guidellm_benchmark,
     )
 
@@ -484,7 +483,7 @@ def _run_workload_benchmark(
                 endpoint_url=f"{endpoint_url}/v1",
                 name=_guidellm_job_name("guidellm-bench", workload_key, deployment_name),
                 namespace=namespace,
-                image=benchmark_cfg.get("image", DEFAULT_GUIDELLM_IMAGE),
+                image=benchmark_cfg.get("image"),
                 timeout=benchmark_timeout,
                 pvc_size=benchmark_cfg.get("pvc_size", "5Gi"),
                 guidellm_args=guidellm_args,
@@ -558,7 +557,7 @@ def _set_mlflow_metadata(
     from projects.guidellm.toolbox.run_guidellm_benchmark.main import DEFAULT_GUIDELLM_IMAGE
 
     image_name, image_tag = runtime_config.split_image_tag(serving_image)
-    guidellm_image = benchmark_cfg.get("image", DEFAULT_GUIDELLM_IMAGE)
+    guidellm_image = benchmark_cfg.get("image") or DEFAULT_GUIDELLM_IMAGE
     benchmark_args = benchmark_cfg.get("args", {})
     tp = (
         engine_args.get("tensor-parallel-size")
@@ -699,7 +698,6 @@ def _run_warmup_step(
     """Run a short warmup benchmark to prime KV cache and CUDA kernels."""
     from projects.core.library import config
     from projects.guidellm.toolbox.run_guidellm_benchmark.main import (
-        DEFAULT_GUIDELLM_IMAGE,
         run as run_guidellm_benchmark,
     )
 
@@ -721,7 +719,7 @@ def _run_warmup_step(
             endpoint_url=f"{endpoint_url}/v1",
             name=_guidellm_job_name("guidellm-warmup", workload_key, deployment_name),
             namespace=namespace,
-            image=benchmark_cfg.get("image", DEFAULT_GUIDELLM_IMAGE),
+            image=benchmark_cfg.get("image"),
             timeout=benchmark_timeout,
             pvc_size=benchmark_cfg.get("pvc_size", "5Gi"),
             guidellm_args=guidellm_args,
@@ -746,7 +744,6 @@ def _run_profiler_step(
 ) -> None:
     """Run profiler-gated benchmarks: verify prereqs → enable gate → benchmark → disable gate → copy traces."""
     from projects.guidellm.toolbox.run_guidellm_benchmark.main import (
-        DEFAULT_GUIDELLM_IMAGE,
         run as run_guidellm_benchmark,
     )
     from projects.rhaiis.toolbox.copy_profiler_traces.main import run as copy_profiler_traces
@@ -789,7 +786,7 @@ def _run_profiler_step(
                 endpoint_url=f"{endpoint_url}/v1",
                 name=_guidellm_job_name("guidellm-profiler", workload_key, deployment_name),
                 namespace=namespace,
-                image=benchmark_cfg.get("image", DEFAULT_GUIDELLM_IMAGE),
+                image=benchmark_cfg.get("image"),
                 timeout=benchmark_timeout,
                 pvc_size=benchmark_cfg.get("pvc_size", "5Gi"),
                 guidellm_args=guidellm_args,

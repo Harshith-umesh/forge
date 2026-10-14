@@ -16,7 +16,6 @@ from projects.core.library.postprocess import (
 from projects.guidellm.library import benchconf as benchconf_lib
 from projects.guidellm.toolbox.run_guidellm_benchmark import build_guidellm_args
 from projects.guidellm.toolbox.run_guidellm_benchmark import main as run_guidellm_benchmark_command
-from projects.guidellm.toolbox.run_guidellm_benchmark.main import DEFAULT_GUIDELLM_IMAGE
 from projects.guidellm.toolbox.run_smoke_request import main as run_smoke_request_command
 from projects.kserve.toolbox.capture_sim_state import main as capture_sim_state_command
 from projects.kserve.toolbox.deploy_k8s_vllm_sim import main as deploy_sim_command
@@ -245,7 +244,7 @@ def run_guidellm_benchmark(test_dir, *, endpoint_url: str) -> None:
                 endpoint_url=endpoint_url,
                 name=benchmark.get("job_name"),
                 namespace=namespace,
-                image=benchmark.get("image", DEFAULT_GUIDELLM_IMAGE),
+                image=benchmark.get("image"),
                 timeout=benchmark.get("timeout_seconds"),
                 pvc_size=benchmark.get("pvc_size"),
                 pvc_storage_class=benchmark.get("pvc_storage_class"),
