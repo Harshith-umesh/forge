@@ -20,6 +20,7 @@ from projects.core.library.postprocess import (
 from projects.foreign_testing.library import initialize as foreign_repository
 from projects.guidellm.toolbox.run_guidellm_benchmark import build_guidellm_args
 from projects.guidellm.toolbox.run_guidellm_benchmark import main as run_guidellm_benchmark
+from projects.guidellm.toolbox.run_guidellm_benchmark.main import DEFAULT_GUIDELLM_IMAGE
 from projects.inference_playbooks.orchestration.recipe_validation import load_recipe_catalog
 from projects.kserve.toolbox.capture_llmisvc_state import main as capture_llmisvc_state
 from projects.kserve.toolbox.capture_lws_state import main as capture_lws_state
@@ -490,7 +491,7 @@ def _run_workload(
                 endpoint_url=endpoint_url,
                 name=_unique_name(f"guidellm-{phase}-{run_name}"),
                 namespace=namespace,
-                image=benchmark["image"],
+                image=benchmark.get("image", DEFAULT_GUIDELLM_IMAGE),
                 timeout=benchmark["timeout"],
                 pvc_size=benchmark["pvc_size"],
                 guidellm_args=build_guidellm_args({"args": args, "rate": rates}),

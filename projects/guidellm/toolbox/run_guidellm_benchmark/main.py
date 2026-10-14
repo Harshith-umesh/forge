@@ -37,6 +37,7 @@ from projects.guidellm.toolbox.run_guidellm_benchmark.utils import (
 logger = logging.getLogger(__name__)
 WAIT_POLL_INTERVAL_SECONDS = 10
 JOB_COMPLETION_GRACE_SECONDS = 60
+DEFAULT_GUIDELLM_IMAGE = "ghcr.io/vllm-project/guidellm:v0.8.1"
 
 # Script template for trimming benchmark JSON on remote pod (removes 'requests' field)
 # Use REMOTE_TRIM_SCRIPT.format(file_path=...) to generate the script
@@ -115,7 +116,7 @@ def run(
     endpoint_url: str,
     name: str = "guidellm-benchmark",
     namespace: str = "",
-    image: str = "ghcr.io/vllm-project/guidellm:v0.8.1",
+    image: str = DEFAULT_GUIDELLM_IMAGE,
     timeout: int = 900,
     pvc_size: str = "1Gi",
     pvc_storage_class: str | None = None,
@@ -582,6 +583,7 @@ def create_copy_pod(args, ctx):
         render_guidellm_copy_pod_from_parts(
             namespace=ctx.target_namespace,
             name=ctx.benchmark_name,
+            image=args.image,
             pvc_size=args.pvc_size,
             node_name=node_name,
         ),

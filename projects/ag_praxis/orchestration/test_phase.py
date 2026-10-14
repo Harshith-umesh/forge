@@ -70,6 +70,7 @@ def _execute_benchmark(test_namespace, endpoint_url, benchmark, artifact_suffix)
     from projects.guidellm.toolbox.run_guidellm_benchmark import (
         main as run_guidellm_benchmark_command,
     )
+    from projects.guidellm.toolbox.run_guidellm_benchmark.main import DEFAULT_GUIDELLM_IMAGE
 
     config_path = None
     benchconf_ref = benchmark.get("benchconf")
@@ -84,7 +85,7 @@ def _execute_benchmark(test_namespace, endpoint_url, benchmark, artifact_suffix)
         endpoint_url=endpoint_url,
         name=benchmark.get("job_name"),
         namespace=test_namespace,
-        image=benchmark.get("image"),
+        image=benchmark.get("image", DEFAULT_GUIDELLM_IMAGE),
         timeout=benchmark.get("timeout_seconds"),
         pvc_size=benchmark.get("pvc_size"),
         pvc_storage_class=benchmark.get("pvc_storage_class"),
