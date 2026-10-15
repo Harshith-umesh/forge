@@ -554,6 +554,7 @@ def _set_mlflow_metadata(
     deployment_name: str,
 ) -> None:
     from projects.core.library import config
+
     image_name, image_tag = runtime_config.split_image_tag(serving_image)
     guidellm_image = benchmark_cfg.get("image")
     benchmark_args = benchmark_cfg.get("args", {})
