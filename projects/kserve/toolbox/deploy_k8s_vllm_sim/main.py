@@ -24,7 +24,7 @@ def run(
     *,
     namespace: str,
     name: str = "sim-llm",
-    model_name: str = "simulated-llama-3",
+    model_name: str = "simulated-model",
     served_model_names: list[str] | None = None,
     image: str = SIM_IMAGE,
     port: int = 8000,
