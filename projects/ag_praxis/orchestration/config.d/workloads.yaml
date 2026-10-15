@@ -9,6 +9,7 @@ timeout_seconds: 3600
 validate_backend: false
 args:
   processor: gpt2
+  request_format: /v1/responses
 
 smoke_request:
   prompt: San Francisco is a
