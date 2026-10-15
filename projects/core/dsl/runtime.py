@@ -139,6 +139,8 @@ def execute_tasks(function_args: dict = None):
         # Convert function arguments to namespace object and add artifact_dir
         args = types.SimpleNamespace(**(function_args or {}))
         args.artifact_dir = env.ARTIFACT_DIR
+        args.artifact_dirname_prefix = prefix
+        args.artifact_dirname_suffix = suffix
 
         # Create a shared context that persists across all tasks
         shared_context = types.SimpleNamespace()
