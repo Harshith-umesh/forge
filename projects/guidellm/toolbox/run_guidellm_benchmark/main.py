@@ -448,13 +448,13 @@ def _handle_benchmark_wait_failure(args, ctx, exception):
 - **Exception**: {exception.__class__.__name__}: {exception}
 
 ## Available Files for Analysis
-- **Pod logs**: `artifacts/guidellm_benchmark_<pod_name>.log` (one per pod)
+- **Pod logs**: `artifacts/logs/guidellm_benchmark_<pod_name>.log` (one per pod)
 - **Pod YAML**: `artifacts/guidellm_benchmark_job.pods.yaml`
 - **Job YAML**: `artifacts/guidellm_benchmark_job.yaml`
 - **Pod description**: `artifacts/guidellm_benchmark_pod_description.txt`
 
 ## Analysis Instructions
-1. **Review pod logs** in `guidellm_benchmark_<pod_name>.log` for GuideLLM errors or crashes
+1. **Review pod logs** in `artifacts/logs/guidellm_benchmark_<pod_name>.log` for GuideLLM errors or crashes
 2. **Check pod status** in `guidellm_benchmark_job.pods.yaml` for OOM kills, image pull errors, or scheduling failures
 3. **Examine job YAML** for timeout or backoff limit issues
 4. **Check pod description** for K8s events (resource limits, node affinity, etc.)
@@ -564,7 +564,7 @@ def _check_job_outcome(args, ctx):
         failure_message = f"""GuideLLM benchmark job '{ctx.benchmark_name}' failed.
 
 Check the per-pod log files for detailed error information:
-  artifacts/guidellm_benchmark_<pod_name>.log
+  artifacts/logs/guidellm_benchmark_<pod_name>.log
 """
         write_text(failure_file, failure_message)
         raise RuntimeError(f"GuideLLM job {ctx.benchmark_name} failed")
@@ -575,7 +575,7 @@ Check the per-pod log files for detailed error information:
     failure_message = f"""GuideLLM benchmark job '{ctx.benchmark_name}' ended with unexpected replica counts (succeeded={succeeded_count}, expected={args.replica_count}).
 
 Check the per-pod log files for detailed error information:
-  artifacts/guidellm_benchmark_<pod_name>.log
+  artifacts/logs/guidellm_benchmark_<pod_name>.log
 """
     write_text(failure_file, failure_message)
     raise RuntimeError(
@@ -671,7 +671,7 @@ def _check_main_container_outcome(args, ctx):
     failure_message = (
         f"GuideLLM benchmark main container(s) '{ctx.benchmark_name}' failed: {details}.\n\n"
         "Check the job logs for detailed error information:\n"
-        "  artifacts/guidellm_benchmark_<pod_name>.log\n"
+        "  artifacts/logs/guidellm_benchmark_<pod_name>.log\n"
     )
     write_text(failure_file, failure_message)
     raise RuntimeError(f"GuideLLM main container(s) {ctx.benchmark_name} failed: {details}")
@@ -1256,6 +1256,9 @@ def capture_guidellm_state(*, artifact_dir: Path, namespace: str, benchmark_name
         selector=f"job-name={benchmark_name}",
     )
 
+    logs_dir = artifacts_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+
     pod_names = _get_job_pod_names(namespace, benchmark_name)
     for pod_name in pod_names:
         oc(
@@ -1266,7 +1269,7 @@ def capture_guidellm_state(*, artifact_dir: Path, namespace: str, benchmark_name
             namespace,
             check=False,
             log_stdout=False,
-            stdout_dest=artifacts_dir / f"guidellm_benchmark_{pod_name}.log",
+            stdout_dest=logs_dir / f"guidellm_benchmark_{pod_name}.log",
         )
         oc(
             "describe",
@@ -1276,7 +1279,7 @@ def capture_guidellm_state(*, artifact_dir: Path, namespace: str, benchmark_name
             namespace,
             check=False,
             log_stdout=False,
-            stdout_dest=artifacts_dir / f"guidellm_benchmark_{pod_name}.describe.txt",
+            stdout_dest=logs_dir / f"guidellm_benchmark_{pod_name}.describe.txt",
         )
 
 
