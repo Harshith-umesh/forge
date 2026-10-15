@@ -12,6 +12,7 @@ from projects.core.library import env
 from projects.core.library.fournos_status import patch_fjob_relevant_deployments
 from projects.core.library.postprocess import create_test_metadata, run_and_postprocess
 from projects.rhaiis.orchestration import runtime_config
+from projects.rhaiis.postprocess.csv_dashboard import serialize_env_vars
 
 logger = logging.getLogger(__name__)
 
@@ -346,6 +347,7 @@ def _run_test(
                 gpu_type=gpu_type,
                 serving_image=serving_image,
                 engine_args=engine_args,
+                env_vars=env_vars,
                 benchmark_cfg=benchmark_cfg,
                 deployment_name=deployment_name,
                 namespace=namespace,
@@ -407,6 +409,7 @@ def _run_workload_benchmark(
     gpu_type: str,
     serving_image: str,
     engine_args: dict,
+    env_vars: dict[str, object],
     benchmark_cfg: dict,
     deployment_name: str,
     namespace: str,
@@ -450,6 +453,7 @@ def _run_workload_benchmark(
             accelerator_chip=gpu_type.upper(),
             run_uuid=run_uuid,
             trtllm_config=trtllm_config,
+            env_vars=env_vars,
         )
 
         if not run_benchmark:
@@ -505,6 +509,7 @@ def _create_test_labels(
     accelerator_chip: str = "",
     run_uuid: str = "",
     trtllm_config: dict | None = None,
+    env_vars: dict[str, object] | None = None,
 ) -> None:
     _, image_tag = runtime_config.split_image_tag(serving_image) if serving_image else ("", "")
     parts = [f"{k}: {v}" for k, v in engine_args.items()]
@@ -530,6 +535,7 @@ def _create_test_labels(
         "image_tag": image_tag,
         "cluster_tag": cluster_tag,
         "runtime_args": runtime_args,
+        "env_vars": serialize_env_vars(env_vars),
         "run_uuid": run_uuid,
     }
 
@@ -537,7 +543,10 @@ def _create_test_labels(
         env.ARTIFACT_DIR,
         labels,
     )
-    logger.info("Created test labels: %s", labels)
+    logger.info(
+        "Created test labels: %s",
+        {key: value for key, value in labels.items() if key != "env_vars"},
+    )
 
 
 def _set_mlflow_metadata(
