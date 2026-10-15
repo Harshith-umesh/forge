@@ -77,9 +77,6 @@ def apply_trusted_ca_configmap(args, ctx):
     """Fetch the OpenShift ingress CA and create a ConfigMap with it."""
     from projects.core.dsl.utils.k8s import oc
 
-    src_dir = args.artifact_dir / "src"
-    src_dir.mkdir(parents=True, exist_ok=True)
-
     ca_b64 = oc(
         "get",
         "secret",
@@ -88,6 +85,7 @@ def apply_trusted_ca_configmap(args, ctx):
         "openshift-ingress-operator",
         "-o",
         "jsonpath={.data.tls\\.crt}",
+        log_stdout=False,
     ).stdout.strip()
 
     import base64
@@ -105,7 +103,7 @@ def apply_trusted_ca_configmap(args, ctx):
             "ca-bundle.crt": ca_pem,
         },
     }
-    oc_apply(src_dir / "trusted-ca-configmap.yaml", manifest)
+    oc("apply", "-f", "-", input_text=yaml.safe_dump(manifest, sort_keys=False))
     return "Applied praxis-trusted-ca ConfigMap with ingress CA bundle"
 
 

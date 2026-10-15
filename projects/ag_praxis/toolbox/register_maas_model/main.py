@@ -116,7 +116,6 @@ def apply_maas_auth_policy(args, ctx):
         "metadata": {
             "name": f"{ctx.model_ref_name}-access",
             "namespace": args.tenant_namespace,
-            "ownerReferences": [_llmisvc_owner_ref(args.llmisvc_name, ctx.llmisvc_uid)],
         },
         "spec": {
             "modelRefs": [
@@ -149,7 +148,6 @@ def apply_maas_subscription(args, ctx):
         "metadata": {
             "name": f"{ctx.model_ref_name}-subscription",
             "namespace": args.tenant_namespace,
-            "ownerReferences": [_llmisvc_owner_ref(args.llmisvc_name, ctx.llmisvc_uid)],
         },
         "spec": {
             "owner": {
@@ -160,9 +158,6 @@ def apply_maas_subscription(args, ctx):
                 {
                     "name": ctx.model_ref_name,
                     "namespace": args.model_namespace,
-                    "tokenRateLimits": [
-                        {"limit": 100, "window": "1m"},
-                    ],
                 },
             ],
             "priority": 10,

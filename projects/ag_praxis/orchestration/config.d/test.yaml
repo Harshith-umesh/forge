@@ -12,4 +12,5 @@ continue_on_flavor_failure: true
 
 flavors:
   - direct
+  - maas
   - maas-praxis
