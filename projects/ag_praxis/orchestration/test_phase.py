@@ -111,8 +111,10 @@ def _execute_benchmark(
 
 def _run_guidellm_benchmark(test_namespace, endpoint_url, benchmark_key):
     """Resolve a named benchmark and run it."""
-    benchmark = _resolve_benchmark_config(benchmark_key)
-    _execute_benchmark(test_namespace, endpoint_url, benchmark, benchmark_key)
+
+    with env.NextArtifactDir("benchmark"):
+        benchmark = _resolve_benchmark_config(benchmark_key)
+        _execute_benchmark(test_namespace, endpoint_url, benchmark, benchmark_key)
 
 
 def _build_benchmark_config(payload_name, sweep_name):
@@ -299,10 +301,11 @@ def _deploy_all_sims(test_namespace, **kwargs):
         **kwargs,
     )
 
-    sims = []
-    for model_name in served_model_names:
-        sims.append((model_name, endpoint))
-        _smoke_test(test_namespace, endpoint, f"sim-{model_name}", served_model_name=model_name)
+    with env.NextArtifactDir("smoke_tests"):
+        sims = []
+        for model_name in served_model_names:
+            sims.append((model_name, endpoint))
+            _smoke_test(test_namespace, endpoint, f"sim-{model_name}", served_model_name=model_name)
 
     return sims
 
