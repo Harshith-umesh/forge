@@ -220,7 +220,7 @@ def _build_run_args(
                     processor_args = _json.loads(val)
                 except (ValueError, TypeError):
                     pass
-        elif key == "--request-type":
+        elif key in ("--request-type", "--request-format"):
             request_format = val
         elif key == "--backend":
             # v0.7.x-style --backend=subkey=subval from presets/workload args.
