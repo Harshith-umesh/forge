@@ -53,6 +53,12 @@ spec:
         - "--mode"
         - "{{ mode }}"
         - "--logtostderr=true"
+{% if served_model_names %}
+        - "--served-model-name"
+{% for served_name in served_model_names %}
+        - "{{ served_name }}"
+{% endfor %}
+{% endif %}
         ports:
         - containerPort: 8000
           name: http1

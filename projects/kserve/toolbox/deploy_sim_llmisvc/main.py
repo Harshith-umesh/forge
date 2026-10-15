@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 
 import yaml
@@ -14,6 +15,7 @@ from projects.core.dsl import (  # noqa: F401
 )
 from projects.core.dsl.template import render_template
 from projects.core.dsl.utils.k8s import (
+    oc,
     oc_apply,
 )
 from projects.kserve.toolbox.deploy_llmisvc import main as deploy_llmisvc
@@ -41,6 +43,7 @@ def run(
     deploy_monitor: bool = True,
     skip_router: bool = False,
     maas_gateway_label: str = "",
+    served_model_names: list[str] | None = None,
 ) -> str:
     """Build and deploy an llm-d simulator LLMInferenceService.
 
@@ -60,6 +63,7 @@ def run(
         deploy_monitor: If True, deploy ServiceMonitor for monitoring.
         skip_router: If True, set spec.router to empty (no scheduler, no gateway routing).
         maas_gateway_label: MaaS gateway label value. When set, adds MaaS labels and annotations.
+        served_model_names: Additional model names to serve (--served-model-name flags).
     """
     ctx = execute_tasks(locals())
 
@@ -90,6 +94,7 @@ def build_manifest(args, ctx):
                 "skip_router": args.skip_router,
                 "deploy_monitor": args.deploy_monitor,
                 "maas_gateway_label": args.maas_gateway_label,
+                "served_model_names": args.served_model_names or [],
             },
         )
     )
@@ -116,29 +121,29 @@ def deploy(args, ctx):
 
 
 @task
-def patch_servicemonitors_plaintext(args, ctx):
-    """Patch operator-created ServiceMonitors to scrape over HTTP when skip_router is set."""
+def cleanup_router_servicemonitor(args, ctx):
+    """Remove the router ServiceMonitor when skip_router is enabled."""
+    if not args.skip_router:
+        return "Router enabled, keeping epp ServiceMonitor"
+
+    oc(
+        "delete",
+        "servicemonitor",
+        f"{args.name}-epp",
+        "-n",
+        args.namespace,
+        "--ignore-not-found=true",
+    )
+    return f"Deleted router ServiceMonitor {args.name}-epp (skip_router=True)"
+
+
+@task
+def patch_workload_servicemonitor_plaintext(args, ctx):
+    """Patch this service's workload ServiceMonitor to scrape over HTTP when skip_router is set."""
     if not args.skip_router:
         return "Router enabled, keeping HTTPS scraping"
 
-    import json
-
-    from projects.core.dsl.utils.k8s import oc
-
-    result = oc(
-        "get",
-        "servicemonitor",
-        "-n",
-        args.namespace,
-        "-l",
-        "app.kubernetes.io/part-of=llminferenceservice",
-        "-o",
-        "jsonpath={.items[*].metadata.name}",
-    )
-    names = result.stdout.strip().split()
-    if not names:
-        return "No operator-created ServiceMonitors found"
-
+    sm_name = f"{args.name}-kserve"
     patch = json.dumps(
         {
             "spec": {
@@ -154,35 +159,70 @@ def patch_servicemonitors_plaintext(args, ctx):
             }
         }
     )
-    for name in names:
-        oc("patch", "servicemonitor", name, "-n", args.namespace, "--type=merge", f"-p={patch}")
-        logger.info("Patched ServiceMonitor %s to use scheme: http", name)
+    oc("patch", "servicemonitor", sm_name, "-n", args.namespace, "--type=merge", f"-p={patch}")
+    logger.info("Patched ServiceMonitor %s to use scheme: http", sm_name)
 
-    return f"Patched {len(names)} ServiceMonitor(s) to use HTTP"
+    return f"Patched ServiceMonitor {sm_name} to use HTTP"
 
 
-def _get_llmisvc_uid(namespace, name):
-    from projects.core.dsl.utils.k8s import oc
-
-    return oc(
+@task
+def fetch_llmisvc_uid(args, ctx):
+    """Fetch the LLMInferenceService UID for DestinationRule owner references."""
+    ctx.llmisvc_uid = oc(
         "get",
         "llminferenceservice",
-        name,
+        args.name,
         "-n",
-        namespace,
+        args.namespace,
         "-o",
         "jsonpath={.metadata.uid}",
+        log_stdout=True,
     ).stdout.strip()
 
+    return f"LLMInferenceService UID: {ctx.llmisvc_uid}"
 
-def _apply_destination_rule(args, host):
-    llmisvc_uid = _get_llmisvc_uid(args.namespace, args.name)
 
+@retry(attempts=18, delay=10, backoff=1.0)
+@task
+def apply_pool_destination_rule(args, ctx):
+    """Create a DestinationRule to disable TLS to the InferencePool backend service."""
+    if args.skip_router:
+        return "Skipped pool DestinationRule (no router configured)"
+
+    pool_svc_result = oc(
+        "get",
+        "svc",
+        "-n",
+        args.namespace,
+        "-l",
+        "internal.istio.io/service-semantics=inferencepool",
+        "-o",
+        "jsonpath={.items[*].metadata.name}",
+    )
+    pool_svc_name = pool_svc_result.stdout.strip()
+    if not pool_svc_name:
+        logger.info("InferencePool service not found yet, retrying...")
+        return False
+
+    pool_host = f"{pool_svc_name}.{args.namespace}.svc.cluster.local"
+    return _apply_destination_rule(args, pool_host, "pool", ctx.llmisvc_uid)
+
+
+@task
+def apply_workload_destination_rule(args, ctx):
+    """Create a DestinationRule to disable TLS to the workload service."""
+    workload_host = f"{args.name}-kserve-workload-svc.{args.namespace}.svc.cluster.local"
+    return _apply_destination_rule(args, workload_host, "workload", ctx.llmisvc_uid)
+
+
+def _apply_destination_rule(args, host, suffix, llmisvc_uid):
+    """Apply a DestinationRule that disables TLS for the given host."""
+    dr_name = f"{args.name}-{suffix}-plaintext"
     dr_manifest = {
         "apiVersion": "networking.istio.io/v1",
         "kind": "DestinationRule",
         "metadata": {
-            "name": f"{args.name}-plaintext",
+            "name": dr_name,
             "namespace": args.namespace,
             "ownerReferences": [
                 {
@@ -203,48 +243,10 @@ def _apply_destination_rule(args, host):
         },
     }
 
-    dest_rule_path = args.artifact_dir / "src" / "destination-rule.yaml"
+    dest_rule_path = args.artifact_dir / "src" / f"destination-rule-{suffix}.yaml"
     oc_apply(dest_rule_path, dr_manifest)
 
-    return f"Applied DestinationRule {args.name}-plaintext for host {host}"
-
-
-@retry(attempts=18, delay=10, backoff=1.0)
-@task
-def apply_destination_rule_inferencepool(args, ctx):
-    """Create a DestinationRule to disable TLS to the InferencePool backend service."""
-    if args.skip_router:
-        return "Skipped (no router configured)"
-
-    from projects.core.dsl.utils.k8s import oc
-
-    pool_svc_result = oc(
-        "get",
-        "svc",
-        "-n",
-        args.namespace,
-        "-l",
-        "internal.istio.io/service-semantics=inferencepool",
-        "-o",
-        "jsonpath={.items[*].metadata.name}",
-    )
-    pool_svc_name = pool_svc_result.stdout.strip()
-    if not pool_svc_name:
-        logger.info("InferencePool service not found yet, retrying...")
-        return False
-
-    pool_host = f"{pool_svc_name}.{args.namespace}.svc.cluster.local"
-    return _apply_destination_rule(args, pool_host)
-
-
-@task
-def apply_destination_rule_workload(args, ctx):
-    """Create a DestinationRule to disable TLS to the workload service."""
-    if not args.skip_router:
-        return "Skipped (router handles routing)"
-
-    workload_host = f"{args.name}-kserve-workload-svc.{args.namespace}.svc.cluster.local"
-    return _apply_destination_rule(args, workload_host)
+    return f"Applied DestinationRule {dr_name} for host {host}"
 
 
 if __name__ == "__main__":
