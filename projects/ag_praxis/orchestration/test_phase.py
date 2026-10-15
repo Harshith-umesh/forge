@@ -16,6 +16,20 @@ logger = logging.getLogger(__name__)
 SIM_DEPLOY_MODE = "k8s"
 
 
+def _sim_instance_names():
+    """Return the list of sim instance names based on config count."""
+    sim_cfg = config.project.get_config("platform.sim")
+    base_name = sim_cfg["llmisvc_name"]
+    count = sim_cfg.get("count", 1)
+    return [base_name if i == 0 else f"{base_name}-{i}" for i in range(count)]
+
+
+def _sim_model_name(index):
+    """Return the model name for a sim instance by index."""
+    base_model = config.project.get_config("platform.sim.model_name")
+    return base_model if index == 0 else f"{base_model}-{index}"
+
+
 def test_maas():
     from projects.ag_praxis.toolbox.maas_sim_test import main as maas_sim_test_command
 
@@ -216,6 +230,7 @@ def _deploy_sim_llmisvc(
     test_namespace,
     *,
     name=None,
+    model_name=None,
     gateway_name="",
     gateway_namespace="",
     maas_gateway_label="",
@@ -224,6 +239,7 @@ def _deploy_sim_llmisvc(
     """Deploy a sim model (LLMInferenceService or plain K8s Deployment depending on SIM_DEPLOY_MODE)."""
     sim_cfg = config.project.get_config("platform.sim")
     deploy_name = name or sim_cfg["llmisvc_name"]
+    deploy_model_name = model_name or sim_cfg["model_name"]
 
     if SIM_DEPLOY_MODE == "k8s":
         if not skip_router:
@@ -236,6 +252,7 @@ def _deploy_sim_llmisvc(
         endpoint = deploy_k8s_vllm_sim_command.run(
             namespace=test_namespace,
             name=deploy_name,
+            model_name=deploy_model_name,
             image=sim_cfg["image"],
             time_to_first_token=sim_cfg["time_to_first_token"],
             inter_token_latency=sim_cfg["inter_token_latency"],
@@ -249,6 +266,7 @@ def _deploy_sim_llmisvc(
     endpoint = deploy_sim_llmisvc_command.run(
         namespace=test_namespace,
         name=deploy_name,
+        model_name=deploy_model_name,
         image=sim_cfg["image"],
         gateway_name=gateway_name,
         gateway_namespace=gateway_namespace,
@@ -262,6 +280,22 @@ def _deploy_sim_llmisvc(
         max_num_seqs=sim_cfg["max_num_seqs"],
     )
     return endpoint.replace("https://", "http://", 1)
+
+
+def _deploy_all_sims(test_namespace, **kwargs):
+    """Deploy all sim instances. Returns the endpoint of the first (primary) one."""
+    names = _sim_instance_names()
+    primary_endpoint = None
+    for i, sim_name in enumerate(names):
+        endpoint = _deploy_sim_llmisvc(
+            test_namespace,
+            name=sim_name,
+            model_name=_sim_model_name(i),
+            **kwargs,
+        )
+        if i == 0:
+            primary_endpoint = endpoint
+    return primary_endpoint
 
 
 def _build_gateway_endpoint(gateway_cfg, test_namespace):
@@ -312,7 +346,7 @@ def _deploy_praxis(test_namespace, model_endpoint):
 
 
 def _prep_direct(test_namespace, gateway_cfg):
-    sim_endpoint = _deploy_sim_llmisvc(test_namespace)
+    sim_endpoint = _deploy_all_sims(test_namespace)
     _smoke_test(test_namespace, sim_endpoint, "sim")
     return sim_endpoint
 
@@ -323,7 +357,7 @@ DIRECT_GATEWAY_HTTPROUTE_NAME = "direct-gateway-route"
 def _prep_direct_gateway(test_namespace, gateway_cfg):
     from projects.ag_praxis.toolbox.add_gateway_route import main as add_gateway_route_command
 
-    sim_endpoint = _deploy_sim_llmisvc(test_namespace)
+    sim_endpoint = _deploy_all_sims(test_namespace)
     llmisvc_name = config.project.get_config("platform.sim.llmisvc_name")
 
     logger.info("[direct-gateway] model direct endpoint: %s", sim_endpoint)
@@ -346,7 +380,7 @@ def _prep_direct_gateway(test_namespace, gateway_cfg):
 
 
 def _prep_praxis(test_namespace, gateway_cfg):
-    sim_endpoint = _deploy_sim_llmisvc(test_namespace)
+    sim_endpoint = _deploy_all_sims(test_namespace)
     logger.info("[praxis] model direct endpoint: %s", sim_endpoint)
     _smoke_test(test_namespace, sim_endpoint, "sim")
 
@@ -374,7 +408,7 @@ def _add_gateway_route(test_namespace, gateway_cfg):
 
 
 def _prep_praxis_gateway(test_namespace, gateway_cfg):
-    sim_endpoint = _deploy_sim_llmisvc(test_namespace)
+    sim_endpoint = _deploy_all_sims(test_namespace)
     logger.info("[praxis-gateway] model direct endpoint: %s", sim_endpoint)
     _smoke_test(test_namespace, sim_endpoint, "sim")
 
@@ -393,12 +427,12 @@ def _prep_praxis_gateway(test_namespace, gateway_cfg):
 def _cleanup_llmisvc(test_namespace):
     from projects.core.dsl.utils.k8s import best_effort_oc
 
-    llmisvc_name = config.project.get_config("platform.sim.llmisvc_name")
-    if SIM_DEPLOY_MODE == "k8s":
-        best_effort_oc("delete", "deployment", llmisvc_name, "-n", test_namespace)
-        best_effort_oc("delete", "service", llmisvc_name, "-n", test_namespace)
-    else:
-        best_effort_oc("delete", "llminferenceservice", llmisvc_name, "-n", test_namespace)
+    for sim_name in _sim_instance_names():
+        if SIM_DEPLOY_MODE == "k8s":
+            best_effort_oc("delete", "deployment", sim_name, "-n", test_namespace)
+            best_effort_oc("delete", "service", sim_name, "-n", test_namespace)
+        else:
+            best_effort_oc("delete", "llminferenceservice", sim_name, "-n", test_namespace)
 
 
 def _cleanup_praxis(test_namespace):
@@ -431,14 +465,14 @@ def _cleanup_praxis_gateway(test_namespace):
     _cleanup_llmisvc(test_namespace)
 
 
-def _llmisvc_name_sim():
+def _llmisvc_names_sim():
     if SIM_DEPLOY_MODE == "k8s":
-        return None
-    return config.project.get_config("platform.sim.llmisvc_name")
+        return []
+    return _sim_instance_names()
 
 
-def _llmisvc_name_maas():
-    return config.project.get_config("platform.maas.llmisvc_name")
+def _llmisvc_names_maas():
+    return [config.project.get_config("platform.maas.llmisvc_name")]
 
 
 def _endpoint_direct(test_namespace, gateway_cfg):
@@ -682,25 +716,25 @@ def _endpoint_maas_praxis(test_namespace, gateway_cfg):
 
 
 FLAVORS = {
-    "direct": (_prep_direct, _cleanup_direct, _endpoint_direct, _llmisvc_name_sim),
+    "direct": (_prep_direct, _cleanup_direct, _endpoint_direct, _llmisvc_names_sim),
     "direct-gateway": (
         _prep_direct_gateway,
         _cleanup_direct_gateway,
         _endpoint_gateway,
-        _llmisvc_name_sim,
+        _llmisvc_names_sim,
     ),
-    "praxis": (_prep_praxis, _cleanup_praxis_flavor, _endpoint_praxis, _llmisvc_name_sim),
+    "praxis": (_prep_praxis, _cleanup_praxis_flavor, _endpoint_praxis, _llmisvc_names_sim),
     "praxis-gateway": (
         _prep_praxis_gateway,
         _cleanup_praxis_gateway,
         _endpoint_gateway,
-        _llmisvc_name_sim,
+        _llmisvc_names_sim,
     ),
     "maas-praxis": (
         _prep_maas_praxis,
         _cleanup_maas_praxis,
         _endpoint_maas_praxis,
-        _llmisvc_name_maas,
+        _llmisvc_names_maas,
     ),
 }
 
@@ -772,16 +806,18 @@ def _run_flavor_finalizers(
             else:
                 logger.exception("Ignoring %s failure after primary test failure", description)
 
-    llmisvc_name = llmisvc_name_fn()
-    if llmisvc_name:
+    llmisvc_names = llmisvc_name_fn()
+    for llmisvc_name in llmisvc_names:
 
-        def _capture_llmisvc_state():
+        def _capture_llmisvc_state(name=llmisvc_name):
             capture_llmisvc_state_command.run(
-                llmisvc_name,
+                name,
                 namespace=test_namespace,
             )
 
-        _run_finalizer("capturing LLMInferenceService state", _capture_llmisvc_state)
+        _run_finalizer(
+            f"capturing LLMInferenceService state for {llmisvc_name}", _capture_llmisvc_state
+        )
 
     if benchmark_times:
         start_time, end_time = benchmark_times
