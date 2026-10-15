@@ -86,9 +86,7 @@ def run_standalone_analysis(
             )
             from projects.rhaiis.postprocess.regression import send_regression_notification
 
-            dp = str(
-                engine_args.get("data-parallel-size") or engine_args.get("dp-size") or ""
-            )
+            dp = str(engine_args.get("data-parallel-size") or engine_args.get("dp-size") or "")
             send_regression_notification(
                 {
                     "status": "skipped",

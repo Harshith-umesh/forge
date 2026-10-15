@@ -281,6 +281,16 @@ def run_regression_analysis(
                 "current_version": current_version,
                 "compare_version": compare_version,
             }
+        elif not results:
+            # common profiles but nothing comparable (e.g. only concurrency 1 in
+            # common, which is excluded) — a skip, not "no changes detected"
+            analysis = {
+                "status": "skipped",
+                "reason": "No common concurrency levels between current and baseline "
+                "(concurrency 1 is excluded from comparisons)",
+                "current_version": current_version,
+                "compare_version": compare_version,
+            }
         else:
             regressions = [r for r in results if r.is_regression]
             improvements = [r for r in results if r.is_improvement]
@@ -457,6 +467,10 @@ def send_regression_notification(
     current_version = analysis_result.get("current_version", "")
     compare_version = analysis_result.get("compare_version", "")
 
+    if status == "completed" and not analysis_result.get("total_comparisons"):
+        # nothing was actually compared — report as a skip, not "no changes"
+        status = "skipped"
+
     user_line = _format_slack_user_line(slack_user)
     owner_line = _format_owner_line(owner)
 
@@ -506,7 +520,9 @@ def send_regression_notification(
     )
 
     if status == "skipped":
-        reason = analysis_result.get("reason", "unknown")
+        reason = analysis_result.get(
+            "reason", "No common concurrency levels between current and baseline"
+        )
         logger.info("Regression analysis skipped: %s", reason)
         message = (
             f":information_source: *Performance comparison skipped*\n"
