@@ -23,6 +23,10 @@ def run(
         namespace: Namespace of the sim Deployment.
         name: Name of the sim Deployment.
     """
+
+    if not name:
+        raise ValueError("name must not be empty")
+
     return execute_tasks(locals())
 
 
