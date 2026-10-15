@@ -645,6 +645,7 @@ def _sync_postprocessed_dashboard_csv(model_key: str, workload_keys: list[str]) 
     if compare_version and version:
         model_cfg = runtime_config.get_model(model_key)
         accelerator = runtime_config.get_accelerator()
+        gpu_type = runtime_config.get_gpu_type(accelerator) or accelerator
         engine = runtime_config.get_engine()
         engine_defaults = runtime_config.get_engine_args(engine)
         first_workload = runtime_config.get_workload(workload_keys[0])
@@ -657,7 +658,7 @@ def _sync_postprocessed_dashboard_csv(model_key: str, workload_keys: list[str]) 
             compare_version,
             version,
             model_cfg,
-            accelerator,
+            gpu_type.upper(),
             run_uuid=config.project.get_config("ci_job.fjob_name", ""),
             engine_args=ea,
         )
