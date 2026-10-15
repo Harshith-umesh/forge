@@ -17,14 +17,18 @@ def run(
     tenant_namespace: str,
     llmisvc_name: str,
     model_ref_name: str = "",
+    model_ref_kind: str = "LLMInferenceService",
 ):
     """Unregister a model from MaaS by deleting MaaSSubscription, MaaSAuthPolicy, and MaaSModelRef.
+
+    For ExternalModel kind, also deletes the ExternalModel CR and credential secret.
 
     Args:
         model_namespace: Namespace where the MaaSModelRef lives.
         tenant_namespace: Namespace where MaaSAuthPolicy and MaaSSubscription live.
         llmisvc_name: Name of the LLMInferenceService that was referenced.
         model_ref_name: Name of the MaaSModelRef resource. Defaults to llmisvc_name.
+        model_ref_kind: Kind of resource the MaaSModelRef references ("LLMInferenceService" or "ExternalModel").
     """
     return execute_tasks(locals())
 
@@ -33,6 +37,7 @@ def run(
 def resolve_names(args, ctx):
     """Resolve default names from parameters."""
     ctx.model_ref_name = args.model_ref_name or args.llmisvc_name
+    ctx.is_external = args.model_ref_kind == "ExternalModel"
     return f"Model ref name: {ctx.model_ref_name}"
 
 
@@ -41,6 +46,20 @@ def capture_maas_resources(args, ctx):
     """Capture the YAML of all MaaS resources before deletion."""
     artifacts_dir = args.artifact_dir / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    if ctx.is_external:
+        oc(
+            "get",
+            "externalmodel.maas.opendatahub.io",
+            ctx.model_ref_name,
+            "-n",
+            args.model_namespace,
+            "-o",
+            "yaml",
+            check=False,
+            log_stdout=False,
+            stdout_dest=artifacts_dir / "externalmodel.yaml",
+        )
 
     oc(
         "get",
@@ -57,7 +76,7 @@ def capture_maas_resources(args, ctx):
     oc(
         "get",
         "maasauthpolicy",
-        f"{ctx.model_ref_name}-access",
+        f"{args.model_namespace}-{ctx.model_ref_name}-access",
         "-n",
         args.tenant_namespace,
         "-o",
@@ -69,7 +88,7 @@ def capture_maas_resources(args, ctx):
     oc(
         "get",
         "maassubscription",
-        f"{ctx.model_ref_name}-subscription",
+        f"{args.model_namespace}-{ctx.model_ref_name}-subscription",
         "-n",
         args.tenant_namespace,
         "-o",
@@ -88,7 +107,7 @@ def delete_maas_subscription(args, ctx):
     best_effort_oc(
         "delete",
         "maassubscription",
-        f"{ctx.model_ref_name}-subscription",
+        f"{args.model_namespace}-{ctx.model_ref_name}-subscription",
         "-n",
         args.tenant_namespace,
         "--ignore-not-found",
@@ -102,7 +121,7 @@ def delete_maas_auth_policy(args, ctx):
     best_effort_oc(
         "delete",
         "maasauthpolicy",
-        f"{ctx.model_ref_name}-access",
+        f"{args.model_namespace}-{ctx.model_ref_name}-access",
         "-n",
         args.tenant_namespace,
         "--ignore-not-found",
@@ -122,6 +141,39 @@ def delete_maas_model_ref(args, ctx):
         "--ignore-not-found",
     )
     return f"Deleted MaaSModelRef {ctx.model_ref_name}"
+
+
+@task
+def delete_external_model(args, ctx):
+    """Delete the ExternalModel and credential secret (only for ExternalModel kind)."""
+    if not ctx.is_external:
+        return "Skipped (not ExternalModel)"
+
+    best_effort_oc(
+        "delete",
+        "externalmodel.maas.opendatahub.io",
+        ctx.model_ref_name,
+        "-n",
+        args.model_namespace,
+        "--ignore-not-found",
+    )
+    best_effort_oc(
+        "delete",
+        "secret",
+        f"{ctx.model_ref_name}-creds",
+        "-n",
+        args.model_namespace,
+        "--ignore-not-found",
+    )
+    best_effort_oc(
+        "delete",
+        "httproute",
+        f"{ctx.model_ref_name}-route",
+        "-n",
+        args.model_namespace,
+        "--ignore-not-found",
+    )
+    return f"Deleted ExternalModel {ctx.model_ref_name}, credential secret, and HTTPRoute"
 
 
 if __name__ == "__main__":

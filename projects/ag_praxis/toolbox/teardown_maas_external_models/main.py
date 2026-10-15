@@ -40,7 +40,9 @@ def delete_httproutes(args, ctx):
 def delete_external_models(args, ctx):
     """Delete ExternalModel CRs for each model."""
     for model_name in args.model_names:
-        best_effort_oc("delete", "externalmodel", model_name, "-n", args.namespace)
+        best_effort_oc(
+            "delete", "externalmodel.maas.opendatahub.io", model_name, "-n", args.namespace
+        )
 
     return f"Deleted {len(args.model_names)} ExternalModel CRs"
 

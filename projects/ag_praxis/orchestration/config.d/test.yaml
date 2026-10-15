@@ -8,6 +8,7 @@ run_warmup: true
 
 skip_cleanup: false
 skip_prepare: false
+skip_finalizers: false
 continue_on_flavor_failure: true
 
 flavors:
