@@ -28,7 +28,7 @@ def run(
     *,
     namespace: str,
     name: str = "sim-llm",
-    model_name: str = "simulated-llama-3",
+    model_name: str = "simulated-model",
     image: str = SIM_IMAGE,
     gateway_name: str = "",
     gateway_namespace: str = "",
