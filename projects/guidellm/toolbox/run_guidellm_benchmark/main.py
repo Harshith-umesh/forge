@@ -1208,6 +1208,7 @@ def cleanup_api_key_secret(args, ctx):
     return f"Cleaned up API key secret {secret_name}"
 
 
+@always
 @task
 def cleanup_guidellm_resources(args, ctx):
     """Delete the GuideLLM benchmark job and optionally PVC at the end"""
