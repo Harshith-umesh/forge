@@ -151,7 +151,7 @@ def run(
         raise ValueError("timeout must be greater than zero")
 
     # None means "no image configured": use the toolbox default
-    if image is None:
+    if not image:
         image = DEFAULT_GUIDELLM_IMAGE
 
     execute_tasks(locals())
@@ -588,7 +588,7 @@ def create_copy_pod(args, ctx):
         render_guidellm_copy_pod_from_parts(
             namespace=ctx.target_namespace,
             name=ctx.benchmark_name,
-            image=DEFAULT_GUIDELLM_IMAGE,
+            image=args.image,
             pvc_size=args.pvc_size,
             node_name=node_name,
         ),

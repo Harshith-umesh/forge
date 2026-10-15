@@ -554,10 +554,8 @@ def _set_mlflow_metadata(
     deployment_name: str,
 ) -> None:
     from projects.core.library import config
-    from projects.guidellm.toolbox.run_guidellm_benchmark.main import DEFAULT_GUIDELLM_IMAGE
-
     image_name, image_tag = runtime_config.split_image_tag(serving_image)
-    guidellm_image = benchmark_cfg.get("image") or DEFAULT_GUIDELLM_IMAGE
+    guidellm_image = benchmark_cfg.get("image")
     benchmark_args = benchmark_cfg.get("args", {})
     tp = (
         engine_args.get("tensor-parallel-size")
