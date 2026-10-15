@@ -25,6 +25,7 @@ def run(
     namespace: str,
     name: str = "sim-llm",
     model_name: str = "simulated-llama-3",
+    served_model_names: list[str] | None = None,
     image: str = SIM_IMAGE,
     port: int = 8000,
     replicas: int = 1,
@@ -39,7 +40,8 @@ def run(
     Args:
         namespace: Namespace for the deployment.
         name: Name of the Deployment and Service.
-        model_name: Model name advertised by the simulator.
+        model_name: Model name advertised by the simulator (--model flag).
+        served_model_names: Additional model names to serve (--served-model-name flags).
         image: Container image for the simulator.
         port: Port the simulator listens on.
         replicas: Number of replicas.
@@ -67,6 +69,7 @@ def create_deployment(args, ctx):
                 "name": args.name,
                 "namespace": args.namespace,
                 "model_name": args.model_name,
+                "served_model_names": args.served_model_names or [],
                 "image": args.image,
                 "port": args.port,
                 "replicas": args.replicas,
