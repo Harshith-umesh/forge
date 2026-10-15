@@ -71,7 +71,9 @@ def _resolve_benchmark_config(benchmark_key: str) -> dict:
     return benchmark
 
 
-def _execute_benchmark(test_namespace, endpoint_url, benchmark, artifact_suffix):
+def _execute_benchmark(
+    test_namespace, endpoint_url, benchmark, artifact_suffix, api_key_file_path=None
+):
     """Run a resolved benchmark config."""
     from projects.guidellm.library import benchconf as benchconf_lib
     from projects.guidellm.toolbox.run_guidellm_benchmark import build_guidellm_args
@@ -102,6 +104,7 @@ def _execute_benchmark(test_namespace, endpoint_url, benchmark, artifact_suffix)
         use_pvc=benchmark.get("use_pvc"),
         replica_count=benchmark.get("replica_count", 1),
         artifact_dirname_suffix=artifact_suffix,
+        api_key_file_path=api_key_file_path,
     )
 
 
@@ -190,7 +193,7 @@ def _write_benchmark_dry_run(endpoint_url):
     logger.info("Benchmark dry-run config written to %s", dest)
 
 
-def _run_guidellm(test_namespace: str, endpoint_url: str):
+def _run_guidellm(test_namespace: str, endpoint_url: str, api_key_file_path=None):
     """Run the warmup (if enabled) then the main GuideLLM benchmark."""
     if config.project.get_config("test.run_warmup"):
         warmup_key = config.project.get_config("workloads.warmup_benchmark_key")
@@ -215,7 +218,9 @@ def _run_guidellm(test_namespace: str, endpoint_url: str):
         logger.info(
             "Running rate=%s (per_replica=%s, replicas=%s)", rate, per_replica_rate, replica_count
         )
-        _execute_benchmark(test_namespace, endpoint_url, run_benchmark, suffix)
+        _execute_benchmark(
+            test_namespace, endpoint_url, run_benchmark, suffix, api_key_file_path=api_key_file_path
+        )
 
 
 def _deploy_sim_llmisvc(
@@ -262,6 +267,7 @@ def _deploy_sim_llmisvc(
         namespace=test_namespace,
         name=deploy_name,
         model_name=deploy_model_name,
+        served_model_names=served_model_names,
         image=sim_cfg["image"],
         gateway_name=gateway_name,
         gateway_namespace=gateway_namespace,
@@ -280,7 +286,6 @@ def _deploy_sim_llmisvc(
 
 def _deploy_all_sims(test_namespace, **kwargs):
     """Deploy a single sim serving multiple model names. Returns list of (model_name, endpoint)."""
-    sim_cfg = config.project.get_config("platform.sim")
     served_model_names = _sim_served_model_names()
 
     endpoint = _deploy_sim_llmisvc(
@@ -520,8 +525,12 @@ def _resolve_maas_external_url():
 
 
 def _create_maas_api_key(namespace, maas_gateway_url):
-    """Create an ephemeral MaaS API key for testing."""
+    """Create an ephemeral MaaS API key and write it to a temp file.
+
+    Returns the path to the file containing the API key (outside ARTIFACT_DIR).
+    """
     import json
+    import tempfile
 
     from projects.core.dsl.utils.k8s import oc
 
@@ -551,8 +560,14 @@ def _create_maas_api_key(namespace, maas_gateway_url):
     if not api_key:
         raise RuntimeError(f"Failed to create MaaS API key: {response}")
 
+    token_file = tempfile.NamedTemporaryFile(
+        prefix="maas-api-key-", suffix=".key", delete=False, mode="w"
+    )
+    token_file.write(api_key)
+    token_file.close()
+
     logger.info("Created ephemeral MaaS API key: %s...", api_key[:10])
-    return api_key
+    return token_file.name
 
 
 def _create_maas_gateway_token(namespace, gateway_name):
@@ -622,7 +637,7 @@ def _prep_maas(test_namespace, gateway_cfg):
         api_key_file_path=token_file_path,
     )
 
-    return gateway_endpoint
+    return gateway_endpoint, token_file_path
 
 
 def _cleanup_maas(test_namespace):
@@ -784,14 +799,20 @@ def _prep_maas_praxis(test_namespace, gateway_cfg):
     _patch_httproute_to_praxis(test_namespace, maas_sim_name)
 
     maas_gateway_url = _resolve_maas_external_url()
-    _create_maas_api_key(test_namespace, maas_gateway_url)
+    api_key_file_path = _create_maas_api_key(test_namespace, maas_gateway_url)
 
     model_path = f"/{test_namespace}/{maas_sim_name}"
     gateway_endpoint = f"{maas_gateway_url}{model_path}"
     logger.info("[maas-praxis] gateway endpoint: %s", gateway_endpoint)
-    _smoke_test(test_namespace, gateway_endpoint, "maas-gateway", maas_model_name)
+    _smoke_test(
+        test_namespace,
+        gateway_endpoint,
+        "maas-gateway",
+        maas_model_name,
+        api_key_file_path=api_key_file_path,
+    )
 
-    return gateway_endpoint
+    return gateway_endpoint, api_key_file_path
 
 
 def _cleanup_maas_praxis(test_namespace):
@@ -973,9 +994,14 @@ def _run_flavor_loop(test_namespace, gateway_cfg):
                 update_test_labels_with_timing(test_dir, "test", "start")
 
                 if not config.project.get_config("test.skip_prepare"):
-                    benchmark_endpoint = prep_fn(test_namespace, gateway_cfg)
+                    prep_result = prep_fn(test_namespace, gateway_cfg)
                 else:
-                    benchmark_endpoint = endpoint_fn(test_namespace, gateway_cfg)
+                    prep_result = endpoint_fn(test_namespace, gateway_cfg)
+
+                if isinstance(prep_result, tuple):
+                    benchmark_endpoint, api_key_file_path = prep_result
+                else:
+                    benchmark_endpoint, api_key_file_path = prep_result, None
 
                 logger.info("[%s] benchmark endpoint: %s", flavor, benchmark_endpoint)
 
@@ -983,7 +1009,9 @@ def _run_flavor_loop(test_namespace, gateway_cfg):
                     update_test_labels_with_timing(test_dir, "benchmark", "start")
                     benchmark_start = datetime.now(UTC)
                     try:
-                        _run_guidellm(test_namespace, benchmark_endpoint)
+                        _run_guidellm(
+                            test_namespace, benchmark_endpoint, api_key_file_path=api_key_file_path
+                        )
                         benchmark_times = (benchmark_start, datetime.now(UTC))
                     except Exception:
                         benchmark_times = (benchmark_start, datetime.now(UTC))
