@@ -172,7 +172,9 @@ def _convert_data_spec(data_spec: str) -> str:
     return f"kind=synthetic_text,{data_spec}"
 
 
-def _build_run_args(endpoint_url: str, old_args: list[str]) -> list[str]:
+def _build_run_args(
+    endpoint_url: str, old_args: list[str], *, validate_backend: bool = True
+) -> list[str]:
     """Transform config-derived CLI args into ``guidellm run`` arguments."""
     backend_type = "openai_http"
     model = None
@@ -250,6 +252,8 @@ def _build_run_args(endpoint_url: str, old_args: list[str]) -> list[str]:
         backend_spec += f",model={model}"
     if request_format:
         backend_spec += f",request_format={request_format}"
+    if not validate_backend:
+        backend_spec += ",validate_backend=false"
     for part in extra_backend_parts:
         backend_spec += f",{part}"
     new_args.append(f"--backend={backend_spec}")
@@ -332,6 +336,7 @@ def _build_multi_run_script(
     config_content: str | None = None,
     api_key_file: str | None = None,
     replica_count: int = 1,
+    validate_backend: bool = True,
 ) -> str:
     """Shell script for multiple GuideLLM runs (rate-expression expansion)."""
     needs_shell_vars = bool(api_key_file) or replica_count > 1
@@ -352,7 +357,7 @@ def _build_multi_run_script(
         lines.append("set -x")
 
     for run in runs:
-        run_args = _build_run_args(endpoint_url, run.args)
+        run_args = _build_run_args(endpoint_url, run.args, validate_backend=validate_backend)
         if config_content:
             run_args.append(f"--config={_CONFIG_FILE_PATH}")
 
@@ -440,6 +445,7 @@ def render_guidellm_job_from_parts(
     config_path: Path | None = None,
     api_key_secret: str = "",
     replica_count: int = 1,
+    validate_backend: bool = True,
 ) -> dict[str, Any]:
     """Render a GuideLL-M job manifest from individual components.
 
@@ -493,7 +499,7 @@ def render_guidellm_job_from_parts(
         container["command"] = ["/opt/app-root/bin/guidellm"]
         container["args"] = [
             "run",
-            *_build_run_args(endpoint_url, runs[0].args),
+            *_build_run_args(endpoint_url, runs[0].args, validate_backend=validate_backend),
         ]
         return manifest
 
@@ -505,6 +511,7 @@ def render_guidellm_job_from_parts(
             config_content=config_content,
             api_key_file=_API_KEY_FILE_PATH if api_key_secret else None,
             replica_count=replica_count,
+            validate_backend=validate_backend,
         )
     ]
     return manifest
@@ -523,6 +530,7 @@ def render_guidellm_shared_volume_job_from_parts(
     config_path: Path | None = None,
     api_key_secret: str = "",
     replica_count: int = 1,
+    validate_backend: bool = True,
 ) -> dict[str, Any]:
     """Render a GuideLL-M job manifest with shared volume (main + sidecar containers).
 
@@ -570,7 +578,7 @@ def render_guidellm_shared_volume_job_from_parts(
         or replica_count > 1
     )
     if not needs_shell:
-        run_args = _build_run_args(endpoint_url, runs[0].args)
+        run_args = _build_run_args(endpoint_url, runs[0].args, validate_backend=validate_backend)
         cmd = shlex.join(["/opt/app-root/bin/guidellm", "run", *run_args])
         main_script = "\n".join(
             [
@@ -586,6 +594,7 @@ def render_guidellm_shared_volume_job_from_parts(
             config_content=config_content,
             api_key_file=_API_KEY_FILE_PATH if api_key_secret else None,
             replica_count=replica_count,
+            validate_backend=validate_backend,
         )
 
     manifest["spec"]["template"]["spec"]["containers"][0]["command"] = ["/bin/sh", "-c"]

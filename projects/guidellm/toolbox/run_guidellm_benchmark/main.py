@@ -128,6 +128,7 @@ def run(
     use_pvc: bool = False,
     api_key_file_path: str | None = None,
     replica_count: int = 1,
+    validate_backend: bool = True,
 ) -> int:
     """
     Run the GuideLLM benchmark against a resolved endpoint.
@@ -153,6 +154,8 @@ def run(
             Job for automatic cleanup.
         replica_count: Number of parallel Job replicas. Each replica writes to its
             own output file using ``JOB_COMPLETION_INDEX``.
+        validate_backend: Whether GuideLLM should validate the backend before
+            benchmarking. Set to False for endpoints that don't support /v1/models.
     """
 
     if timeout <= 0:
@@ -341,6 +344,7 @@ def create_guidellm_resources_task(args, ctx):
                 config_path=ctx.config_path,
                 api_key_secret=api_key_secret,
                 replica_count=args.replica_count,
+                validate_backend=args.validate_backend,
             ),
         )
 
@@ -391,6 +395,7 @@ def create_guidellm_resources_task(args, ctx):
                 config_path=ctx.config_path,
                 api_key_secret=api_key_secret,
                 replica_count=args.replica_count,
+                validate_backend=args.validate_backend,
             ),
         )
 
