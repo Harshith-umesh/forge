@@ -105,6 +105,7 @@ def _execute_benchmark(
         replica_count=benchmark.get("replica_count", 1),
         artifact_dirname_suffix=artifact_suffix,
         api_key_file_path=api_key_file_path,
+        validate_backend=config.project.get_config("workloads.validate_backend"),
     )
 
 
@@ -219,7 +220,11 @@ def _run_guidellm(test_namespace: str, endpoint_url: str, api_key_file_path=None
             "Running rate=%s (per_replica=%s, replicas=%s)", rate, per_replica_rate, replica_count
         )
         _execute_benchmark(
-            test_namespace, endpoint_url, run_benchmark, suffix, api_key_file_path=api_key_file_path
+            test_namespace,
+            endpoint_url,
+            run_benchmark,
+            suffix,
+            api_key_file_path=api_key_file_path,
         )
 
 
