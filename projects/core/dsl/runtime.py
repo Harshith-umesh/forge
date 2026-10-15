@@ -410,12 +410,6 @@ def _execute_single_task(task_info, args, shared_context, start_time=None):
                 logger.info(f"==> EARLY RETURN: {task_status['ret']}")
                 raise EarlyReturnException(task_status["ret"])
 
-        # Store context values back into shared_context for access by subsequent tasks
-        # This allows tasks to communicate through context without polluting args
-        for attr_name, attr_value in vars(context).items():
-            if not attr_name.startswith("_"):
-                setattr(shared_context, attr_name, attr_value)
-
     except (KeyboardInterrupt, SignalInterrupt):
         raise
     except EarlyReturnException:
