@@ -45,9 +45,6 @@ def run_standalone_analysis(
     accelerator = (
         accelerator_key.split("_")[0].upper() if "_" in accelerator_key else accelerator_key.upper()
     )
-    # accelerator is the CSV/dashboard taxonomy (H200, MI355X); notifications label
-    # the vendor key (nvidia, amd) like the rest of the forge Slack messages
-    display_accelerator = config.project.get_config("rhaiis.accelerator", "") or accelerator
 
     consolidated_path = None
     current_csv_path = None
@@ -101,7 +98,7 @@ def run_standalone_analysis(
                     "compare_version": compare_version,
                 },
                 model=model_id,
-                accelerator=display_accelerator,
+                accelerator=accelerator,
                 job_id=run_uuid,
                 slack_user=config.project.get_config("tests.rhaiis.slack_user", ""),
                 owner=config.project.get_config("ci_job.owner", "") or "",
@@ -121,7 +118,7 @@ def run_standalone_analysis(
             compare_version,
             version,
             model_cfg,
-            display_accelerator,
+            accelerator,
             run_uuid=run_uuid,
             restrict_profiles=restrict_profiles,
             engine_args=engine_args,
