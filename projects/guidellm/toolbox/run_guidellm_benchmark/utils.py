@@ -383,9 +383,9 @@ def _build_multi_run_script(
             cmd_str = shlex.join(command)
 
         if api_key_file:
-            safe_cmd_str = cmd_str.replace("$GUIDELLM_API_KEY", "***")
-            lines.append(f"echo '+ {safe_cmd_str}'")
+            safe_cmd_str = cmd_str.replace("$GUIDELLM_API_KEY", "\\$GUIDELLM_API_KEY")
             lines.append("set +x")
+            lines.append(f"echo '+ {safe_cmd_str}'")
             lines.append(cmd_str)
             lines.append("set -x")
         else:

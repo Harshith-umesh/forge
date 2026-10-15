@@ -456,13 +456,13 @@ def _handle_benchmark_wait_failure(args, ctx, exception):
 - **Pod logs**: `artifacts/logs/guidellm_benchmark_<pod_name>.log` (one per pod)
 - **Pod YAML**: `artifacts/guidellm_benchmark_job.pods.yaml`
 - **Job YAML**: `artifacts/guidellm_benchmark_job.yaml`
-- **Pod description**: `artifacts/guidellm_benchmark_pod_description.txt`
+- **Pod descriptions**: `artifacts/describe/guidellm_benchmark_<pod_name>.describe.txt` (one per pod)
 
 ## Analysis Instructions
 1. **Review pod logs** in `artifacts/logs/guidellm_benchmark_<pod_name>.log` for GuideLLM errors or crashes
 2. **Check pod status** in `guidellm_benchmark_job.pods.yaml` for OOM kills, image pull errors, or scheduling failures
 3. **Examine job YAML** for timeout or backoff limit issues
-4. **Check pod description** for K8s events (resource limits, node affinity, etc.)
+4. **Check pod descriptions** in `artifacts/describe/` for K8s events (resource limits, node affinity, etc.)
 """)
 
 
@@ -1264,6 +1264,8 @@ def capture_guidellm_state(*, artifact_dir: Path, namespace: str, benchmark_name
 
     logs_dir = artifacts_dir / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
+    describe_dir = artifacts_dir / "describe"
+    describe_dir.mkdir(parents=True, exist_ok=True)
 
     pod_names = _get_job_pod_names(namespace, benchmark_name)
     for pod_name in pod_names:
@@ -1285,7 +1287,7 @@ def capture_guidellm_state(*, artifact_dir: Path, namespace: str, benchmark_name
             namespace,
             check=False,
             log_stdout=False,
-            stdout_dest=logs_dir / f"guidellm_benchmark_{pod_name}.describe.txt",
+            stdout_dest=describe_dir / f"guidellm_benchmark_{pod_name}.describe.txt",
         )
 
 
