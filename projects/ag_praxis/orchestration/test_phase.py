@@ -12,6 +12,9 @@ from projects.core.library.postprocess import (
 
 logger = logging.getLogger(__name__)
 
+# Temporary: switch between "llmisvc" (KServe LLMInferenceService) and "k8s" (plain Deployment+Service)
+SIM_DEPLOY_MODE = "k8s"
+
 
 def test_maas():
     from projects.ag_praxis.toolbox.maas_sim_test import main as maas_sim_test_command
@@ -206,14 +209,35 @@ def _deploy_sim_llmisvc(
     maas_gateway_label="",
     skip_router=True,
 ):
-    """Deploy a sim LLMInferenceService."""
-    from projects.kserve.toolbox.deploy_sim_llmisvc import main as deploy_sim_llmisvc_command
-
+    """Deploy a sim model (LLMInferenceService or plain K8s Deployment depending on SIM_DEPLOY_MODE)."""
     sim_cfg = config.project.get_config("platform.sim")
+    deploy_name = name or sim_cfg["llmisvc_name"]
+
+    if SIM_DEPLOY_MODE == "k8s":
+        if not skip_router:
+            raise ValueError("K8s deploy mode does not support router (skip_router=False)")
+
+        from projects.kserve.toolbox.deploy_k8s_vllm_sim import (
+            main as deploy_k8s_vllm_sim_command,
+        )
+
+        endpoint = deploy_k8s_vllm_sim_command.run(
+            namespace=test_namespace,
+            name=deploy_name,
+            image=sim_cfg["image"],
+            time_to_first_token=sim_cfg["time_to_first_token"],
+            inter_token_latency=sim_cfg["inter_token_latency"],
+            mode=sim_cfg["mode"],
+            max_num_seqs=sim_cfg["max_num_seqs"],
+        )
+        return endpoint
+
+    from projects.kserve.toolbox.deploy_sim_llmisvc import main as deploy_sim_llmisvc_command
 
     endpoint = deploy_sim_llmisvc_command.run(
         namespace=test_namespace,
-        name=name or sim_cfg["llmisvc_name"],
+        name=deploy_name,
+        image=sim_cfg["image"],
         gateway_name=gateway_name,
         gateway_namespace=gateway_namespace,
         gateway_status_address_name=None,
@@ -299,7 +323,9 @@ def _prep_direct_gateway(test_namespace, gateway_cfg):
         name=DIRECT_GATEWAY_HTTPROUTE_NAME,
         gateway_name=gateway_cfg["name"],
         gateway_namespace=gateway_cfg["namespace"],
-        backend_service=f"{llmisvc_name}-kserve-workload-svc",
+        backend_service=llmisvc_name
+        if SIM_DEPLOY_MODE == "k8s"
+        else f"{llmisvc_name}-kserve-workload-svc",
         backend_port=8000,
     )
     logger.info("[direct-gateway] gateway endpoint: %s", gateway_endpoint)
@@ -356,7 +382,11 @@ def _cleanup_llmisvc(test_namespace):
     from projects.core.dsl.utils.k8s import best_effort_oc
 
     llmisvc_name = config.project.get_config("platform.sim.llmisvc_name")
-    best_effort_oc("delete", "llminferenceservice", llmisvc_name, "-n", test_namespace)
+    if SIM_DEPLOY_MODE == "k8s":
+        best_effort_oc("delete", "deployment", llmisvc_name, "-n", test_namespace)
+        best_effort_oc("delete", "service", llmisvc_name, "-n", test_namespace)
+    else:
+        best_effort_oc("delete", "llminferenceservice", llmisvc_name, "-n", test_namespace)
 
 
 def _cleanup_praxis(test_namespace):
@@ -390,6 +420,8 @@ def _cleanup_praxis_gateway(test_namespace):
 
 
 def _llmisvc_name_sim():
+    if SIM_DEPLOY_MODE == "k8s":
+        return None
     return config.project.get_config("platform.sim.llmisvc_name")
 
 
@@ -398,7 +430,10 @@ def _llmisvc_name_maas():
 
 
 def _endpoint_direct(test_namespace, gateway_cfg):
-    svc_name = f"{_llmisvc_name_sim()}-kserve-workload-svc"
+    sim_name = config.project.get_config("platform.sim.llmisvc_name")
+    if SIM_DEPLOY_MODE == "k8s":
+        return f"http://{sim_name}.{test_namespace}.svc:8000"
+    svc_name = f"{sim_name}-kserve-workload-svc"
     return f"http://{svc_name}.{test_namespace}.svc.cluster.local"
 
 
@@ -706,14 +741,16 @@ def _run_flavor_finalizers(
             else:
                 logger.exception("Ignoring %s failure after primary test failure", description)
 
-    def _capture_llmisvc_state():
-        with env.NextArtifactDir("llmisvc_state"):
+    llmisvc_name = llmisvc_name_fn()
+    if llmisvc_name:
+
+        def _capture_llmisvc_state():
             capture_llmisvc_state_command.run(
-                llmisvc_name_fn(),
+                llmisvc_name,
                 namespace=test_namespace,
             )
 
-    _run_finalizer("capturing LLMInferenceService state", _capture_llmisvc_state)
+        _run_finalizer("capturing LLMInferenceService state", _capture_llmisvc_state)
 
     if benchmark_times:
         start_time, end_time = benchmark_times
