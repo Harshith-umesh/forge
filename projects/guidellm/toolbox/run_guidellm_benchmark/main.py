@@ -184,7 +184,10 @@ def validate_parameters(args, ctx):
     else:
         ctx.target_namespace = args.namespace
 
-    ctx.benchmark_name = args.name
+    benchmark_name = args.name
+    if args.artifact_dirname_suffix:
+        benchmark_name = f"{benchmark_name}-{args.artifact_dirname_suffix.replace('_', '-')}"
+    ctx.benchmark_name = benchmark_name
     ctx.image = args.image
 
     return f"Validated parameters for benchmark {ctx.benchmark_name} in namespace {ctx.target_namespace}"
