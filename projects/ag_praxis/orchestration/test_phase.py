@@ -197,7 +197,19 @@ def _run_guidellm(test_namespace: str, endpoint_url: str):
     sweep_name = config.project.get_config("test.sweep")
     logger.info("Running benchmark: payload=%s sweep=%s", payload_name, sweep_name)
     benchmark = _build_benchmark_config(payload_name, sweep_name)
-    _execute_benchmark(test_namespace, endpoint_url, benchmark, f"{payload_name}_{sweep_name}")
+
+    rates = benchmark.pop("rate")
+    replica_count = benchmark.get("replica_count", 1)
+
+    for rate in rates:
+        per_replica_rate = round(rate / replica_count)
+        run_benchmark = dict(benchmark)
+        run_benchmark["rate"] = per_replica_rate
+        suffix = f"{payload_name}_{sweep_name}_rate{rate}"
+        logger.info(
+            "Running rate=%s (per_replica=%s, replicas=%s)", rate, per_replica_rate, replica_count
+        )
+        _execute_benchmark(test_namespace, endpoint_url, run_benchmark, suffix)
 
 
 def _deploy_sim_llmisvc(
@@ -693,6 +705,22 @@ FLAVORS = {
 }
 
 
+def _validate_benchmark_rates():
+    """Validate that all sweep rates divide evenly by replica_count."""
+    benchmark = _build_benchmark_config(
+        config.project.get_config("test.payload"),
+        config.project.get_config("test.sweep"),
+    )
+    replica_count = benchmark.get("replica_count", 1)
+    for rate in benchmark.get("rate", []):
+        per_replica_rate = rate / replica_count
+        if abs(per_replica_rate - round(per_replica_rate)) > 0.01:
+            raise ValueError(
+                f"rate={rate} does not divide evenly by replica_count={replica_count} "
+                f"(got {per_replica_rate})"
+            )
+
+
 def do_test_praxis():
     logger.info("=== AG Praxis Project Test Phase ===")
     from projects.cluster.library.prom.collection import (
@@ -700,6 +728,9 @@ def do_test_praxis():
         validate_user_workload_monitoring,
     )
     from projects.core.orchestration.utils.k8s import ensure_namespace
+
+    if config.project.get_config("test.run_benchmark"):
+        _validate_benchmark_rates()
 
     validate_user_workload_monitoring()
     prepare_user_workload_monitoring(during="test")
