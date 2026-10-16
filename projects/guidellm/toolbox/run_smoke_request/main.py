@@ -258,7 +258,7 @@ def execute_smoke_request(args, ctx):
         payload_json = shlex.quote(json.dumps(ctx.payload))
         url = shlex.quote(f"{args.endpoint_url}{args.endpoint_path}")
         script = (
-            f"curl -k -sSf --max-time {args.request_timeout_seconds}"
+            f"curl -k -sS --fail-with-body --max-time {args.request_timeout_seconds}"
             f" {url}"
             f" -H 'Content-Type: application/json'"
             f' -H "Authorization: Bearer $(cat {_API_KEY_MOUNT_PATH})"'
@@ -269,7 +269,8 @@ def execute_smoke_request(args, ctx):
         exec_cmd = [
             "curl",
             "-k",
-            "-sSf",
+            "-sS",
+            "--fail-with-body",
             "--max-time",
             str(args.request_timeout_seconds),
             f"{args.endpoint_url}{args.endpoint_path}",
@@ -294,9 +295,9 @@ def execute_smoke_request(args, ctx):
 
     # Save stdout and stderr for debugging
     if result.stdout:
-        write_text(args.artifact_dir / "artifacts" / "smoke.curl.stdout", result.stdout)
+        write_text(args.artifact_dir / "artifacts" / "smoke.curl.stdout.txt", result.stdout)
     if result.stderr:
-        write_text(args.artifact_dir / "artifacts" / "smoke.curl.stderr", result.stderr)
+        write_text(args.artifact_dir / "artifacts" / "smoke.curl.stderr.txt", result.stderr)
 
     if result.returncode != 0 or not result.stdout:
         # Request failed
@@ -376,7 +377,7 @@ def capture_smoke_pod_debug_info(args, ctx):
 @always
 @task
 def cleanup_smoke_pod(args, ctx):
-    """Delete the smoke pod after test completion"""
+    """Delete the smoke pod and API key secret after test completion."""
 
     if not hasattr(ctx, "pod_name"):
         return "No pod name available for cleanup"
@@ -391,6 +392,20 @@ def cleanup_smoke_pod(args, ctx):
         "--wait=false",
         check=False,
     )
+
+    secret_name = getattr(ctx, "api_key_secret_name", "")
+    if secret_name:
+        oc(
+            "delete",
+            "secret",
+            secret_name,
+            "-n",
+            args.namespace,
+            "--ignore-not-found=true",
+            check=False,
+        )
+        return f"Cleaned up smoke pod {ctx.pod_name} and secret {secret_name}"
+
     return f"Cleaned up smoke pod {ctx.pod_name}"
 
 
