@@ -27,13 +27,15 @@ def run(
     external_target_model: str = "",
     external_service_name: str = "",
     external_port: int = 8080,
+    external_path: str = "/v1",
     gateway_name: str = "",
     gateway_namespace: str = "",
     owner_deployment_name: str = "",
 ):
     """Register a model with MaaS by creating MaaSModelRef, MaaSAuthPolicy, and MaaSSubscription.
 
-    For ExternalModel kind, also creates a credential secret, ExternalModel CR, and HTTPRoute.
+    For ExternalModel kind, also creates credential secret, ExternalProvider,
+    ExternalModel (both maas and inference CRDs).
 
     Args:
         model_namespace: Namespace where the LLMInferenceService or ExternalModel lives.
@@ -43,10 +45,11 @@ def run(
         model_ref_kind: Kind of resource the MaaSModelRef references ("LLMInferenceService" or "ExternalModel").
         external_endpoint: Service endpoint for ExternalModel (e.g. "praxis.ns.svc.cluster.local").
         external_target_model: Target model name for ExternalModel.
-        external_service_name: K8s Service name for the HTTPRoute backend (e.g. "praxis").
-        external_port: Port for the HTTPRoute backend.
-        gateway_name: MaaS gateway name (required for ExternalModel HTTPRoute).
-        gateway_namespace: MaaS gateway namespace (required for ExternalModel HTTPRoute).
+        external_service_name: K8s Service name for the backend (e.g. "praxis").
+        external_port: Port for the backend service.
+        external_path: Path prefix for IPP path rewriting (e.g. "/v1").
+        gateway_name: MaaS gateway name (required for ExternalModel).
+        gateway_namespace: MaaS gateway namespace (required for ExternalModel).
         owner_deployment_name: Name of the Deployment that owns the created resources (for garbage collection).
     """
     if model_ref_kind not in _VALID_MODEL_REF_KINDS:
@@ -57,10 +60,6 @@ def run(
         raise ValueError("external_endpoint is required when model_ref_kind is ExternalModel")
     if model_ref_kind == "ExternalModel" and not external_service_name:
         raise ValueError("external_service_name is required when model_ref_kind is ExternalModel")
-    if model_ref_kind == "ExternalModel" and not (gateway_name and gateway_namespace):
-        raise ValueError(
-            "gateway_name and gateway_namespace are required when model_ref_kind is ExternalModel"
-        )
 
     return execute_tasks(locals())
 
@@ -74,7 +73,8 @@ def resolve_names(args, ctx):
     ctx.created_auth_policy = False
     ctx.created_subscription = False
     ctx.created_external_model = False
-    ctx.created_httproute = False
+    ctx.created_inference_external_model = False
+    ctx.created_external_provider = False
 
     if ctx.is_external:
         ctx.llmisvc_uid = None
@@ -133,7 +133,18 @@ def delete_previous(args, ctx):
 
     if ctx.is_external:
         best_effort_oc(
-            "delete", "httproute", f"{ctx.model_ref_name}-route", "-n", args.model_namespace
+            "delete",
+            "externalmodel.inference.opendatahub.io",
+            ctx.model_ref_name,
+            "-n",
+            args.model_namespace,
+        )
+        best_effort_oc(
+            "delete",
+            "externalprovider.inference.opendatahub.io",
+            f"{ctx.model_ref_name}-provider",
+            "-n",
+            args.model_namespace,
         )
         best_effort_oc(
             "delete",
@@ -141,6 +152,9 @@ def delete_previous(args, ctx):
             ctx.model_ref_name,
             "-n",
             args.model_namespace,
+        )
+        best_effort_oc(
+            "delete", "httproute", f"{ctx.model_ref_name}-route", "-n", args.model_namespace
         )
         best_effort_oc(
             "delete", "secret", f"{ctx.model_ref_name}-creds", "-n", args.model_namespace
@@ -162,6 +176,7 @@ def _template_context(args, ctx):
         "external_target_model": args.external_target_model,
         "external_service_name": args.external_service_name,
         "external_port": args.external_port,
+        "external_path": args.external_path,
         "gateway_name": args.gateway_name,
         "gateway_namespace": args.gateway_namespace,
         "owner_ref": ctx.owner_ref,
@@ -170,7 +185,14 @@ def _template_context(args, ctx):
 
 @task
 def apply_external_model(args, ctx):
-    """Create credential secret and ExternalModel CR (only for ExternalModel kind)."""
+    """Create credential secret, ExternalProvider, and ExternalModel CRs (only for ExternalModel kind).
+
+    Creates:
+    - Credential secret for the ExternalProvider auth
+    - maas.opendatahub.io ExternalModel (triggers operator to create routing infrastructure)
+    - inference.opendatahub.io ExternalProvider (backend endpoint for IPP)
+    - inference.opendatahub.io ExternalModel (path rewriting for IPP)
+    """
     if not ctx.is_external:
         return "Skipped (not ExternalModel)"
 
@@ -203,28 +225,24 @@ def apply_external_model(args, ctx):
     src_dir.mkdir(parents=True, exist_ok=True)
 
     tctx = _template_context(args, ctx)
-    manifest = yaml.safe_load(render_template("external_model.yaml.j2", context=tctx))
-    oc_apply(src_dir / "external-model.yaml", manifest)
+
+    maas_manifest = yaml.safe_load(render_template("external_model.yaml.j2", context=tctx))
+    oc_apply(src_dir / "external-model-maas.yaml", maas_manifest)
     ctx.created_external_model = True
 
-    return f"Applied ExternalModel {ctx.model_ref_name} → {args.external_endpoint}"
+    provider_manifest = yaml.safe_load(render_template("external_provider.yaml.j2", context=tctx))
+    oc_apply(src_dir / "external-provider.yaml", provider_manifest)
+    ctx.created_external_provider = True
 
+    inference_manifest = yaml.safe_load(
+        render_template("inference_external_model.yaml.j2", context=tctx)
+    )
+    oc_apply(src_dir / "external-model-inference.yaml", inference_manifest)
+    ctx.created_inference_external_model = True
 
-@task
-def apply_httproute(args, ctx):
-    """Create an HTTPRoute from the MaaS gateway to the backend service (only for ExternalModel)."""
-    if not ctx.is_external:
-        return "Skipped (not ExternalModel)"
-
-    src_dir = args.artifact_dir / "src"
-    src_dir.mkdir(parents=True, exist_ok=True)
-
-    tctx = _template_context(args, ctx)
-    manifest = yaml.safe_load(render_template("httproute.yaml.j2", context=tctx))
-    oc_apply(src_dir / "httproute.yaml", manifest)
-    ctx.created_httproute = True
-
-    return f"Applied HTTPRoute {ctx.model_ref_name}-route"
+    return (
+        f"Applied ExternalModel + ExternalProvider {ctx.model_ref_name} → {args.external_endpoint}"
+    )
 
 
 @task
@@ -290,6 +308,157 @@ def wait_maas_model_ref_ready(args, ctx):
     return f"MaaSModelRef {ctx.model_ref_name} is Ready"
 
 
+@retry(attempts=30, delay=4, backoff=1.0)
+@task
+def patch_operator_resources(args, ctx):
+    """Patch operator-created resources for internal HTTP backends.
+
+    The inference.opendatahub.io ExternalProvider controller creates resources
+    (Service, ServiceEntry, DestinationRule, HTTPRoute) configured for external
+    HTTPS providers (port 443, TLS). For internal HTTP backends, we patch them
+    to use the correct port/protocol and add URL rewriting.
+    """
+    if not ctx.is_external:
+        return "Skipped (not ExternalModel)"
+
+    import json
+
+    provider_name = f"{ctx.model_ref_name}-provider"
+    path_prefix = f"/{args.model_namespace}/{ctx.model_ref_name}"
+
+    result = oc(
+        "get",
+        "httproute",
+        ctx.model_ref_name,
+        "-n",
+        args.model_namespace,
+        "-o",
+        "jsonpath={.metadata.uid}",
+        check=False,
+        log_stdout=True,
+    )
+    if not result.stdout.strip():
+        return False, "Waiting for IPP-created HTTPRoute"
+
+    oc(
+        "annotate",
+        "externalmodel.inference.opendatahub.io",
+        ctx.model_ref_name,
+        "-n",
+        args.model_namespace,
+        "opendatahub.io/managed=false",
+        "--overwrite",
+    )
+
+    for route_name in (ctx.model_ref_name, f"maas-{ctx.model_ref_name}"):
+        result = oc(
+            "get",
+            "httproute",
+            route_name,
+            "-n",
+            args.model_namespace,
+            "-o",
+            "json",
+            check=False,
+            log_stdout=False,
+        )
+        if not result.stdout.strip() or result.returncode != 0:
+            continue
+
+        route = json.loads(result.stdout)
+        for rule in route["spec"].get("rules", []):
+            rule["backendRefs"] = [
+                {
+                    "name": args.external_service_name,
+                    "port": args.external_port,
+                    "kind": "Service",
+                    "group": "",
+                }
+            ]
+            has_path_prefix = any(
+                m.get("path", {}).get("value", "").startswith(path_prefix)
+                for m in rule.get("matches", [])
+            )
+            filter_types = [f["type"] for f in rule.get("filters", [])]
+            if has_path_prefix and "URLRewrite" not in filter_types:
+                rule.setdefault("filters", []).append(
+                    {
+                        "type": "URLRewrite",
+                        "urlRewrite": {
+                            "path": {
+                                "type": "ReplacePrefixMatch",
+                                "replacePrefixMatch": "/",
+                            }
+                        },
+                    }
+                )
+        oc("replace", "-f", "-", input_text=json.dumps(route))
+
+    oc(
+        "patch",
+        "destinationrule",
+        provider_name,
+        "-n",
+        args.model_namespace,
+        "--type=merge",
+        "-p",
+        '{"spec":{"trafficPolicy":{"tls":{"mode":"DISABLE"}}}}',
+        check=False,
+    )
+
+    port_patch = json.dumps(
+        {
+            "spec": {
+                "ports": [
+                    {
+                        "name": "http",
+                        "number": args.external_port,
+                        "protocol": "HTTP",
+                    }
+                ]
+            }
+        }
+    )
+    oc(
+        "patch",
+        "serviceentry",
+        provider_name,
+        "-n",
+        args.model_namespace,
+        "--type=merge",
+        "-p",
+        port_patch,
+        check=False,
+    )
+
+    svc_patch = json.dumps(
+        {
+            "spec": {
+                "ports": [
+                    {
+                        "port": args.external_port,
+                        "protocol": "TCP",
+                        "targetPort": args.external_port,
+                    }
+                ]
+            }
+        }
+    )
+    oc(
+        "patch",
+        "svc",
+        provider_name,
+        "-n",
+        args.model_namespace,
+        "--type=merge",
+        "-p",
+        svc_patch,
+        check=False,
+    )
+
+    return f"Patched operator resources for {ctx.model_ref_name}: HTTP/{args.external_port}"
+
+
 @always
 @task
 def capture_maas_resources(args, ctx):
@@ -310,24 +479,39 @@ def capture_maas_resources(args, ctx):
             "yaml",
             check=False,
             log_stdout=False,
-            stdout_dest=artifacts_dir / "externalmodel.yaml",
+            stdout_dest=artifacts_dir / "externalmodel-maas.yaml",
         )
-        captured.append("ExternalModel")
+        captured.append("ExternalModel(maas)")
 
-    if ctx.created_httproute:
+    if ctx.created_external_provider:
         oc(
             "get",
-            "httproute",
-            f"{ctx.model_ref_name}-route",
+            "externalprovider.inference.opendatahub.io",
+            f"{ctx.model_ref_name}-provider",
             "-n",
             args.model_namespace,
             "-o",
             "yaml",
             check=False,
             log_stdout=False,
-            stdout_dest=artifacts_dir / "httproute.yaml",
+            stdout_dest=artifacts_dir / "externalprovider.yaml",
         )
-        captured.append("HTTPRoute")
+        captured.append("ExternalProvider")
+
+    if ctx.created_inference_external_model:
+        oc(
+            "get",
+            "externalmodel.inference.opendatahub.io",
+            ctx.model_ref_name,
+            "-n",
+            args.model_namespace,
+            "-o",
+            "yaml",
+            check=False,
+            log_stdout=False,
+            stdout_dest=artifacts_dir / "externalmodel-inference.yaml",
+        )
+        captured.append("ExternalModel(inference)")
 
     if ctx.created_model_ref:
         oc(

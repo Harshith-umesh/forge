@@ -8,10 +8,8 @@ run_warmup: true
 
 skip_cleanup: false
 skip_prepare: false
-skip_finalizers: false
-continue_on_flavor_failure: true
+skip_finalizers: true
 
-flavors:
-  - direct
-  - maas
-  - maas-praxis
+endpoints:
+- svc
+- maas
