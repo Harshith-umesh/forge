@@ -133,23 +133,12 @@ def delete_previous(args, ctx):
 
     if ctx.is_external:
         best_effort_oc(
+            "delete", "httproute", f"{ctx.model_ref_name}-route", "-n", args.model_namespace
+        )
+        best_effort_oc(
             "delete",
             "externalmodel.maas.opendatahub.io",
             ctx.model_ref_name,
-            "-n",
-            args.model_namespace,
-        )
-        best_effort_oc(
-            "delete",
-            "externalmodel.inference.opendatahub.io",
-            ctx.model_ref_name,
-            "-n",
-            args.model_namespace,
-        )
-        best_effort_oc(
-            "delete",
-            "externalprovider.inference.opendatahub.io",
-            f"{ctx.model_ref_name}-provider",
             "-n",
             args.model_namespace,
         )
@@ -216,15 +205,6 @@ def apply_external_model(args, ctx):
     tctx = _template_context(args, ctx)
     manifest = yaml.safe_load(render_template("external_model.yaml.j2", context=tctx))
     oc_apply(src_dir / "external-model.yaml", manifest)
-
-    provider_manifest = yaml.safe_load(render_template("external_provider.yaml.j2", context=tctx))
-    oc_apply(src_dir / "external-provider.yaml", provider_manifest)
-
-    inference_manifest = yaml.safe_load(
-        render_template("inference_external_model.yaml.j2", context=tctx)
-    )
-    oc_apply(src_dir / "inference-external-model.yaml", inference_manifest)
-
     ctx.created_external_model = True
 
     return f"Applied ExternalModel {ctx.model_ref_name} → {args.external_endpoint}"
