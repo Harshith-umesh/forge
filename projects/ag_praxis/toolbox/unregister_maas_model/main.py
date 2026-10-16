@@ -165,7 +165,15 @@ def delete_external_model(args, ctx):
         args.model_namespace,
         "--ignore-not-found",
     )
-    return f"Deleted ExternalModel {ctx.model_ref_name} and credential secret"
+    best_effort_oc(
+        "delete",
+        "httproute",
+        f"{ctx.model_ref_name}-route",
+        "-n",
+        args.model_namespace,
+        "--ignore-not-found",
+    )
+    return f"Deleted ExternalModel {ctx.model_ref_name}, credential secret, and HTTPRoute"
 
 
 if __name__ == "__main__":
