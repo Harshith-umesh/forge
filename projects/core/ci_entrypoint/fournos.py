@@ -177,7 +177,7 @@ def transform_fournos_config_to_variable_overrides(fjob: dict) -> dict:
         - spec.executionEngine.forge.configOverrides entries are flattened directly
         - spec.exclusive -> ci_job.exclusive
         - spec.hardware -> ci_job.hardware
-        - spec.cluster -> ci_job.cluster
+        - spec.cluster, or status.cluster for a GPU-pool job -> ci_job.cluster
         - spec.owner -> ci_job.owner
         - spec.displayName -> ci_job.display_name
     """
@@ -214,7 +214,12 @@ def transform_fournos_config_to_variable_overrides(fjob: dict) -> dict:
     if "hardware" in fjob_spec:
         variable_overrides["ci_job.hardware"] = fjob_spec["hardware"]
 
-    if "cluster" in fjob_spec:
+    if fjob_spec.get("gpuPool"):
+        assigned_cluster = fjob.get("status", {}).get("cluster")
+        if not assigned_cluster:
+            raise ValueError("GPU-pool FournosJob has no assigned cluster")
+        variable_overrides["ci_job.cluster"] = assigned_cluster
+    elif "cluster" in fjob_spec:
         variable_overrides["ci_job.cluster"] = fjob_spec["cluster"]
 
     if "displayName" in fjob_spec:
@@ -399,12 +404,6 @@ def load_fjob_yaml(fjob_yaml_path):
         if not fjob:
             logger.warning(f"Empty or invalid FournosJob YAML: {fjob_yaml_path}")
             return None, None
-
-        # Remove status if present
-        try:
-            del fjob["status"]
-        except KeyError:
-            pass  # ignore
 
         logger.info(f"Loaded FournosJob YAML from {fjob_yaml_path}")
 
