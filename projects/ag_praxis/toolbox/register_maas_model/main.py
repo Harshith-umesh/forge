@@ -133,9 +133,6 @@ def delete_previous(args, ctx):
 
     if ctx.is_external:
         best_effort_oc(
-            "delete", "httproute", f"{ctx.model_ref_name}-route", "-n", args.model_namespace
-        )
-        best_effort_oc(
             "delete",
             "externalmodel.maas.opendatahub.io",
             ctx.model_ref_name,
@@ -212,19 +209,8 @@ def apply_external_model(args, ctx):
 
 @task
 def apply_httproute(args, ctx):
-    """Create an HTTPRoute from the MaaS gateway to the backend service (only for ExternalModel)."""
-    if not ctx.is_external:
-        return "Skipped (not ExternalModel)"
-
-    src_dir = args.artifact_dir / "src"
-    src_dir.mkdir(parents=True, exist_ok=True)
-
-    tctx = _template_context(args, ctx)
-    manifest = yaml.safe_load(render_template("httproute.yaml.j2", context=tctx))
-    oc_apply(src_dir / "httproute.yaml", manifest)
-    ctx.created_httproute = True
-
-    return f"Applied HTTPRoute {ctx.model_ref_name}-route"
+    """Skip — the MaaS operator creates the HTTPRoute automatically from the MaaSModelRef."""
+    return "Skipped (MaaS operator manages HTTPRoute)"
 
 
 @task
@@ -313,21 +299,6 @@ def capture_maas_resources(args, ctx):
             stdout_dest=artifacts_dir / "externalmodel.yaml",
         )
         captured.append("ExternalModel")
-
-    if ctx.created_httproute:
-        oc(
-            "get",
-            "httproute",
-            f"{ctx.model_ref_name}-route",
-            "-n",
-            args.model_namespace,
-            "-o",
-            "yaml",
-            check=False,
-            log_stdout=False,
-            stdout_dest=artifacts_dir / "httproute.yaml",
-        )
-        captured.append("HTTPRoute")
 
     if ctx.created_model_ref:
         oc(
