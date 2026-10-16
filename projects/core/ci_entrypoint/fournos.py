@@ -177,7 +177,8 @@ def transform_fournos_config_to_variable_overrides(fjob: dict) -> dict:
         - spec.executionEngine.forge.configOverrides entries are flattened directly
         - spec.exclusive -> ci_job.exclusive
         - spec.hardware -> ci_job.hardware
-        - spec.cluster, or status.cluster for a GPU-pool job -> ci_job.cluster
+        - status.cluster after admission -> ci_job.cluster
+        - spec.cluster before admission for a pinned job -> ci_job.cluster
         - spec.owner -> ci_job.owner
         - spec.displayName -> ci_job.display_name
     """
@@ -214,13 +215,19 @@ def transform_fournos_config_to_variable_overrides(fjob: dict) -> dict:
     if "hardware" in fjob_spec:
         variable_overrides["ci_job.hardware"] = fjob_spec["hardware"]
 
-    if fjob_spec.get("gpuPool"):
-        assigned_cluster = fjob.get("status", {}).get("cluster")
-        if not assigned_cluster:
-            raise ValueError("GPU-pool FournosJob has no assigned cluster")
+    status = fjob.get("status") or {}
+    if fjob_spec.get("clusterless"):
+        variable_overrides.pop("ci_job.cluster", None)
+    elif status.get("phase") in {"Resolving", "Pending"}:
+        if fjob_spec.get("gpuPool"):
+            variable_overrides.pop("ci_job.cluster", None)
+        elif "cluster" in fjob_spec:
+            variable_overrides["ci_job.cluster"] = fjob_spec["cluster"]
+    else:
+        assigned_cluster = status.get("cluster")
+        if not assigned_cluster or assigned_cluster == "[clusterless]":
+            raise ValueError("Admitted FournosJob has no assigned cluster")
         variable_overrides["ci_job.cluster"] = assigned_cluster
-    elif "cluster" in fjob_spec:
-        variable_overrides["ci_job.cluster"] = fjob_spec["cluster"]
 
     if "displayName" in fjob_spec:
         variable_overrides["ci_job.display_name"] = fjob_spec["displayName"]
