@@ -12,7 +12,7 @@ from projects.core.dsl import (
     task,
 )
 from projects.core.dsl.template import render_template
-from projects.core.dsl.utils.k8s import best_effort_oc, oc, oc_apply
+from projects.core.dsl.utils.k8s import oc, oc_apply
 
 logger = logging.getLogger("TOOLBOX")
 
@@ -57,11 +57,36 @@ def run(
 
 
 @task
-def delete_previous(args, ctx):
-    """Delete any pre-existing Deployment and Service to avoid merge conflicts."""
-    best_effort_oc("delete", "deployment", args.name, "-n", args.namespace)
-    best_effort_oc("delete", "service", args.name, "-n", args.namespace)
-    return f"Cleaned up previous {args.name} resources"
+def delete_existing(args, ctx):
+    """Delete existing Deployment and Service before redeploying."""
+    oc("delete", "deployment", args.name, "-n", args.namespace, "--ignore-not-found=true")
+    oc("delete", "service", args.name, "-n", args.namespace, "--ignore-not-found=true")
+    return f"Deleted existing deployment/service {args.name}"
+
+
+@retry(attempts=30, delay=5, backoff=1.0)
+@task
+def wait_old_resources_gone(args, ctx):
+    """Wait for existing Deployment and Service to be fully removed."""
+    for kind in ("deployment", "service"):
+        result = oc(
+            "get",
+            kind,
+            args.name,
+            "-n",
+            args.namespace,
+            "--ignore-not-found",
+            "-oname",
+            check=False,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                "Failed to check %s %s (rc=%d), retrying...", kind, args.name, result.returncode
+            )
+            return False
+        if result.stdout.strip():
+            return False
+    return f"Deployment and Service {args.name} are gone"
 
 
 @task
@@ -96,9 +121,20 @@ def create_deployment(args, ctx):
 
 @task
 def create_service(args, ctx):
-    """Render and apply the sim Service."""
+    """Render and apply the sim Service with ownerReference to the Deployment."""
     src_dir = args.artifact_dir / "src"
     src_dir.mkdir(parents=True, exist_ok=True)
+
+    deployment_uid = oc(
+        "get",
+        "deployment",
+        args.name,
+        "-n",
+        args.namespace,
+        "-o",
+        "jsonpath={.metadata.uid}",
+        log_stdout=True,
+    ).stdout.strip()
 
     manifest = yaml.safe_load(
         render_template(
@@ -107,6 +143,7 @@ def create_service(args, ctx):
                 "name": args.name,
                 "namespace": args.namespace,
                 "port": args.port,
+                "deployment_uid": deployment_uid,
             },
         )
     )
