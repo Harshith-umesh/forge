@@ -12,7 +12,7 @@ from projects.core.dsl import (
     task,
 )
 from projects.core.dsl.template import render_template
-from projects.core.dsl.utils.k8s import oc, oc_apply
+from projects.core.dsl.utils.k8s import best_effort_oc, oc, oc_apply
 
 logger = logging.getLogger("TOOLBOX")
 
@@ -54,6 +54,14 @@ def run(
     ctx = execute_tasks(locals())
 
     return ctx.endpoint_url
+
+
+@task
+def delete_previous(args, ctx):
+    """Delete any pre-existing Deployment and Service to avoid merge conflicts."""
+    best_effort_oc("delete", "deployment", args.name, "-n", args.namespace)
+    best_effort_oc("delete", "service", args.name, "-n", args.namespace)
+    return f"Cleaned up previous {args.name} resources"
 
 
 @task
