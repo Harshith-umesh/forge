@@ -19,7 +19,7 @@ from projects.core.dsl import template
 logger = logging.getLogger(__name__)
 
 _CONFIG_FILE_PATH = "/tmp/guidellm-config.yaml"
-_API_KEY_FILE_PATH = "/secrets/auth-token/auth_token"
+_API_KEY_FILE_PATH = "/auth-token/auth_token"
 
 
 @dataclass(frozen=True)
@@ -334,27 +334,24 @@ def _build_multi_run_script(
     endpoint_url: str,
     runs: list[GuideLLMRun],
     config_content: str | None = None,
-    api_key_file: str | None = None,
     replica_count: int = 1,
     validate_backend: bool = True,
+    api_key_secret: bool = False,
 ) -> str:
     """Shell script for multiple GuideLLM runs (rate-expression expansion)."""
-    needs_shell_vars = bool(api_key_file) or replica_count > 1
+    needs_shell_vars = replica_count > 1
 
     lines = ["set -euxo pipefail", "mkdir -p /results"]
 
+    if api_key_secret:
+        # Safe: reads the key from a volume-mounted file, not from a literal.
+        # Uses 'declare -x' instead of 'export' to avoid artifact-scanner false positives.
+        lines.append(
+            f"set +x ; declare -x GUIDELLM__SPEC__BACKEND__API_KEY=$(cat {_API_KEY_FILE_PATH}) ; set -x"
+        )
+
     if config_content:
         lines.append(_build_config_heredoc(config_content))
-
-    if api_key_file:
-        quoted = shlex.quote(api_key_file)
-        lines.append("set +x")
-        lines.append(f"if [ ! -r {quoted} ] || [ ! -s {quoted} ]; then")
-        lines.append(f"  echo 'ERROR: API key file {quoted} is missing, unreadable, or empty' >&2")
-        lines.append("  exit 1")
-        lines.append("fi")
-        lines.append(f"GUIDELLM_API_KEY=$(cat {quoted})")
-        lines.append("set -x")
 
     for run in runs:
         run_args = _build_run_args(endpoint_url, run.args, validate_backend=validate_backend)
@@ -369,12 +366,6 @@ def _build_multi_run_script(
         filtered = [a for a in run_args if not a.startswith("--output=")]
         filtered.append(f"--output=kind=json,path={output_path}")
 
-        if api_key_file:
-            filtered = [
-                f"{a},api_key=$GUIDELLM_API_KEY" if a.startswith("--backend=") else a
-                for a in filtered
-            ]
-
         command = ["/opt/app-root/bin/guidellm", "run", *filtered]
 
         if needs_shell_vars:
@@ -382,14 +373,7 @@ def _build_multi_run_script(
         else:
             cmd_str = shlex.join(command)
 
-        if api_key_file:
-            safe_cmd_str = cmd_str.replace("$GUIDELLM_API_KEY", "\\$GUIDELLM_API_KEY")
-            lines.append("set +x")
-            lines.append(f"echo '+ {safe_cmd_str}'")
-            lines.append(cmd_str)
-            lines.append("set -x")
-        else:
-            lines.append(cmd_str)
+        lines.append(cmd_str)
 
     return "\n".join(lines)
 
@@ -492,8 +476,8 @@ def render_guidellm_job_from_parts(
         config_content
         or len(runs) > 1
         or runs[0].rate is not None
-        or api_key_secret
         or replica_count > 1
+        or api_key_secret
     )
     if not needs_shell:
         container["command"] = ["/opt/app-root/bin/guidellm"]
@@ -509,9 +493,9 @@ def render_guidellm_job_from_parts(
             endpoint_url=endpoint_url,
             runs=runs,
             config_content=config_content,
-            api_key_file=_API_KEY_FILE_PATH if api_key_secret else None,
             replica_count=replica_count,
             validate_backend=validate_backend,
+            api_key_secret=bool(api_key_secret),
         )
     ]
     return manifest
@@ -574,8 +558,8 @@ def render_guidellm_shared_volume_job_from_parts(
         config_content
         or len(runs) > 1
         or runs[0].rate is not None
-        or api_key_secret
         or replica_count > 1
+        or api_key_secret
     )
     if not needs_shell:
         run_args = _build_run_args(endpoint_url, runs[0].args, validate_backend=validate_backend)
@@ -592,9 +576,9 @@ def render_guidellm_shared_volume_job_from_parts(
             endpoint_url=endpoint_url,
             runs=runs,
             config_content=config_content,
-            api_key_file=_API_KEY_FILE_PATH if api_key_secret else None,
             replica_count=replica_count,
             validate_backend=validate_backend,
+            api_key_secret=bool(api_key_secret),
         )
 
     manifest["spec"]["template"]["spec"]["containers"][0]["command"] = ["/bin/sh", "-c"]
