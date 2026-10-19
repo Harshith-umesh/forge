@@ -14,11 +14,11 @@ from projects.caliper.engine.model import (
     PostProcessingPlugin,
     UnifiedRunModel,
 )
-from projects.llm_d.postprocess.llm_d.parsing.kpis import GuideLLMKpiHandler
 
 from .ai_eval import GuideLLMAIEvaluator
 from .dashboard import enrich_guidellm_parse_result
-from .parsing import GuideLLMParser
+from .kpi_handler import GuideLLMKpiHandler
+from .parsing.parsers import GuideLLMParser
 
 logger = logging.getLogger(__name__)
 
