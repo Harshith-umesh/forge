@@ -20,6 +20,8 @@ from projects.core.library.config import requires
 
 logger = logging.getLogger(__name__)
 
+DSCI_MANIFEST = Path(__file__).resolve().parent / "manifests" / "dsci.yaml"
+
 RHOAI_CUSTOM_CATALOG_VAULTS = [
     "psap-rhoai-rc",
     "psap-forge-staging-image-pull",
@@ -384,6 +386,19 @@ def ensure_required_crds_before_dsc(rhoai: RhoaiOperatorConfig) -> None:
     )
 
 
+def ensure_dsci() -> None:
+    result = oc("get", "dscinitialization", "default-dsci", check=False, log_stdout=False)
+    if result.returncode == 0:
+        logger.info("DSCInitialization already exists, skipping creation")
+        return
+
+    if "(NotFound)" not in result.stderr:
+        raise RuntimeError(f"Failed to check DSCInitialization: {result.stderr.strip()}")
+
+    logger.info("Creating DSCInitialization from default manifest")
+    oc("apply", "-f", str(DSCI_MANIFEST))
+
+
 def prepare_rhoai_operator(
     *,
     platform: dict[str, Any],
@@ -404,3 +419,4 @@ def prepare_rhoai_operator(
     )
     ensure_operator_subscription(operator_spec)
     ensure_required_crds_before_dsc(rhoai_config)
+    ensure_dsci()
