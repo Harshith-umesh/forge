@@ -31,7 +31,6 @@ def run(
     operator_type: str,
     keep_pod: bool = True,
     skip_conflicting_ns_check: bool = True,
-    verbose: bool = True,
     force_reinstall: bool = False,
 ):
     """Deploy MaaS by cloning the upstream repo and running deploy.sh inside a Pod.
@@ -43,7 +42,6 @@ def run(
         operator_type: Operator type passed to deploy.sh (e.g. 'odh').
         keep_pod: If True, keep the Pod after deployment and reuse it if it already exists.
         skip_conflicting_ns_check: If True, skip the check for conflicting namespaces.
-        verbose: If True, show command output live instead of redirecting to log files.
         force_reinstall: If True, reinstall MaaS even if already available
     """
     return execute_tasks(locals())
@@ -247,11 +245,11 @@ def install_dependencies(args, ctx):
 
     dnf_log = None
     kustomize_log = None
-    if not args.verbose:
-        logs_dir = args.artifact_dir / "logs"
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        dnf_log = logs_dir / "dnf-install.log"
-        kustomize_log = logs_dir / "kustomize-install.log"
+
+    logs_dir = args.artifact_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    dnf_log = logs_dir / "dnf-install.log"
+    kustomize_log = logs_dir / "kustomize-install.log"
 
     oc_exec(
         "sh",
@@ -297,6 +295,12 @@ def clone_repository(args, ctx):
 @task
 def run_deploy_script(args, ctx):
     """Run deploy.sh inside the deployer Pod."""
+    deploy_log = None
+
+    logs_dir = args.artifact_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    deploy_log = logs_dir / "deploy.log"
+
     deploy_cmd = (
         f"cd {CLONE_DIR} && "
         f"KUBECONFIG={KUBECONFIG_POD_PATH} "
@@ -309,6 +313,7 @@ def run_deploy_script(args, ctx):
         namespace=args.namespace,
         pod=POD_NAME,
         timeout_seconds=1800,
+        stdout_dest=deploy_log,
     )
     return "deploy.sh completed"
 
