@@ -752,7 +752,7 @@ def wait_copy_pod_ready(args, ctx):
 def extract_results(args, ctx):
     """Extract GuideLLM results from copy pod (PVC mode) or sidecar (shared volume mode)"""
 
-    results_dir = args.artifact_dir / "artifacts" / "results"
+    results_dir = args.artifact_dir / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
 
     if args.use_pvc:
