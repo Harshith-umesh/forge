@@ -335,7 +335,7 @@ class GuideLLMPlugin(PostProcessingPlugin):
                 logger.debug(f"No matches found in {test_dir} for pattern: {pattern}")
 
         # GuideLLM benchmark results - search within this test directory only
-        benchmark_pattern = "**/*__run_guidellm_benchmark/artifacts/results/benchmarks*.json"
+        benchmark_pattern = "**/*__run_guidellm_benchmark/results/benchmarks*.json"
         benchmark_matches = list(test_dir.glob(benchmark_pattern))
 
         if benchmark_matches:
