@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 
 import yaml
@@ -10,14 +9,10 @@ import yaml
 from projects.core.dsl import (  # noqa: F401
     entrypoint,
     execute_tasks,
-    retry,
     task,
 )
 from projects.core.dsl.template import render_template
-from projects.core.dsl.utils.k8s import (
-    oc,
-    oc_apply,
-)
+from projects.core.dsl.utils.k8s import oc
 from projects.kserve.toolbox.deploy_llmisvc import main as deploy_llmisvc
 
 logger = logging.getLogger("DSL")
@@ -135,118 +130,6 @@ def cleanup_router_servicemonitor(args, ctx):
         "--ignore-not-found=true",
     )
     return f"Deleted router ServiceMonitor {args.name}-epp (skip_router=True)"
-
-
-@task
-def patch_workload_servicemonitor_plaintext(args, ctx):
-    """Patch this service's workload ServiceMonitor to scrape over HTTP when skip_router is set."""
-    if not args.skip_router:
-        return "Router enabled, keeping HTTPS scraping"
-
-    sm_name = f"{args.name}-kserve"
-    patch = json.dumps(
-        {
-            "spec": {
-                "endpoints": [
-                    {
-                        "interval": "5s",
-                        "path": "/metrics",
-                        "port": "http1",
-                        "scheme": "http",
-                        "scrapeTimeout": "4s",
-                    }
-                ]
-            }
-        }
-    )
-    oc("patch", "servicemonitor", sm_name, "-n", args.namespace, "--type=merge", f"-p={patch}")
-    logger.info("Patched ServiceMonitor %s to use scheme: http", sm_name)
-
-    return f"Patched ServiceMonitor {sm_name} to use HTTP"
-
-
-@task
-def fetch_llmisvc_uid(args, ctx):
-    """Fetch the LLMInferenceService UID for DestinationRule owner references."""
-    ctx.llmisvc_uid = oc(
-        "get",
-        "llminferenceservice",
-        args.name,
-        "-n",
-        args.namespace,
-        "-o",
-        "jsonpath={.metadata.uid}",
-        log_stdout=True,
-    ).stdout.strip()
-
-    return f"LLMInferenceService UID: {ctx.llmisvc_uid}"
-
-
-@retry(attempts=18, delay=10, backoff=1.0)
-@task
-def apply_pool_destination_rule(args, ctx):
-    """Create a DestinationRule to disable TLS to the InferencePool backend service."""
-    if args.skip_router:
-        return "Skipped pool DestinationRule (no router configured)"
-
-    pool_svc_result = oc(
-        "get",
-        "svc",
-        "-n",
-        args.namespace,
-        "-l",
-        "internal.istio.io/service-semantics=inferencepool",
-        "-o",
-        "jsonpath={.items[*].metadata.name}",
-    )
-    pool_svc_name = pool_svc_result.stdout.strip()
-    if not pool_svc_name:
-        logger.info("InferencePool service not found yet, retrying...")
-        return False
-
-    pool_host = f"{pool_svc_name}.{args.namespace}.svc.cluster.local"
-    return _apply_destination_rule(args, pool_host, "pool", ctx.llmisvc_uid)
-
-
-@task
-def apply_workload_destination_rule(args, ctx):
-    """Create a DestinationRule to disable TLS to the workload service."""
-    workload_host = f"{args.name}-kserve-workload-svc.{args.namespace}.svc.cluster.local"
-    return _apply_destination_rule(args, workload_host, "workload", ctx.llmisvc_uid)
-
-
-def _apply_destination_rule(args, host, suffix, llmisvc_uid):
-    """Apply a DestinationRule that disables TLS for the given host."""
-    dr_name = f"{args.name}-{suffix}-plaintext"
-    dr_manifest = {
-        "apiVersion": "networking.istio.io/v1",
-        "kind": "DestinationRule",
-        "metadata": {
-            "name": dr_name,
-            "namespace": args.namespace,
-            "ownerReferences": [
-                {
-                    "apiVersion": "serving.kserve.io/v1alpha1",
-                    "kind": "LLMInferenceService",
-                    "name": args.name,
-                    "uid": llmisvc_uid,
-                },
-            ],
-        },
-        "spec": {
-            "host": host,
-            "trafficPolicy": {
-                "tls": {
-                    "mode": "DISABLE",
-                },
-            },
-        },
-    }
-
-    dest_rule_path = args.artifact_dir / "src" / f"destination-rule-{suffix}.yaml"
-    oc_apply(dest_rule_path, dr_manifest)
-
-    return f"Applied DestinationRule {dr_name} for host {host}"
 
 
 if __name__ == "__main__":
