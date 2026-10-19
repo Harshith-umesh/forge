@@ -41,6 +41,7 @@ rhoai:
   datasciencecluster_name: default-dsc
   components:
     - kserve
+    - aigateway.maas
   required_crds_before_dsc:
     - datascienceclusters.datasciencecluster.opendatahub.io
   required_crds_after_dsc: []
