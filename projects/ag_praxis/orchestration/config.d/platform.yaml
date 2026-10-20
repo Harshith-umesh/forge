@@ -15,6 +15,7 @@ operators:
     cleanup_crds:
       - ztunnels.sailoperator.io
   rhods-operator:
+    name: null
     display_name: Red Hat OpenShift AI
     namespace: redhat-ods-operator
     channel: stable-3.x
