@@ -501,10 +501,13 @@ def do_test_praxis():
         primary_exc = sys.exc_info()
         logger.exception("Test phase failed")
 
-    _run_finalizers(test_namespace, maas_cfg, primary_exc, benchmark_times)
+    finalizer_exc = _run_finalizers(test_namespace, maas_cfg, primary_exc, benchmark_times)
 
     if primary_exc is not None:
         raise primary_exc[1].with_traceback(primary_exc[2])
+
+    if finalizer_exc is not None:
+        raise finalizer_exc[1].with_traceback(finalizer_exc[2])
 
     return 0
 
@@ -516,12 +519,16 @@ def _run_finalizers(test_namespace, maas_cfg, primary_exc, benchmark_times):
         main as capture_sim_state_command,
     )
 
+    finalizer_exc = None
+
     def _run_finalizer(description, callback, **kwargs):
+        nonlocal finalizer_exc
         try:
             callback(**kwargs)
         except Exception:
             if primary_exc is None:
                 logger.exception("Finalizer failed: %s", description)
+                finalizer_exc = finalizer_exc or sys.exc_info()
             else:
                 logger.exception("Ignoring %s failure after primary test failure", description)
 
@@ -551,6 +558,8 @@ def _run_finalizers(test_namespace, maas_cfg, primary_exc, benchmark_times):
             test_namespace=test_namespace,
             maas_cfg=maas_cfg,
         )
+
+    return finalizer_exc
 
 
 def fournos_resolve_hardware_request(hardware_spec: dict):
