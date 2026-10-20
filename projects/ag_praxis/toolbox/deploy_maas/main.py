@@ -29,6 +29,7 @@ def run(
     repo_url: str,
     repo_ref: str,
     operator_type: str,
+    applications_namespace: str = "redhat-ods-applications",
     keep_pod: bool = True,
     skip_conflicting_ns_check: bool = True,
     force_reinstall: bool = False,
@@ -40,6 +41,7 @@ def run(
         repo_url: URL of the models-as-a-service git repository.
         repo_ref: Git branch, tag, or SHA to checkout.
         operator_type: Operator type passed to deploy.sh (e.g. 'odh').
+        applications_namespace: RHOAI applications namespace for setup-database.sh.
         keep_pod: If True, keep the Pod after deployment and reuse it if it already exists.
         skip_conflicting_ns_check: If True, skip the check for conflicting namespaces.
         force_reinstall: If True, reinstall MaaS even if already available
@@ -290,6 +292,30 @@ def clone_repository(args, ctx):
         timeout_seconds=300,
     )
     return f"Cloned {args.repo_url}@{args.repo_ref} to {CLONE_DIR}"
+
+
+@task
+def setup_database(args, ctx):
+    """Run setup-database.sh to create the PostgreSQL database for MaaS."""
+    logs_dir = args.artifact_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+
+    setup_cmd = (
+        f"cd {CLONE_DIR} && "
+        f"KUBECONFIG={KUBECONFIG_POD_PATH} "
+        f"NAMESPACE={args.applications_namespace} "
+        f"./scripts/setup-database.sh"
+    )
+    oc_exec(
+        "sh",
+        "-c",
+        setup_cmd,
+        namespace=args.namespace,
+        pod=POD_NAME,
+        timeout_seconds=300,
+        stdout_dest=logs_dir / "setup-database.log",
+    )
+    return "setup-database.sh completed"
 
 
 @task
