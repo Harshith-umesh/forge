@@ -104,6 +104,21 @@ def delete_postgres(args, ctx):
 
 
 @task
+def delete_maas_gateway(args, ctx):
+    """Delete the MaaS default gateway."""
+    best_effort_oc(
+        "delete",
+        "gateway",
+        "maas-default-gateway",
+        "-n",
+        "openshift-ingress",
+        "--ignore-not-found",
+        description="Delete MaaS default gateway",
+    )
+    return "Deleted MaaS default gateway"
+
+
+@task
 def delete_deployer_resources(args, ctx):
     """Delete the deployer ServiceAccount and ClusterRoleBinding."""
     best_effort_oc(
