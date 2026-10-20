@@ -108,7 +108,9 @@ def operator_spec_by_package(platform: dict[str, Any], package: str) -> dict[str
     operators = platform["operators"]
     if isinstance(operators, dict):
         if package in operators:
-            return {"package": package, **operators[package]}
+            spec = dict(operators[package])
+            spec["package"] = spec.pop("name", None) or package
+            return spec
         raise KeyError(f"Unknown operator package: {package}")
 
     for operator_spec in operators:
@@ -118,6 +120,10 @@ def operator_spec_by_package(platform: dict[str, Any], package: str) -> dict[str
 
 
 def ensure_operator_subscription(operator_spec: dict[str, str]) -> dict[str, object]:
+    if not operator_spec.get("enabled", True):
+        logger.info(f"Operator {operator_spec['package']} is disabled, skipping subscription")
+        return {}
+
     return cluster_deploy_operator.run(
         package_name=operator_spec["package"],
         target_namespace=operator_spec["namespace"],
