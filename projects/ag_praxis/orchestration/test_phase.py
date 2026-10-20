@@ -3,6 +3,7 @@ import sys
 from datetime import UTC, datetime
 
 from projects.core.library import config, env, run
+from projects.core.library.ci import ExitCategory
 from projects.core.library.postprocess import (
     create_test_metadata,
     run_and_postprocess,
@@ -434,6 +435,7 @@ def do_test_praxis():
 
     primary_exc = None
     benchmark_times = None
+    completed_endpoints = []
 
     try:
         svc_endpoint = _deploy_maas_sim(test_namespace, maas_cfg)
@@ -493,6 +495,7 @@ def do_test_praxis():
                     update_test_labels_with_status(
                         test_dir, True, f"Endpoint {ep_name} completed successfully"
                     )
+                    completed_endpoints.append(ep_name)
             benchmark_times = (benchmark_start, datetime.now(UTC))
         else:
             _write_benchmark_dry_run(maas_endpoint)
@@ -509,7 +512,10 @@ def do_test_praxis():
     if finalizer_exc is not None:
         raise finalizer_exc[1].with_traceback(finalizer_exc[2])
 
-    return 0
+    endpoint_names = ", ".join(completed_endpoints) if completed_endpoints else "none"
+    reason = f"Endpoints benchmarked: {endpoint_names}"
+
+    return 0, ExitCategory.SUCCESS, reason
 
 
 def _run_finalizers(test_namespace, maas_cfg, primary_exc, benchmark_times):
