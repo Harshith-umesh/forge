@@ -171,3 +171,36 @@ def test_profiler_failure_does_not_skip_performance_benchmarks(monkeypatch, tmp_
     assert not trace.exists()
     assert benchmarked == ["profile1", "profile4"]
     assert notifications[0][0] == "profiler-profile4-failed"
+
+
+def test_profiler_failure_reaches_ci_entrypoint(monkeypatch) -> None:
+    from projects.core.library import ci, config
+    from projects.rhaiis.orchestration import test_phase, test_rhaiis
+
+    monkeypatch.setattr(
+        config,
+        "project",
+        SimpleNamespace(get_config=lambda key, default=None: default),
+    )
+    monkeypatch.setattr(test_phase, "run", lambda **kwargs: 1)
+    requested = SimpleNamespace(model_key="model", workload_key="profile4", namespace="test")
+
+    with pytest.raises(ci.CIError, match="RHAIIS test phase failed") as error:
+        test_rhaiis.test.__wrapped__(requested)
+
+    assert error.value.category == ci.ExitCategory.TEST_FAILURE
+
+
+def test_successful_rhaiis_phase_reaches_ci_entrypoint(monkeypatch) -> None:
+    from projects.core.library import config
+    from projects.rhaiis.orchestration import test_phase, test_rhaiis
+
+    monkeypatch.setattr(
+        config,
+        "project",
+        SimpleNamespace(get_config=lambda key, default=None: default),
+    )
+    monkeypatch.setattr(test_phase, "run", lambda **kwargs: 0)
+    requested = SimpleNamespace(model_key="model", workload_key="profile1", namespace="test")
+
+    assert test_rhaiis.test.__wrapped__(requested) == 0

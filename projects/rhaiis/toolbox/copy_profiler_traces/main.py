@@ -6,6 +6,7 @@ import logging
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from projects.core.dsl import (
@@ -18,6 +19,15 @@ from projects.core.dsl import (
 
 logger = logging.getLogger(__name__)
 _MIN_FREE_BYTES = 64 * 1024 * 1024
+_TRANSFER_CHUNK_BYTES = 8 * 1024 * 1024
+_CHUNK_ATTEMPTS = 3
+_CHUNK_ATTEMPT_TIMEOUT_SECONDS = 60
+_READ_CHUNK_SCRIPT = (
+    "import sys\n"
+    "with open(sys.argv[1], 'rb') as trace:\n"
+    "    trace.seek(int(sys.argv[2]))\n"
+    "    sys.stdout.buffer.write(trace.read(int(sys.argv[3])))\n"
+)
 
 
 @entrypoint
@@ -131,6 +141,64 @@ def _file_digest(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _read_remote_chunk(
+    pod_name: str,
+    namespace: str,
+    source: str,
+    offset: int,
+    length: int,
+    deadline: float,
+) -> bytes:
+    """Retry bounded reads because oc exec can exit successfully with truncated stdout."""
+    command = _oc_exec(
+        pod_name,
+        namespace,
+        "python3",
+        "-c",
+        _READ_CHUNK_SCRIPT,
+        source,
+        str(offset),
+        str(length),
+    )
+    last_error = ""
+
+    for attempt in range(1, _CHUNK_ATTEMPTS + 1):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(f"Profiler trace transfer for {source} exceeded its timeout")
+
+        try:
+            transfer = subprocess.run(
+                command,
+                capture_output=True,
+                timeout=min(remaining, _CHUNK_ATTEMPT_TIMEOUT_SECONDS),
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            last_error = "oc exec timed out"
+        else:
+            if transfer.returncode:
+                stderr = transfer.stderr.decode("utf-8", errors="replace").strip()[-1000:]
+                last_error = f"oc exec exit {transfer.returncode}: {stderr}"
+            elif len(transfer.stdout) != length:
+                last_error = f"received {len(transfer.stdout)} of {length} bytes"
+            else:
+                return transfer.stdout
+
+        logger.warning(
+            "Profiler trace chunk at offset %d failed (attempt %d/%d): %s",
+            offset,
+            attempt,
+            _CHUNK_ATTEMPTS,
+            last_error,
+        )
+
+    raise RuntimeError(
+        f"Profiler trace transfer for {source} failed at offset {offset} "
+        f"after {_CHUNK_ATTEMPTS} attempts: {last_error}"
+    )
+
+
 def _copy_one_trace(
     pod_name: str, namespace: str, filename: str, traces_dir: Path, timeout_seconds: int
 ) -> Path:
@@ -157,21 +225,14 @@ def _copy_one_trace(
             f"{source_size}-byte trace {filename}"
         )
 
+    deadline = time.monotonic() + timeout_seconds
     try:
         with transfer_target.open("wb") as output:
-            transfer = subprocess.run(
-                _oc_exec(pod_name, namespace, "cat", source),
-                stdout=output,
-                stderr=subprocess.PIPE,
-                timeout=timeout_seconds,
-                check=False,
-            )
-        if transfer.returncode:
-            stderr = transfer.stderr.decode("utf-8", errors="replace").strip()[-1000:]
-            raise RuntimeError(
-                f"Profiler trace transfer for {filename} failed "
-                f"(oc exec exit {transfer.returncode}): {stderr}"
-            )
+            for offset in range(0, source_size, _TRANSFER_CHUNK_BYTES):
+                length = min(_TRANSFER_CHUNK_BYTES, source_size - offset)
+                output.write(
+                    _read_remote_chunk(pod_name, namespace, source, offset, length, deadline)
+                )
         if transfer_target.stat().st_size != source_size:
             raise RuntimeError(
                 f"Profiler trace transfer for {filename} produced "
